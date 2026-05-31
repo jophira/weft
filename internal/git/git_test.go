@@ -7,6 +7,7 @@ import (
 	"time"
 
 	gogit "github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
 
@@ -196,5 +197,94 @@ func TestIsClean_modifiedFileIsDirty(t *testing.T) {
 	}
 	if clean {
 		t.Error("expected dirty repo after modifying a tracked file")
+	}
+}
+
+// ── HeadBranch ────────────────────────────────────────────────────────────────
+
+func TestHeadBranch_returnsMain(t *testing.T) {
+	remote := makeRemote(t)
+	local := t.TempDir()
+	git.Clone(remote, local, "main", nil)
+
+	r, _ := git.Open(local)
+	branch, err := r.HeadBranch()
+	if err != nil {
+		t.Fatalf("HeadBranch: %v", err)
+	}
+	if branch != "main" {
+		t.Errorf("HeadBranch = %q, want %q", branch, "main")
+	}
+}
+
+// ── Push ──────────────────────────────────────────────────────────────────────
+
+// makeLocalWithBare sets up:
+//   - a bare remote (can receive pushes)
+//   - a local working copy cloned from it, with one commit
+func makeLocalWithBare(t *testing.T) (localPath string) {
+	t.Helper()
+
+	// 1. Create bare remote.
+	bare := t.TempDir()
+	bareRepo, err := gogit.PlainInit(bare, true)
+	if err != nil {
+		t.Fatalf("PlainInit bare: %v", err)
+	}
+	_ = bareRepo
+
+	// 2. Create a working clone with the bare as origin.
+	local := t.TempDir()
+	localRepo, err := gogit.PlainInitWithOptions(local, &gogit.PlainInitOptions{
+		InitOptions: gogit.InitOptions{
+			DefaultBranch: plumbing.NewBranchReferenceName("main"),
+		},
+	})
+	if err != nil {
+		t.Fatalf("PlainInitWithOptions: %v", err)
+	}
+
+	// 3. Add the bare as origin.
+	if _, err := localRepo.CreateRemote(&config.RemoteConfig{
+		Name: "origin",
+		URLs: []string{bare},
+	}); err != nil {
+		t.Fatalf("CreateRemote: %v", err)
+	}
+
+	// 4. Commit a file so there is something to push.
+	wt, _ := localRepo.Worktree()
+	addFile(t, local, "CLAUDE.md", "# Rules\n")
+	wt.Add("CLAUDE.md")
+	wt.Commit("initial commit", &gogit.CommitOptions{
+		Author: &object.Signature{Name: "Test", Email: "test@test.com", When: time.Now()},
+	})
+
+	return local
+}
+
+func TestPush_sendsCommitsToBareRemote(t *testing.T) {
+	local := makeLocalWithBare(t)
+
+	r, err := git.Open(local)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if err := r.Push(nil); err != nil {
+		t.Fatalf("Push: %v", err)
+	}
+}
+
+func TestPush_alreadyUpToDate(t *testing.T) {
+	local := makeLocalWithBare(t)
+	r, _ := git.Open(local)
+
+	// First push.
+	if err := r.Push(nil); err != nil {
+		t.Fatalf("first Push: %v", err)
+	}
+	// Second push — nothing new, should return nil (not an error).
+	if err := r.Push(nil); err != nil {
+		t.Fatalf("second Push (already up to date): %v", err)
 	}
 }

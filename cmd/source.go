@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"strings"
@@ -202,25 +203,114 @@ func runSync(s source.Source) error {
 	return nil
 }
 
+var pushForce bool
+
 var sourcePushCmd = &cobra.Command{
 	Use:   "push <name>",
-	Short: "Push source to its remote (asks for confirmation)",
-	Args:  cobra.ExactArgs(1),
+	Short: "Push local commits to the source remote",
+	Long: `Push commits from the local source directory to its configured remote.
+
+Asks for confirmation unless --force is given. Never force-pushes.`,
+	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// TODO: implement via internal/git
-		fmt.Printf("push %s — not yet implemented\n", args[0])
+		s, err := newRegistry().Get(args[0])
+		if err != nil {
+			return err
+		}
+		expanded := source.ExpandHome(s.Root)
+
+		if !git.IsRepo(expanded) {
+			return fmt.Errorf("%s is not a git repository — run 'weft source sync %s' first",
+				s.Root, s.Name)
+		}
+
+		r, err := git.Open(expanded)
+		if err != nil {
+			return err
+		}
+
+		branch, err := r.HeadBranch()
+		if err != nil {
+			return fmt.Errorf("reading branch: %w", err)
+		}
+
+		fmt.Printf("Push %s  %s → %s\n", s.Name, branch, s.Remote)
+
+		if !pushForce && !confirm("Continue? (y/N) ") {
+			fmt.Println("Aborted.")
+			return nil
+		}
+
+		auth, err := git.ResolveAuth(s.Remote)
+		if err != nil {
+			return fmt.Errorf("resolving auth: %w", err)
+		}
+
+		if err := r.Push(auth); err != nil {
+			return fmt.Errorf("push failed: %w", err)
+		}
+		fmt.Printf("✓ %s pushed\n", s.Name)
 		return nil
 	},
 }
 
+// confirm prints prompt and returns true only if the user types "y".
+func confirm(prompt string) bool {
+	fmt.Print(prompt)
+	sc := bufio.NewScanner(os.Stdin)
+	sc.Scan()
+	return strings.EqualFold(strings.TrimSpace(sc.Text()), "y")
+}
+
 var sourceStatusCmd = &cobra.Command{
 	Use:   "status",
-	Short: "Show git status for all sources",
+	Short: "Show git state for all registered sources",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// TODO: implement via internal/git
-		fmt.Println("status — not yet implemented")
-		return nil
+		sources, err := newRegistry().List()
+		if err != nil {
+			return err
+		}
+		if len(sources) == 0 {
+			fmt.Println("No sources registered.")
+			return nil
+		}
+
+		w := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
+		fmt.Fprintln(w, "NAME\tROOT\tBRANCH\tSTATE")
+		for _, s := range sources {
+			branch, state := sourceState(source.ExpandHome(s.Root))
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", s.Name, s.Root, branch, state)
+		}
+		return w.Flush()
 	},
+}
+
+// sourceState returns the branch and a one-word state for display.
+func sourceState(path string) (branch, state string) {
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return "-", "not cloned"
+	}
+	if !git.IsRepo(path) {
+		return "-", "not a git repo"
+	}
+	r, err := git.Open(path)
+	if err != nil {
+		return "-", "error"
+	}
+	b, err := r.HeadBranch()
+	if err != nil {
+		b = "?"
+	}
+	clean, err := r.IsClean()
+	switch {
+	case err != nil:
+		state = "error"
+	case clean:
+		state = "clean"
+	default:
+		state = "dirty"
+	}
+	return b, state
 }
 
 var sourceRemoveCmd = &cobra.Command{
@@ -249,6 +339,7 @@ func init() {
 
 	sourceAddCmd.Flags().StringVar(&addBranch, "branch", "main", "branch to track")
 	sourceAddCmd.Flags().BoolVar(&addAutoPull, "auto-pull", true, "pull on 'weft source sync'")
+	sourcePushCmd.Flags().BoolVarP(&pushForce, "force", "f", false, "skip confirmation prompt")
 }
 
 // boolWord renders a bool as "yes" / "no" for display.

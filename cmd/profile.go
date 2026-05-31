@@ -241,10 +241,10 @@ var profileUseCmd = &cobra.Command{
 			}
 		}
 		if target != "" {
-			hReg := harness.NewRegistry(&harness.ClaudeCode{}, &harness.Cursor{})
+			hReg := harness.NewRegistry(harness.Instances()...)
 			h, ok := hReg.Get(target)
 			if !ok {
-				return fmt.Errorf("unknown harness %q — supported: claude-code, cursor", target)
+				return fmt.Errorf("unknown harness %q — run 'weft target list' to see supported harnesses", target)
 			}
 			fmt.Printf("Applying to %s...\n", target)
 			if err := h.Apply(stagedDir); err != nil {

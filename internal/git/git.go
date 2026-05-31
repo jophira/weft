@@ -98,3 +98,34 @@ func (r *Repo) IsClean() (bool, error) {
 	}
 	return s == "", nil
 }
+
+// HeadBranch returns the name of the currently checked-out branch (e.g. "main").
+func (r *Repo) HeadBranch() (string, error) {
+	repo, err := gogit.PlainOpen(r.path)
+	if err != nil {
+		return "", fmt.Errorf("opening repo: %w", err)
+	}
+	head, err := repo.Head()
+	if err != nil {
+		return "", fmt.Errorf("getting HEAD: %w", err)
+	}
+	return head.Name().Short(), nil
+}
+
+// Push pushes all local commits on the current branch to origin.
+// Returns nil when there is nothing new to push (already up to date).
+func (r *Repo) Push(auth transport.AuthMethod) error {
+	repo, err := gogit.PlainOpen(r.path)
+	if err != nil {
+		return fmt.Errorf("opening repo: %w", err)
+	}
+	err = repo.Push(&gogit.PushOptions{
+		RemoteName: "origin",
+		Auth:       auth,
+		Progress:   os.Stdout,
+	})
+	if err == gogit.NoErrAlreadyUpToDate {
+		return nil
+	}
+	return err
+}
