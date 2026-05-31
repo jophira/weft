@@ -3,12 +3,14 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
 	"github.com/jophira/weft/internal/config"
+	"github.com/jophira/weft/internal/git"
 	"github.com/jophira/weft/internal/source"
 )
 
@@ -108,16 +110,96 @@ var sourceListCmd = &cobra.Command{
 
 var sourceSyncCmd = &cobra.Command{
 	Use:   "sync [name]",
-	Short: "Pull latest from source remote (all sources if name omitted)",
+	Short: "Pull latest from source remote",
+	Long: `Pull the latest commits from each source's git remote.
+
+Without a name: syncs every source where auto_pull is true.
+With a name:    syncs that source regardless of auto_pull.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// TODO: implement via internal/git
-		target := "all"
-		if len(args) > 0 {
-			target = args[0]
+		reg := newRegistry()
+		all, err := reg.List()
+		if err != nil {
+			return err
 		}
-		fmt.Printf("sync %s — not yet implemented\n", target)
+		if len(all) == 0 {
+			fmt.Println("No sources registered.")
+			return nil
+		}
+
+		var toSync []source.Source
+		if len(args) > 0 {
+			s, err := reg.Get(args[0])
+			if err != nil {
+				return err
+			}
+			toSync = []source.Source{*s}
+		} else {
+			for _, s := range all {
+				if s.AutoPull {
+					toSync = append(toSync, s)
+				}
+			}
+			if len(toSync) == 0 {
+				fmt.Println("No sources have auto_pull enabled.")
+				fmt.Println("Sync a specific source with: weft source sync <name>")
+				return nil
+			}
+		}
+
+		var failures []string
+		for _, s := range toSync {
+			if err := runSync(s); err != nil {
+				failures = append(failures, fmt.Sprintf("  %s: %v", s.Name, err))
+			}
+		}
+		if len(failures) > 0 {
+			return fmt.Errorf("sync completed with errors:\n%s", strings.Join(failures, "\n"))
+		}
 		return nil
 	},
+}
+
+// runSync clones or pulls a single source.
+func runSync(s source.Source) error {
+	expanded := source.ExpandHome(s.Root)
+
+	auth, err := git.ResolveAuth(s.Remote)
+	if err != nil {
+		return fmt.Errorf("resolving auth: %w", err)
+	}
+
+	// Clone if the directory does not exist yet.
+	if _, err := os.Stat(expanded); os.IsNotExist(err) {
+		fmt.Printf("Cloning %s from %s...\n", s.Name, s.Remote)
+		if err := git.Clone(s.Remote, expanded, s.Branch, auth); err != nil {
+			return fmt.Errorf("clone failed: %w", err)
+		}
+		fmt.Printf("✓ %s cloned → %s\n", s.Name, s.Root)
+		return nil
+	}
+
+	// Path exists but isn't a repo — stop before doing anything destructive.
+	if !git.IsRepo(expanded) {
+		return fmt.Errorf("%s exists but is not a git repository\n"+
+			"  remove it or point the source to a different path", s.Root)
+	}
+
+	// Pull.
+	fmt.Printf("Syncing %s (%s)...\n", s.Name, s.Root)
+	repo, err := git.Open(expanded)
+	if err != nil {
+		return err
+	}
+	updated, err := repo.Pull(s.Branch, auth)
+	if err != nil {
+		return fmt.Errorf("pull failed: %w", err)
+	}
+	if updated {
+		fmt.Printf("✓ %s updated\n", s.Name)
+	} else {
+		fmt.Printf("  %s already up to date\n", s.Name)
+	}
+	return nil
 }
 
 var sourcePushCmd = &cobra.Command{
