@@ -1,0 +1,37 @@
+# ── Build output ──────────────────────────────────────────────────────────────
+bin/
+dist/
+*.exe
+*.exe~
+
+# ── Go toolchain ──────────────────────────────────────────────────────────────
+*.test          # go test -c output
+*.out           # go tool cover output
+coverage.out
+coverage.html
+*.prof          # pprof profiling output (cpu.prof, mem.prof, etc.)
+go.work         # Go workspace (local only, not committed)
+go.work.sum
+
+# ── Dependency vendoring (we use modules, not vendor/) ────────────────────────
+vendor/
+
+# ── Environment / secrets ─────────────────────────────────────────────────────
+.env
+.env.*
+*.pem
+*.key
+
+# ── IDE and editors ───────────────────────────────────────────────────────────
+.idea/          # JetBrains (GoLand, IntelliJ)
+*.iml
+.vscode/        # VS Code / Cursor (add back if you want to share settings)
+*.swp
+*.swo
+*~              # Emacs backups
+
+# ── OS ────────────────────────────────────────────────────────────────────────
+.DS_Store
+.DS_Store?
+Thumbs.db
+desktop.ini
