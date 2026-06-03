@@ -1,0 +1,51 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: none
+  enable:
+    # correctness
+    - govet         # go vet checks
+    - errcheck      # unchecked errors — critical for a CLI
+    - staticcheck   # comprehensive static analysis (supersedes golint)
+    - ineffassign   # assignments that are never read
+    - unused        # unused code
+
+    # security
+    - gosec         # OWASP-style security checks
+
+    # style / quality
+    - gocritic      # opinionated but practical code issues
+    - misspell      # typos in comments and strings
+
+  settings:
+    errcheck:
+      exclude-functions:
+        - fmt.Fprintln  # tabwriter writes — errors only surface at w.Flush() which is always checked
+        - fmt.Fprintf
+        - fmt.Fprint
+
+    gosec:
+      excludes:
+        - G301  # 0755 dirs — correct for user-readable config directories
+        - G302  # 0644 files — correct for user-readable config/log files
+        - G304  # file inclusion — intentional for a config-management tool
+        - G306  # 0644 WriteFile — correct for user-readable config files
+
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - style
+      disabled-checks:
+        - unnamedResult    # overly pedantic for short helpers
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

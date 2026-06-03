@@ -36,7 +36,7 @@ func (e *Executor) Run(h Hook) error {
 
 // runShell executes the hook's command in a shell, inheriting stdio.
 func (e *Executor) runShell(h Hook) error {
-	cmd := exec.Command("sh", "-c", h.Action.Command)
+	cmd := exec.Command("sh", "-c", h.Action.Command) //nolint:gosec // intentional: runs user-defined hook commands
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
@@ -70,10 +70,12 @@ func (e *Executor) appendMemory(h Hook) error {
 	if err != nil {
 		return fmt.Errorf("opening %s: %w", target, err)
 	}
-	defer f.Close()
-
 	if _, err := f.WriteString(entry); err != nil {
+		_ = f.Close()
 		return fmt.Errorf("writing to %s: %w", target, err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("closing %s: %w", target, err)
 	}
 
 	fmt.Printf("✓ Appended to %s\n", contractHome(target))

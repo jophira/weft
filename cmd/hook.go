@@ -36,14 +36,14 @@ func newExecutor() *hook.Executor {
 // ── Flags ─────────────────────────────────────────────────────────────────────
 
 var (
-	hookTrigger    string
-	hookAction     string
-	hookCommand    string
-	hookSource     string
-	hookSummaryTo  string
-	hookPrompt     string
-	hookConfirm    bool
-	hookFile       string
+	hookTrigger   string
+	hookAction    string
+	hookCommand   string
+	hookSource    string
+	hookSummaryTo string
+	hookPrompt    string
+	hookConfirm   bool
+	hookFile      string
 )
 
 // ── Commands ──────────────────────────────────────────────────────────────────

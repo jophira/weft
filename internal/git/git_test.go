@@ -31,10 +31,14 @@ func makeRemote(t *testing.T) string {
 	wt, _ := repo.Worktree()
 
 	addFile(t, dir, "CLAUDE.md", "# Rules\n")
-	wt.Add("CLAUDE.md")
-	wt.Commit("initial commit", &gogit.CommitOptions{
+	if _, err := wt.Add("CLAUDE.md"); err != nil {
+		t.Fatalf("wt.Add: %v", err)
+	}
+	if _, err := wt.Commit("initial commit", &gogit.CommitOptions{
 		Author: &object.Signature{Name: "Test", Email: "test@test.com", When: time.Now()},
-	})
+	}); err != nil {
+		t.Fatalf("wt.Commit: %v", err)
+	}
 	return dir
 }
 
@@ -47,10 +51,14 @@ func addCommit(t *testing.T, repoPath, file, content, msg string) {
 	}
 	wt, _ := repo.Worktree()
 	addFile(t, repoPath, file, content)
-	wt.Add(file)
-	wt.Commit(msg, &gogit.CommitOptions{
+	if _, err := wt.Add(file); err != nil {
+		t.Fatalf("wt.Add: %v", err)
+	}
+	if _, err := wt.Commit(msg, &gogit.CommitOptions{
 		Author: &object.Signature{Name: "Test", Email: "test@test.com", When: time.Now()},
-	})
+	}); err != nil {
+		t.Fatalf("wt.Commit: %v", err)
+	}
 }
 
 func addFile(t *testing.T, dir, rel, content string) {
@@ -82,7 +90,9 @@ func TestClone_setsOriginRemote(t *testing.T) {
 	remote := makeRemote(t)
 	local := t.TempDir()
 
-	git.Clone(remote, local, "main", nil)
+	if err := git.Clone(remote, local, "main", nil); err != nil {
+		t.Fatalf("Clone: %v", err)
+	}
 
 	repo, err := gogit.PlainOpen(local)
 	if err != nil {
@@ -98,7 +108,9 @@ func TestClone_setsOriginRemote(t *testing.T) {
 func TestPull_alreadyUpToDate(t *testing.T) {
 	remote := makeRemote(t)
 	local := t.TempDir()
-	git.Clone(remote, local, "main", nil)
+	if err := git.Clone(remote, local, "main", nil); err != nil {
+		t.Fatalf("Clone: %v", err)
+	}
 
 	r, err := git.Open(local)
 	if err != nil {
@@ -116,7 +128,9 @@ func TestPull_alreadyUpToDate(t *testing.T) {
 func TestPull_fetchesNewCommit(t *testing.T) {
 	remote := makeRemote(t)
 	local := t.TempDir()
-	git.Clone(remote, local, "main", nil)
+	if err := git.Clone(remote, local, "main", nil); err != nil {
+		t.Fatalf("Clone: %v", err)
+	}
 
 	// Push a new commit to the remote after the clone.
 	addCommit(t, remote, "update.md", "new content\n", "add update")
@@ -170,7 +184,9 @@ func TestOpen_notARepo(t *testing.T) {
 func TestIsClean_freshCloneIsClean(t *testing.T) {
 	remote := makeRemote(t)
 	local := t.TempDir()
-	git.Clone(remote, local, "main", nil)
+	if err := git.Clone(remote, local, "main", nil); err != nil {
+		t.Fatalf("Clone: %v", err)
+	}
 
 	r, _ := git.Open(local)
 	clean, err := r.IsClean()
@@ -185,10 +201,14 @@ func TestIsClean_freshCloneIsClean(t *testing.T) {
 func TestIsClean_modifiedFileIsDirty(t *testing.T) {
 	remote := makeRemote(t)
 	local := t.TempDir()
-	git.Clone(remote, local, "main", nil)
+	if err := git.Clone(remote, local, "main", nil); err != nil {
+		t.Fatalf("Clone: %v", err)
+	}
 
 	// Modify a tracked file.
-	os.WriteFile(filepath.Join(local, "CLAUDE.md"), []byte("changed\n"), 0o644)
+	if err := os.WriteFile(filepath.Join(local, "CLAUDE.md"), []byte("changed\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
 
 	r, _ := git.Open(local)
 	clean, err := r.IsClean()
@@ -205,7 +225,9 @@ func TestIsClean_modifiedFileIsDirty(t *testing.T) {
 func TestHeadBranch_returnsMain(t *testing.T) {
 	remote := makeRemote(t)
 	local := t.TempDir()
-	git.Clone(remote, local, "main", nil)
+	if err := git.Clone(remote, local, "main", nil); err != nil {
+		t.Fatalf("Clone: %v", err)
+	}
 
 	r, _ := git.Open(local)
 	branch, err := r.HeadBranch()
@@ -255,10 +277,14 @@ func makeLocalWithBare(t *testing.T) (localPath string) {
 	// 4. Commit a file so there is something to push.
 	wt, _ := localRepo.Worktree()
 	addFile(t, local, "CLAUDE.md", "# Rules\n")
-	wt.Add("CLAUDE.md")
-	wt.Commit("initial commit", &gogit.CommitOptions{
+	if _, err := wt.Add("CLAUDE.md"); err != nil {
+		t.Fatalf("wt.Add: %v", err)
+	}
+	if _, err := wt.Commit("initial commit", &gogit.CommitOptions{
 		Author: &object.Signature{Name: "Test", Email: "test@test.com", When: time.Now()},
-	})
+	}); err != nil {
+		t.Fatalf("wt.Commit: %v", err)
+	}
 
 	return local
 }

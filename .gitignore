@@ -25,7 +25,8 @@ vendor/
 # ── IDE and editors ───────────────────────────────────────────────────────────
 .idea/          # JetBrains (GoLand, IntelliJ)
 *.iml
-.vscode/        # VS Code / Cursor (add back if you want to share settings)
+.vscode/*       # VS Code / Cursor — ignore personal settings
+!.vscode/settings.json  # but commit shared project settings (lint, format)
 *.swp
 *.swo
 *~              # Emacs backups

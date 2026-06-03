@@ -58,5 +58,5 @@ func copyFile(src, dst string) error {
 	if err != nil {
 		return fmt.Errorf("reading %s: %w", src, err)
 	}
-	return os.WriteFile(dst, data, 0o644)
+	return os.WriteFile(dst, data, 0o644) //nolint:gosec // dst is filepath.Join(~/.claude, rel) where rel comes from filepath.Rel — clean by construction
 }

@@ -17,7 +17,7 @@ func builtins() []Known {
 		// ── Typed harnesses ──────────────────────────────────────────────────
 		{&ClaudeCode{}, "~/.claude"},
 		{&Cursor{}, "~/.cursor"},
-		{&Warp{}, ""},   // ConfigPath via ConfigPather
+		{&Warp{}, ""}, // ConfigPath via ConfigPather
 		{&Aider{}, "~/.aider.conf.yml  or  aider in PATH"},
 
 		// ── Generic harnesses (plain directory copy) ─────────────────────────

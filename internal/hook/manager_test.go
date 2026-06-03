@@ -242,8 +242,8 @@ func TestAdd_requireConfirmRoundtrip(t *testing.T) {
 
 func newExecutor(t *testing.T) (*hook.Executor, string) {
 	t.Helper()
-	sourcesDir := t.TempDir()
-	return hook.NewExecutor(sourcesDir), sourcesDir
+	dir := t.TempDir()
+	return hook.NewExecutor(dir), dir
 }
 
 func TestExecutor_shell_success(t *testing.T) {
@@ -330,9 +330,15 @@ func TestExecutor_appendMemory_createsFile(t *testing.T) {
 func TestExecutor_appendMemory_appendsToExisting(t *testing.T) {
 	exec, sourcesDir := newExecutor(t)
 	sourceRoot := t.TempDir()
-	os.WriteFile(sourcesDir+"/personal.yaml", []byte("name: personal\nroot: "+sourceRoot+"\n"), 0o644)
-	os.MkdirAll(sourceRoot+"/memory", 0o755)
-	os.WriteFile(sourceRoot+"/memory/LOG.md", []byte("existing content\n"), 0o644)
+	if err := os.WriteFile(sourcesDir+"/personal.yaml", []byte("name: personal\nroot: "+sourceRoot+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(sourceRoot+"/memory", 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sourceRoot+"/memory/LOG.md", []byte("existing content\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	h := hook.Hook{
 		Name:    "log",
@@ -379,7 +385,7 @@ func TestExecutor_appendMemory_missingSource(t *testing.T) {
 }
 
 func contains(s, sub string) bool {
-	return len(s) >= len(sub) && (s == sub || len(sub) == 0 ||
+	return len(s) >= len(sub) && (s == sub || sub == "" ||
 		func() bool {
 			for i := 0; i <= len(s)-len(sub); i++ {
 				if s[i:i+len(sub)] == sub {
