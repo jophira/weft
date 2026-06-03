@@ -1,49 +1,80 @@
 package harness
 
-// Known pairs a Harness with a human-readable config location for display.
+import "github.com/jophira/weft/internal/locate"
+
+// Known pairs a Harness with a fallback display string for the CONFIG column.
+// When the Harness also implements ConfigPather, that takes precedence.
 type Known struct {
 	H          Harness
-	ConfigPath string // display-only, always uses ~/
+	ConfigPath string // static fallback; use "" when the harness implements ConfigPather
 }
 
 // builtins returns the compile-time harness list.
-// Harnesses with custom apply logic use typed structs; everything else uses
-// GenericHarness (plain directory copy).
+// Typed structs (ClaudeCode, Warp, …) carry custom apply logic.
+// GenericHarness handles plain directory-copy tools.
 func builtins() []Known {
 	return []Known{
-		// Typed — custom apply logic.
+		// ── Typed harnesses ──────────────────────────────────────────────────
 		{&ClaudeCode{}, "~/.claude"},
 		{&Cursor{}, "~/.cursor"},
-		{&Warp{}, "~/.warp"},
+		{&Warp{}, ""},   // ConfigPath via ConfigPather
 		{&Aider{}, "~/.aider.conf.yml  or  aider in PATH"},
-		// Generic — directory copy only.
+
+		// ── Generic harnesses (plain directory copy) ─────────────────────────
+		// ConfigPath is resolved at runtime via ConfigPather; static field is "".
 		{
-			&GenericHarness{name: "codex", detectBinary: "codex", detectPath: ".codex", configDir: ".codex"},
-			"~/.codex",
+			&GenericHarness{
+				name:         "codex",
+				detectBinary: "codex",
+				candidates:   []locate.Candidate{locate.HomeRel(".codex")},
+			},
+			"",
 		},
 		{
-			&GenericHarness{name: "antigravity", detectPath: ".gemini/antigravity", configDir: ".gemini/antigravity"},
-			"~/.gemini/antigravity",
+			&GenericHarness{
+				name:       "antigravity",
+				candidates: []locate.Candidate{locate.HomeRel(".gemini", "antigravity")},
+			},
+			"",
 		},
 		{
-			&GenericHarness{name: "gemini-cli", detectBinary: "gemini", detectPath: ".gemini", configDir: ".gemini"},
-			"~/.gemini",
+			&GenericHarness{
+				name:         "gemini-cli",
+				detectBinary: "gemini",
+				candidates:   []locate.Candidate{locate.HomeRel(".gemini")},
+			},
+			"",
 		},
 		{
-			&GenericHarness{name: "opencode", detectBinary: "opencode", detectPath: ".config/opencode", configDir: ".config/opencode"},
-			"~/.config/opencode",
+			&GenericHarness{
+				name:         "opencode",
+				detectBinary: "opencode",
+				candidates:   []locate.Candidate{locate.XDGRel("opencode")},
+			},
+			"",
 		},
 		{
-			&GenericHarness{name: "hermes", detectBinary: "hermes", detectPath: ".hermes", configDir: ".hermes"},
-			"~/.hermes",
+			&GenericHarness{
+				name:         "hermes",
+				detectBinary: "hermes",
+				candidates:   []locate.Candidate{locate.HomeRel(".hermes")},
+			},
+			"",
 		},
 		{
-			&GenericHarness{name: "windsurf", detectPath: ".codeium/windsurf", configDir: ".codeium/windsurf"},
-			"~/.codeium/windsurf",
+			&GenericHarness{
+				name:       "windsurf",
+				candidates: []locate.Candidate{locate.HomeRel(".codeium", "windsurf")},
+			},
+			"",
 		},
 		{
-			&GenericHarness{name: "goose", detectBinary: "goose", detectPath: ".config/goose", configDir: ".config/goose"},
-			"~/.config/goose",
+			&GenericHarness{
+				name:         "goose",
+				detectBinary: "goose",
+				candidates:   []locate.Candidate{locate.XDGRel("goose")},
+			},
+			"",
 		},
 	}
 }

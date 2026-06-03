@@ -31,7 +31,11 @@ var targetListCmd = &cobra.Command{
 			if k.H.Detect() {
 				detected = "✓"
 			}
-			fmt.Fprintf(w, "%s\t%s\t%s\n", k.H.Name(), detected, k.ConfigPath)
+			configPath := k.ConfigPath
+			if cp, ok := k.H.(harness.ConfigPather); ok {
+				configPath = cp.ConfigPath()
+			}
+			fmt.Fprintf(w, "%s\t%s\t%s\n", k.H.Name(), detected, configPath)
 		}
 		return w.Flush()
 	},

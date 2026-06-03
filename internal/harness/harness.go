@@ -11,6 +11,13 @@ type Harness interface {
 	Apply(mergedRoot string) error
 }
 
+// ConfigPather is an optional extension of Harness for adapters whose config
+// root cannot be known until runtime (e.g. varies by platform or Warp version).
+// When implemented, the returned path is used in place of the static Known.ConfigPath.
+type ConfigPather interface {
+	ConfigPath() string
+}
+
 // Registry holds all known harness adapters.
 type Registry struct {
 	harnesses []Harness

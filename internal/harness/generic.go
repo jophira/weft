@@ -6,58 +6,68 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+
+	"github.com/jophira/weft/internal/locate"
 )
 
 // GenericHarness handles tools whose apply strategy is a plain directory copy.
-// Most AI coding tools fall into this category — detect a path or binary,
-// then copy the staged output into a config directory under $HOME.
+// Most AI coding tools fall into this category — detect a config root or binary,
+// then copy the staged output into the resolved directory.
 type GenericHarness struct {
 	name         string
-	detectPath   string // relative to $HOME; empty = skip path check
-	detectBinary string // binary name looked up via PATH; empty = skip
-	configDir    string // relative to $HOME; destination for Apply
+	detectBinary string             // binary looked up via PATH; empty = skip
+	candidates   []locate.Candidate // config root candidates; probed in order
+	root         string             // resolved by Detect; used by Apply
 }
 
 func (g *GenericHarness) Name() string { return g.name }
 
 func (g *GenericHarness) Detect() bool {
+	// Prefer an existing config directory — it pinpoints the exact root to write.
+	if p, ok := locate.First(g.candidates); ok {
+		g.root = p
+		return true
+	}
+	// Fall back to binary detection; prime root with the first candidate path
+	// so Apply knows where to create the directory.
 	if g.detectBinary != "" {
 		if _, err := exec.LookPath(g.detectBinary); err == nil {
+			if paths := locate.All(g.candidates); len(paths) > 0 {
+				g.root = paths[0]
+			}
 			return true
 		}
-	}
-	if g.detectPath != "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return false
-		}
-		_, err = os.Stat(filepath.Join(home, g.detectPath))
-		return err == nil
 	}
 	return false
 }
 
-func (g *GenericHarness) Apply(stagedRoot string) error {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return fmt.Errorf("resolving home directory: %w", err)
+// ConfigPath implements ConfigPather: returns the resolved root when detected,
+// or the full candidate display string otherwise.
+func (g *GenericHarness) ConfigPath() string {
+	if g.root != "" {
+		return locate.Tilde(g.root)
 	}
-	target := filepath.Join(home, g.configDir)
-	if err := os.MkdirAll(target, 0o755); err != nil {
-		return fmt.Errorf("ensuring %s exists: %w", target, err)
+	return locate.Display(g.candidates)
+}
+
+func (g *GenericHarness) Apply(stagedRoot string) error {
+	if g.root == "" {
+		if !g.Detect() {
+			return fmt.Errorf("%s not detected — install it or create its config directory", g.name)
+		}
+	}
+	if err := os.MkdirAll(g.root, 0o755); err != nil {
+		return fmt.Errorf("ensuring %s exists: %w", g.root, err)
 	}
 	return filepath.WalkDir(stagedRoot, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
+		if err != nil || d.IsDir() {
 			return err
-		}
-		if d.IsDir() {
-			return nil
 		}
 		rel, err := filepath.Rel(stagedRoot, path)
 		if err != nil {
 			return err
 		}
-		dst := filepath.Join(target, rel)
+		dst := filepath.Join(g.root, rel)
 		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 			return fmt.Errorf("creating parent dir for %s: %w", rel, err)
 		}

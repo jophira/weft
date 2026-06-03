@@ -8,6 +8,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/jophira/weft/internal/config"
+	"github.com/jophira/weft/internal/locate"
 )
 
 type harnessEntry struct {
@@ -49,15 +50,35 @@ func loadConfigHarnesses() ([]Known, error) {
 	}
 	out := make([]Known, 0, len(f.Harnesses))
 	for _, e := range f.Harnesses {
+		candidates := entryCandidates(e)
 		out = append(out, Known{
 			H: &GenericHarness{
 				name:         e.Name,
-				detectPath:   e.DetectPath,
 				detectBinary: e.DetectBinary,
-				configDir:    e.ConfigDir,
+				candidates:   candidates,
 			},
-			ConfigPath: "~/" + e.ConfigDir,
+			ConfigPath: "", // resolved at runtime via ConfigPather
 		})
 	}
 	return out, nil
+}
+
+// entryCandidates converts the string fields from a harness YAML entry into
+// locate.Candidates. config_dir is the write target and is always included;
+// detect_path is added as an additional probe when it differs.
+func entryCandidates(e harnessEntry) []locate.Candidate {
+	var candidates []locate.Candidate
+	if e.ConfigDir != "" {
+		configDir := e.ConfigDir
+		candidates = append(candidates, locate.Candidate{
+			Path: func(home, _ string) string { return filepath.Join(home, configDir) },
+		})
+	}
+	if e.DetectPath != "" && e.DetectPath != e.ConfigDir {
+		detectPath := e.DetectPath
+		candidates = append(candidates, locate.Candidate{
+			Path: func(home, _ string) string { return filepath.Join(home, detectPath) },
+		})
+	}
+	return candidates
 }
