@@ -1,0 +1,73 @@
+# weft
+
+Composable AI rules manager — manage, layer, and sync AI rule sources across teams and harnesses.
+
+Maintain separate rule repositories (personal, team, company) and compose them into a single layered profile applied to whichever AI coding tool you're using: Claude Code, Cursor, Warp, and more.
+
+## Install
+
+**macOS / Linux — Homebrew**
+```bash
+brew install jophira/tap/weft
+```
+
+**Linux / macOS — binary**
+```bash
+curl -sSL https://github.com/jophira/weft/releases/latest/download/weft_linux_amd64.tar.gz | tar xz
+sudo mv weft /usr/local/bin/
+```
+
+Replace `linux_amd64` with your platform: `linux_arm64`, `darwin_amd64`, `darwin_arm64`.
+
+**Windows**
+
+Download `weft_windows_amd64.zip` from the [releases page](https://github.com/jophira/weft/releases/latest), extract, and add to your `PATH`.
+
+**Build from source** (requires Go 1.24+)
+```bash
+git clone https://github.com/jophira/weft.git && cd weft
+make build        # binary at ./bin/weft
+```
+
+## Quick start
+
+```bash
+# Register a rule source (local path + git remote)
+weft source add work ~/.rules/work git@github.com:you/work-rules.git
+
+# Pull latest from all remotes
+weft source sync
+
+# Combine sources into a named profile
+weft profile create hybrid --sources personal,work
+
+# Activate the profile (merges sources, writes to harness config)
+weft profile use hybrid
+
+# Apply to a specific harness
+weft target apply claude-code
+
+# Verify everything is configured correctly
+weft doctor
+```
+
+## Commands
+
+| Command | Description |
+|---|---|
+| `source add/list/sync/push/status/remove` | Manage rule sources |
+| `profile create/list/use/diff/delete` | Manage named profiles |
+| `target list/apply` | Manage AI harness targets |
+| `hook add/list/run/remove` | Manage lifecycle hooks |
+| `doctor` | Health check — shows discovered harnesses and config issues |
+| `version` | Print version, commit, and build date |
+
+## Configuration
+
+Config file: `~/.config/weft/config.yaml`
+
+Override with `--config <path>` on any command.
+
+## License
+
+MIT
