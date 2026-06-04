@@ -85,6 +85,7 @@ var (
 	profileOverlay string
 	profileTarget  string
 	profileWatch   bool
+	inspectFormat  string
 )
 
 // mergeAndApply runs the merge+apply pipeline for a resolved profile.
@@ -330,6 +331,191 @@ var profileDiffCmd = &cobra.Command{
 	},
 }
 
+var profileInspectCmd = &cobra.Command{
+	Use:   "inspect <name>",
+	Short: "Dry-run a profile: show conflicts and merge winners without applying",
+	Long: `Inspect resolves a profile's sources and reports which files conflict,
+which source wins, and what the merge result will be — without writing anything to disk.
+
+Formats:
+  --format text     human-readable table (default)
+  --format mermaid  flowchart showing the merge topology`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		name := args[0]
+
+		p, err := newProfileManager().Get(name)
+		if err != nil {
+			return err
+		}
+
+		reg := newRegistry()
+		var roots []string
+		var sourceNames []string
+		var srcs []source.Source
+		for _, srcName := range p.Sources {
+			s, err := reg.Get(srcName)
+			if err != nil {
+				return fmt.Errorf("source %q referenced by profile not found: %w", srcName, err)
+			}
+			expanded := source.ExpandHome(s.Root)
+			if _, err := os.Stat(expanded); err != nil {
+				return fmt.Errorf("source %q root %s does not exist", s.Name, s.Root)
+			}
+			roots = append(roots, expanded)
+			sourceNames = append(sourceNames, srcName)
+			srcs = append(srcs, *s)
+		}
+
+		report, err := merge.New(p.Overlay).
+			WithFilter(managedFilter(srcs)).
+			Inspect(roots)
+		if err != nil {
+			return fmt.Errorf("inspecting sources: %w", err)
+		}
+
+		rootToName := make(map[string]string, len(roots))
+		for i, root := range roots {
+			rootToName[root] = sourceNames[i]
+		}
+
+		switch inspectFormat {
+		case "mermaid":
+			printInspectMermaid(report, rootToName, sourceNames)
+		default:
+			printInspectText(report, rootToName, sourceNames, p)
+		}
+		return nil
+	},
+}
+
+// printInspectText renders a human-readable conflict report.
+func printInspectText(report *merge.InspectReport, rootToName map[string]string, sourceNames []string, p *profile.Profile) {
+	conflicts := report.Conflicts()
+	unique := report.Unique()
+
+	fmt.Printf("Profile %q — inspect\n", p.Name)
+	fmt.Printf("  strategy: %s\n", p.Overlay)
+	fmt.Printf("  sources:  %s\n", strings.Join(sourceNames, " → "))
+	fmt.Println()
+
+	if len(conflicts) > 0 {
+		fmt.Printf("Conflicts — %d file(s):\n", len(conflicts))
+		w := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
+		fmt.Fprintln(w, "  FILE\tIN SOURCES\tWINNER\tNOTE")
+		for _, e := range conflicts {
+			srcNames := make([]string, len(e.Roots))
+			for i, root := range e.Roots {
+				srcNames[i] = rootToName[root]
+			}
+			winner, note := "all (merged)", "all sources combined"
+			if e.WinnerRoot != "" {
+				winner = rootToName[e.WinnerRoot]
+				note = "last overlay wins"
+			}
+			fmt.Fprintf(w, "  %s\t%s\t%s\t%s\n",
+				e.Rel, strings.Join(srcNames, ", "), winner, note)
+		}
+		_ = w.Flush()
+		fmt.Println()
+	} else {
+		fmt.Println("No conflicts — all files are unique across sources.")
+		fmt.Println()
+	}
+
+	if len(unique) > 0 {
+		fmt.Printf("Unique — %d file(s):\n", len(unique))
+		w := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
+		fmt.Fprintln(w, "  FILE\tSOURCE")
+		for _, e := range unique {
+			fmt.Fprintf(w, "  %s\t%s\n", e.Rel, rootToName[e.Roots[0]])
+		}
+		_ = w.Flush()
+		fmt.Println()
+	}
+
+	fmt.Printf("Total: %d file(s)  (%d conflict, %d unique)\n",
+		len(report.Entries), len(conflicts), len(unique))
+}
+
+// printInspectMermaid renders a flowchart showing the merge topology.
+func printInspectMermaid(report *merge.InspectReport, rootToName map[string]string, sourceNames []string) {
+	fmt.Println("```mermaid")
+	fmt.Println("flowchart LR")
+
+	for _, name := range sourceNames {
+		fmt.Printf("  s_%s[\"%s\"]\n", mermaidNodeID(name), name)
+	}
+
+	conflicts := report.Conflicts()
+	for _, e := range conflicts {
+		nodeID := "f_" + mermaidNodeID(e.Rel)
+		fmt.Printf("  %s[\"%s\"]\n", nodeID, e.Rel)
+		for _, root := range e.Roots {
+			srcID := "s_" + mermaidNodeID(rootToName[root])
+			switch {
+			case e.WinnerRoot == "":
+				fmt.Printf("  %s -->|merged| %s\n", srcID, nodeID)
+			case root == e.WinnerRoot:
+				fmt.Printf("  %s -->|wins| %s\n", srcID, nodeID)
+			default:
+				fmt.Printf("  %s --> %s\n", srcID, nodeID)
+			}
+		}
+	}
+
+	// Per-source unique file count summary nodes.
+	uniqueCount := make(map[string]int, len(sourceNames))
+	for _, e := range report.Unique() {
+		uniqueCount[rootToName[e.Roots[0]]]++
+	}
+	for _, name := range sourceNames {
+		n := uniqueCount[name]
+		if n == 0 {
+			continue
+		}
+		uID := "u_" + mermaidNodeID(name)
+		fmt.Printf("  %s[\"%d unique file(s)\"]\n", uID, n)
+		fmt.Printf("  s_%s --> %s\n", mermaidNodeID(name), uID)
+	}
+
+	// Class assignments.
+	if len(conflicts) > 0 {
+		ids := make([]string, len(conflicts))
+		for i, e := range conflicts {
+			ids[i] = "f_" + mermaidNodeID(e.Rel)
+		}
+		fmt.Printf("  class %s conflict\n", strings.Join(ids, ","))
+	}
+	var uIDs []string
+	for _, name := range sourceNames {
+		if uniqueCount[name] > 0 {
+			uIDs = append(uIDs, "u_"+mermaidNodeID(name))
+		}
+	}
+	if len(uIDs) > 0 {
+		fmt.Printf("  class %s unique\n", strings.Join(uIDs, ","))
+	}
+
+	fmt.Println()
+	fmt.Println("  classDef conflict fill:#fbbf24,stroke:#f59e0b,color:#1f2937,font-weight:bold")
+	fmt.Println("  classDef unique fill:#e5e7eb,stroke:#d1d5db,color:#374151")
+	fmt.Println("```")
+}
+
+// mermaidNodeID sanitizes a string for use as a Mermaid node identifier.
+func mermaidNodeID(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		} else {
+			b.WriteRune('_')
+		}
+	}
+	return b.String()
+}
+
 var profileDeleteCmd = &cobra.Command{
 	Use:   "delete <name>",
 	Short: "Delete a profile (does not affect sources)",
@@ -349,6 +535,7 @@ func init() {
 		profileCreateCmd,
 		profileUseCmd,
 		profileListCmd,
+		profileInspectCmd,
 		profileDiffCmd,
 		profileDeleteCmd,
 	)
@@ -359,4 +546,6 @@ func init() {
 	_ = profileCreateCmd.MarkFlagRequired("sources")
 
 	profileUseCmd.Flags().BoolVar(&profileWatch, "watch", false, "re-apply automatically when source files change")
+
+	profileInspectCmd.Flags().StringVar(&inspectFormat, "format", "text", "output format: text|mermaid")
 }

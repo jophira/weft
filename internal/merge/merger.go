@@ -17,19 +17,20 @@ type Filter func(rel string) bool
 // Merger applies a byte-level Strategy across a list of source root directories,
 // producing a single merged tree in an output directory.
 type Merger struct {
+	overlay  profile.Overlay
 	strategy Strategy
 	filter   Filter // nil = include all files
 }
 
 // New creates a Merger for the given overlay mode.
 func New(o profile.Overlay) *Merger {
-	return &Merger{strategy: ForOverlay(o)}
+	return &Merger{overlay: o, strategy: ForOverlay(o)}
 }
 
 // WithFilter returns a copy of the Merger that only processes files for which
 // f returns true. Use this to restrict the merge to managed paths.
 func (m *Merger) WithFilter(f Filter) *Merger {
-	return &Merger{strategy: m.strategy, filter: f}
+	return &Merger{overlay: m.overlay, strategy: m.strategy, filter: f}
 }
 
 // MergeRoots walks every root, collects unique relative file paths, folds each
