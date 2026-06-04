@@ -1,0 +1,93 @@
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: weft
+    main: .
+    binary: weft
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+    ldflags:
+      - -s -w
+      - -X github.com/jophira/weft/cmd.Version={{.Version}}
+      - -X github.com/jophira/weft/cmd.Commit={{.Commit}}
+      - -X github.com/jophira/weft/cmd.Date={{.Date}}
+
+archives:
+  - id: default
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README*
+      - LICENSE*
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - Merge pull request
+      - Merge branch
+  groups:
+    - title: Features
+      regexp: "^feat"
+      order: 0
+    - title: Bug Fixes
+      regexp: "^fix"
+      order: 1
+    - title: Performance
+      regexp: "^perf"
+      order: 2
+    - title: Other
+      order: 999
+
+brews:
+  - name: weft
+    repository:
+      owner: jophira
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    commit_author:
+      name: goreleaserbot
+      email: bot@goreleaser.com
+    commit_msg_template: "chore: update weft to {{ .Tag }}"
+    homepage: "https://github.com/jophira/weft"
+    description: "weft — a tool for managing git source sync and hooks"
+    license: "MIT"
+    install: |
+      bin.install "weft"
+    test: |
+      system "#{bin}/weft", "version"
+
+release:
+  github:
+    owner: jophira
+    name: weft
+  draft: false
+  prerelease: auto
+  name_template: "v{{.Version}}"
