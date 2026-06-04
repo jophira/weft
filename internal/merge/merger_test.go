@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jophira/weft/internal/collect"
 	"github.com/jophira/weft/internal/merge"
 	"github.com/jophira/weft/internal/profile"
 )
@@ -235,5 +236,137 @@ func TestMergeRoots_manifestSorted(t *testing.T) {
 			t.Errorf("manifest not sorted: %v", manifest)
 			break
 		}
+	}
+}
+
+// ── WithAssembler: hierarchical instruction files ─────────────────────────────
+
+// assemblerFor builds a merge.Assembler using collect.Collect with the given glob.
+func assemblerFor(glob string, excludes ...string) merge.Assembler {
+	return func(root string) ([]byte, error) {
+		return collect.Collect(root, glob, excludes...)
+	}
+}
+
+func TestMergeRoots_assembler_singleRoot_hierarchyAssembled(t *testing.T) {
+	src := t.TempDir()
+	out := t.TempDir()
+	writeFile(t, src, "CLAUDE.md", "global")
+	writeFile(t, src, "Backend/BACKEND.md", "backend")
+	writeFile(t, src, "Frontend/FRONTEND.md", "frontend")
+
+	_, err := merge.New(profile.OverlayCascade).
+		WithAssembler(assemblerFor("**/*.md")).
+		MergeRoots([]string{src}, out)
+	if err != nil {
+		t.Fatalf("MergeRoots: %v", err)
+	}
+	got := readFile(t, out, "CLAUDE.md")
+	want := "global\nbackend\nfrontend"
+	if got != want {
+		t.Errorf("assembled CLAUDE.md =\n%q\nwant\n%q", got, want)
+	}
+}
+
+func TestMergeRoots_assembler_twoRoots_mergedWithCascade(t *testing.T) {
+	base := t.TempDir()
+	overlay := t.TempDir()
+	out := t.TempDir()
+
+	// base has a hierarchy; overlay has only a root CLAUDE.md override.
+	writeFile(t, base, "CLAUDE.md", "base-global")
+	writeFile(t, base, "Backend/BACKEND.md", "base-backend")
+	writeFile(t, overlay, "CLAUDE.md", "overlay-rules")
+
+	_, err := merge.New(profile.OverlayCascade).
+		WithAssembler(assemblerFor("**/*.md")).
+		MergeRoots([]string{base, overlay}, out)
+	if err != nil {
+		t.Fatalf("MergeRoots: %v", err)
+	}
+	// Cascade: overlay wins — overlay's assembled content replaces base.
+	got := readFile(t, out, "CLAUDE.md")
+	if got != "overlay-rules" {
+		t.Errorf("cascade should use overlay's assembled content, got %q", got)
+	}
+}
+
+func TestMergeRoots_assembler_twoRoots_mergedWithAppend(t *testing.T) {
+	base := t.TempDir()
+	overlay := t.TempDir()
+	out := t.TempDir()
+
+	writeFile(t, base, "Backend/BACKEND.md", "base-backend")
+	writeFile(t, overlay, "Frontend/FRONTEND.md", "overlay-frontend")
+
+	_, err := merge.New(profile.OverlayMerge).
+		WithAssembler(assemblerFor("**/*.md")).
+		MergeRoots([]string{base, overlay}, out)
+	if err != nil {
+		t.Fatalf("MergeRoots: %v", err)
+	}
+	// Merge strategy: both assembled contents concatenated.
+	got := readFile(t, out, "CLAUDE.md")
+	want := "base-backend\noverlay-frontend"
+	if got != want {
+		t.Errorf("append merge =\n%q\nwant\n%q", got, want)
+	}
+}
+
+func TestMergeRoots_assembler_excludesHonoured(t *testing.T) {
+	src := t.TempDir()
+	out := t.TempDir()
+	writeFile(t, src, "CLAUDE.md", "rules")
+	writeFile(t, src, "skills/my-skill.md", "skill content") // should be excluded
+
+	_, err := merge.New(profile.OverlayCascade).
+		WithAssembler(assemblerFor("**/*.md", "skills")).
+		MergeRoots([]string{src}, out)
+	if err != nil {
+		t.Fatalf("MergeRoots: %v", err)
+	}
+	got := readFile(t, out, "CLAUDE.md")
+	if got != "rules" {
+		t.Errorf("skills/ content leaked into CLAUDE.md: %q", got)
+	}
+}
+
+func TestMergeRoots_assembler_rootNoMatchContributesNothing(t *testing.T) {
+	// base has no .md files → contributes nil → only overlay appears.
+	base := t.TempDir()
+	overlay := t.TempDir()
+	out := t.TempDir()
+
+	writeFile(t, base, "commands/foo.yaml", "cmd") // non-matching
+	writeFile(t, overlay, "CLAUDE.md", "overlay-only")
+
+	_, err := merge.New(profile.OverlayCascade).
+		WithAssembler(assemblerFor("**/*.md")).
+		MergeRoots([]string{base, overlay}, out)
+	if err != nil {
+		t.Fatalf("MergeRoots: %v", err)
+	}
+	got := readFile(t, out, "CLAUDE.md")
+	if got != "overlay-only" {
+		t.Errorf("got %q, want only overlay content", got)
+	}
+}
+
+func TestMergeRoots_assembler_backwardCompat_plainFilename(t *testing.T) {
+	// "CLAUDE.md" pattern = plain filename = backward compatible: reads only root file.
+	src := t.TempDir()
+	out := t.TempDir()
+	writeFile(t, src, "CLAUDE.md", "root rules")
+	writeFile(t, src, "Backend/BACKEND.md", "should not be assembled")
+
+	_, err := merge.New(profile.OverlayCascade).
+		WithAssembler(assemblerFor("CLAUDE.md")).
+		MergeRoots([]string{src}, out)
+	if err != nil {
+		t.Fatalf("MergeRoots: %v", err)
+	}
+	got := readFile(t, out, "CLAUDE.md")
+	if got != "root rules" {
+		t.Errorf("backward compat broken: got %q", got)
 	}
 }

@@ -2,7 +2,9 @@
 
 Composable AI rules manager — manage, layer, and sync AI rule sources across teams and harnesses.
 
-Maintain separate rule repositories (personal, team, company) and compose them into a single layered profile applied to whichever AI coding tool you're using: Claude Code, Cursor, Warp, and more.
+Maintain separate rule repositories (personal, team, company) and compose them into a single layered profile applied to whichever AI coding tool you're using. Weft normalises across harnesses automatically — the same source writes `CLAUDE.md` for Claude Code, `AGENTS.md` for Codex, `GEMINI.md` for Gemini CLI, and a `.mdc` rule for Cursor.
+
+Sources can use a flat `CLAUDE.md` or a full domain hierarchy (`Backend/BACKEND.md`, `Backend/Java/JAVA.md`, …). Set `instruction_glob: "**/*.md"` in the source config and Weft assembles every matching file — parent directories before children — before merging and applying.
 
 ## Install
 
@@ -64,6 +66,22 @@ weft doctor
 | `hook add/list/run/remove` | Manage lifecycle hooks |
 | `doctor` | Health check — shows discovered harnesses and config issues |
 | `version` | Print version, commit, and build date |
+
+## Supported harnesses
+
+| Harness | Written as |
+|---|---|
+| Claude Code | `~/.claude/CLAUDE.md` |
+| OpenAI Codex | `~/.codex/AGENTS.md` |
+| Cursor | `~/.cursor/rules/weft.mdc` |
+| Windsurf | `~/.codeium/windsurf/global_rules.md` |
+| Gemini CLI | `~/.gemini/GEMINI.md` |
+| Warp | `~/.warp/workflows/*.yaml` |
+| Aider | `~/.aider/CONVENTIONS.md` |
+
+Additional harnesses (Goose, OpenCode, Hermes, Antigravity) are supported via
+plain directory copy. New harnesses can be added to `~/.config/weft/harnesses.yaml`
+without recompiling.
 
 ## Configuration
 

@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
+	"github.com/jophira/weft/internal/collect"
 	"github.com/jophira/weft/internal/config"
 	"github.com/jophira/weft/internal/harness"
 	"github.com/jophira/weft/internal/merge"
@@ -62,6 +63,42 @@ func managedFilter(sources []source.Source) merge.Filter {
 	}
 }
 
+// buildAssembler returns a merge.Assembler that collects instruction files for
+// each root using the InstructionGlob configured in the corresponding source.
+// Managed subdirectory files (commands, agents, etc.) are always excluded so
+// they are never assembled into the instruction content.
+func buildAssembler(roots []string, srcs []source.Source) merge.Assembler {
+	type entry struct {
+		glob     string
+		excludes []string
+	}
+	byRoot := make(map[string]entry, len(roots))
+	for i, root := range roots {
+		s := srcs[i]
+		glob := s.Structure.InstructionGlob
+		if glob == "" {
+			glob = source.DefaultStructure().InstructionGlob
+		}
+		var excludes []string
+		for _, d := range []string{
+			s.Structure.Commands,
+			s.Structure.Agents,
+			s.Structure.Skills,
+			s.Structure.Memory,
+			s.Structure.Hooks,
+		} {
+			if d = strings.TrimRight(strings.TrimSpace(d), "/\\"); d != "" {
+				excludes = append(excludes, d)
+			}
+		}
+		byRoot[root] = entry{glob: glob, excludes: excludes}
+	}
+	return func(root string) ([]byte, error) {
+		e := byRoot[root]
+		return collect.Collect(root, e.glob, e.excludes...)
+	}
+}
+
 // parseSources splits a comma-separated source list and trims whitespace.
 func parseSources(raw string) []string {
 	var names []string
@@ -102,6 +139,7 @@ func mergeAndApply(p *profile.Profile, roots []string, srcs []source.Source, cfg
 	}
 	manifest, err := merge.New(p.Overlay).
 		WithFilter(managedFilter(srcs)).
+		WithAssembler(buildAssembler(roots, srcs)).
 		MergeRoots(roots, stagedDir)
 	if err != nil {
 		return fmt.Errorf("merging sources: %w", err)

@@ -14,12 +14,22 @@ import (
 // Filter is a predicate applied to relative file paths. Return true to include.
 type Filter func(rel string) bool
 
+// Assembler produces the instruction content for a given source root. It is
+// called in place of reading CLAUDE.md directly from disk, allowing sources
+// with hierarchical instruction files to be assembled before merging.
+// Return nil, nil when the root contributes no instruction content.
+type Assembler func(root string) ([]byte, error)
+
+// instructionFile is the canonical output path for assembled instructions.
+const instructionFile = "CLAUDE.md"
+
 // Merger applies a byte-level Strategy across a list of source root directories,
 // producing a single merged tree in an output directory.
 type Merger struct {
-	overlay  profile.Overlay
-	strategy Strategy
-	filter   Filter // nil = include all files
+	overlay   profile.Overlay
+	strategy  Strategy
+	filter    Filter    // nil = include all files
+	assembler Assembler // nil = read CLAUDE.md directly from disk
 }
 
 // New creates a Merger for the given overlay mode.
@@ -30,7 +40,15 @@ func New(o profile.Overlay) *Merger {
 // WithFilter returns a copy of the Merger that only processes files for which
 // f returns true. Use this to restrict the merge to managed paths.
 func (m *Merger) WithFilter(f Filter) *Merger {
-	return &Merger{overlay: m.overlay, strategy: m.strategy, filter: f}
+	return &Merger{overlay: m.overlay, strategy: m.strategy, filter: f, assembler: m.assembler}
+}
+
+// WithAssembler returns a copy of the Merger that uses fn to produce CLAUDE.md
+// content for each root instead of reading the file directly. Use this when
+// source roots contain hierarchical instruction files that must be assembled
+// before merging (see package collect).
+func (m *Merger) WithAssembler(fn Assembler) *Merger {
+	return &Merger{overlay: m.overlay, strategy: m.strategy, filter: m.filter, assembler: fn}
 }
 
 // MergeRoots walks every root, collects unique relative file paths, folds each
@@ -41,6 +59,12 @@ func (m *Merger) WithFilter(f Filter) *Merger {
 func (m *Merger) MergeRoots(roots []string, outputDir string) ([]string, error) {
 	// Collect the union of relative file paths across all roots.
 	seen := map[string]struct{}{}
+	// When an assembler is configured, ensure the instruction file is always
+	// considered — it may not exist as a physical file in any root when sources
+	// use hierarchical instruction files exclusively.
+	if m.assembler != nil {
+		seen[instructionFile] = struct{}{}
+	}
 	for _, root := range roots {
 		if err := collectPaths(root, seen); err != nil {
 			return nil, fmt.Errorf("scanning %s: %w", root, err)
@@ -78,15 +102,17 @@ func (m *Merger) MergeRoots(roots []string, outputDir string) ([]string, error) 
 
 // foldFile reads rel from each root and folds the contents using the strategy.
 // Roots that don't have the file are skipped. Returns nil if no root has it.
+// When an Assembler is configured and rel is the instruction file, the assembler
+// is called instead of reading from disk.
 func (m *Merger) foldFile(rel string, roots []string) ([]byte, error) {
 	var acc []byte
 	for _, root := range roots {
-		data, err := os.ReadFile(filepath.Join(root, rel))
-		if os.IsNotExist(err) {
-			continue
-		}
+		data, err := m.readContent(rel, root)
 		if err != nil {
-			return nil, fmt.Errorf("reading %s from %s: %w", rel, root, err)
+			return nil, err
+		}
+		if data == nil {
+			continue
 		}
 		if acc == nil {
 			acc = data
@@ -98,6 +124,27 @@ func (m *Merger) foldFile(rel string, roots []string) ([]byte, error) {
 		}
 	}
 	return acc, nil
+}
+
+// readContent returns the content for rel from root. When an assembler is set
+// and rel is the instruction file, the assembler is used; otherwise the file is
+// read directly from disk. Returns nil, nil when the root has no content for rel.
+func (m *Merger) readContent(rel, root string) ([]byte, error) {
+	if rel == instructionFile && m.assembler != nil {
+		data, err := m.assembler(root)
+		if err != nil {
+			return nil, fmt.Errorf("assembling instructions from %s: %w", root, err)
+		}
+		return data, nil // nil means this root contributes nothing
+	}
+	data, err := os.ReadFile(filepath.Join(root, rel))
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("reading %s from %s: %w", rel, root, err)
+	}
+	return data, nil
 }
 
 // collectPaths walks root and adds each non-hidden file's relative path to seen.

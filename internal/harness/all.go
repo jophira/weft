@@ -20,7 +20,7 @@ func builtins() []Known {
 		{&Cursor{}, "~/.cursor/rules"},
 		{&Windsurf{}, "~/.codeium/windsurf"},
 		{&GeminiCLI{}, "~/.gemini"},
-		{&Warp{}, ""},  // ConfigPath via ConfigPather
+		{&Warp{}, ""}, // ConfigPath via ConfigPather
 		{&Aider{}, "~/.aider"},
 
 		// ── Generic harnesses (plain directory copy) ─────────────────────────
