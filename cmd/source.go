@@ -3,6 +3,7 @@ package cmd
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"text/tabwriter"
@@ -149,7 +150,7 @@ With a name:    syncs that source regardless of auto_pull.`,
 
 		var failures []string
 		for _, s := range toSync {
-			if err := runSync(s); err != nil {
+			if _, err := runSync(s, os.Stdout); err != nil {
 				failures = append(failures, fmt.Sprintf("  %s: %v", s.Name, err))
 			}
 		}
@@ -161,46 +162,48 @@ With a name:    syncs that source regardless of auto_pull.`,
 }
 
 // runSync clones or pulls a single source.
-func runSync(s source.Source) error {
+// Returns (true, nil) when the local tree changed, (false, nil) when already up to date.
+// All progress messages are written to out.
+func runSync(s source.Source, out io.Writer) (bool, error) {
 	expanded := source.ExpandHome(s.Root)
 
 	auth, err := git.ResolveAuth(s.Remote)
 	if err != nil {
-		return fmt.Errorf("resolving auth: %w", err)
+		return false, fmt.Errorf("resolving auth: %w", err)
 	}
 
 	// Clone if the directory does not exist yet.
 	if _, err := os.Stat(expanded); os.IsNotExist(err) {
-		fmt.Printf("Cloning %s from %s...\n", s.Name, s.Remote)
-		if err := git.Clone(s.Remote, expanded, s.Branch, auth); err != nil {
-			return fmt.Errorf("clone failed: %w", err)
+		fmt.Fprintf(out, "Cloning %s from %s...\n", s.Name, s.Remote)
+		if err := git.Clone(s.Remote, expanded, s.Branch, auth, out); err != nil {
+			return false, fmt.Errorf("clone failed: %w", err)
 		}
-		fmt.Printf("✓ %s cloned → %s\n", s.Name, s.Root)
-		return nil
+		fmt.Fprintf(out, "✓ %s cloned → %s\n", s.Name, s.Root)
+		return true, nil
 	}
 
 	// Path exists but isn't a repo — stop before doing anything destructive.
 	if !git.IsRepo(expanded) {
-		return fmt.Errorf("%s exists but is not a git repository\n"+
+		return false, fmt.Errorf("%s exists but is not a git repository\n"+
 			"  remove it or point the source to a different path", s.Root)
 	}
 
 	// Pull.
-	fmt.Printf("Syncing %s (%s)...\n", s.Name, s.Root)
+	fmt.Fprintf(out, "Syncing %s (%s)...\n", s.Name, s.Root)
 	repo, err := git.Open(expanded)
 	if err != nil {
-		return err
+		return false, err
 	}
 	updated, err := repo.Pull(s.Branch, auth)
 	if err != nil {
-		return fmt.Errorf("pull failed: %w", err)
+		return false, fmt.Errorf("pull failed: %w", err)
 	}
 	if updated {
-		fmt.Printf("✓ %s updated\n", s.Name)
+		fmt.Fprintf(out, "✓ %s updated\n", s.Name)
 	} else {
-		fmt.Printf("  %s already up to date\n", s.Name)
+		fmt.Fprintf(out, "  %s already up to date\n", s.Name)
 	}
-	return nil
+	return updated, nil
 }
 
 var pushForce bool

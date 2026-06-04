@@ -1,6 +1,7 @@
 package git_test
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -78,7 +79,7 @@ func TestClone_createsLocalCopy(t *testing.T) {
 	remote := makeRemote(t)
 	local := t.TempDir()
 
-	if err := git.Clone(remote, local, "main", nil); err != nil {
+	if err := git.Clone(remote, local, "main", nil, io.Discard); err != nil {
 		t.Fatalf("Clone: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(local, "CLAUDE.md")); err != nil {
@@ -90,7 +91,7 @@ func TestClone_setsOriginRemote(t *testing.T) {
 	remote := makeRemote(t)
 	local := t.TempDir()
 
-	if err := git.Clone(remote, local, "main", nil); err != nil {
+	if err := git.Clone(remote, local, "main", nil, io.Discard); err != nil {
 		t.Fatalf("Clone: %v", err)
 	}
 
@@ -108,7 +109,7 @@ func TestClone_setsOriginRemote(t *testing.T) {
 func TestPull_alreadyUpToDate(t *testing.T) {
 	remote := makeRemote(t)
 	local := t.TempDir()
-	if err := git.Clone(remote, local, "main", nil); err != nil {
+	if err := git.Clone(remote, local, "main", nil, io.Discard); err != nil {
 		t.Fatalf("Clone: %v", err)
 	}
 
@@ -128,7 +129,7 @@ func TestPull_alreadyUpToDate(t *testing.T) {
 func TestPull_fetchesNewCommit(t *testing.T) {
 	remote := makeRemote(t)
 	local := t.TempDir()
-	if err := git.Clone(remote, local, "main", nil); err != nil {
+	if err := git.Clone(remote, local, "main", nil, io.Discard); err != nil {
 		t.Fatalf("Clone: %v", err)
 	}
 
@@ -184,7 +185,7 @@ func TestOpen_notARepo(t *testing.T) {
 func TestIsClean_freshCloneIsClean(t *testing.T) {
 	remote := makeRemote(t)
 	local := t.TempDir()
-	if err := git.Clone(remote, local, "main", nil); err != nil {
+	if err := git.Clone(remote, local, "main", nil, io.Discard); err != nil {
 		t.Fatalf("Clone: %v", err)
 	}
 
@@ -201,7 +202,7 @@ func TestIsClean_freshCloneIsClean(t *testing.T) {
 func TestIsClean_modifiedFileIsDirty(t *testing.T) {
 	remote := makeRemote(t)
 	local := t.TempDir()
-	if err := git.Clone(remote, local, "main", nil); err != nil {
+	if err := git.Clone(remote, local, "main", nil, io.Discard); err != nil {
 		t.Fatalf("Clone: %v", err)
 	}
 
@@ -225,7 +226,7 @@ func TestIsClean_modifiedFileIsDirty(t *testing.T) {
 func TestHeadBranch_returnsMain(t *testing.T) {
 	remote := makeRemote(t)
 	local := t.TempDir()
-	if err := git.Clone(remote, local, "main", nil); err != nil {
+	if err := git.Clone(remote, local, "main", nil, io.Discard); err != nil {
 		t.Fatalf("Clone: %v", err)
 	}
 

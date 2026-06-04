@@ -2,6 +2,7 @@ package git
 
 import (
 	"fmt"
+	"io"
 	"os"
 
 	gogit "github.com/go-git/go-git/v5"
@@ -11,14 +12,15 @@ import (
 
 // Clone clones url into path, checking out branch.
 // auth may be nil for HTTPS repos that rely on system credential helpers.
-func Clone(url, path, branch string, auth transport.AuthMethod) error {
+// progress receives git's transfer output; pass os.Stdout for interactive use or io.Discard to silence it.
+func Clone(url, path, branch string, auth transport.AuthMethod, progress io.Writer) error {
 	if err := os.MkdirAll(path, 0o755); err != nil {
 		return fmt.Errorf("creating target directory: %w", err)
 	}
 	_, err := gogit.PlainClone(path, false, &gogit.CloneOptions{
 		URL:           url,
 		Auth:          auth,
-		Progress:      os.Stdout,
+		Progress:      progress,
 		ReferenceName: plumbing.NewBranchReferenceName(branch),
 		SingleBranch:  true,
 	})
