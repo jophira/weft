@@ -37,6 +37,10 @@ make build        # binary at ./bin/weft
 # Register a rule source (local path + git remote)
 weft source add work ~/.rules/work git@github.com:you/work-rules.git
 
+# Register a source with a domain hierarchy (Backend/, Frontend/, …)
+weft source add work-private ~/.rules/work-private git@github.com:you/work-private.git \
+  --instruction-glob "**/*.md"
+
 # Pull latest from all remotes
 weft source sync
 

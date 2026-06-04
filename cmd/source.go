@@ -30,8 +30,9 @@ func newRegistry() *source.FileRegistry {
 // ── Flags ─────────────────────────────────────────────────────────────────────
 
 var (
-	addBranch   string
-	addAutoPull bool
+	addBranch           string
+	addAutoPull         bool
+	addInstructionGlob  string
 )
 
 // ── Commands ──────────────────────────────────────────────────────────────────
@@ -48,9 +49,18 @@ var sourceAddCmd = &cobra.Command{
 
   <name>    identifier, e.g. "work" or "personal" (lowercase, no spaces)
   <path>    local root directory, e.g. ~/.claude or ~/my-rules
-  <remote>  git remote URL, e.g. git@github.com:you/ai-rules.git`,
+  <remote>  git remote URL, e.g. git@github.com:you/ai-rules.git
+
+--instruction-glob controls which files are assembled into the instruction
+context when this source is merged. The default "CLAUDE.md" reads only the
+root-level file. Use "**/*.md" to assemble a full domain hierarchy
+(Backend/BACKEND.md, Frontend/FRONTEND.md, etc.) in parent-before-child order.
+Managed subdirectory files (commands/, skills/, etc.) are always excluded.`,
 	Args: cobra.ExactArgs(3),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		structure := source.DefaultStructure()
+		structure.InstructionGlob = addInstructionGlob
+
 		s := source.Source{
 			Name:      args[0],
 			Root:      args[1],
@@ -58,7 +68,7 @@ var sourceAddCmd = &cobra.Command{
 			Branch:    addBranch,
 			AutoPull:  addAutoPull,
 			AutoPush:  false,
-			Structure: source.DefaultStructure(),
+			Structure: structure,
 		}
 		reg := newRegistry()
 		if err := reg.Add(s); err != nil {
@@ -72,10 +82,11 @@ var sourceAddCmd = &cobra.Command{
 		}
 
 		fmt.Printf("✓ Source %q registered\n", saved.Name)
-		fmt.Printf("  root:      %s\n", saved.Root)
-		fmt.Printf("  remote:    %s\n", saved.Remote)
-		fmt.Printf("  branch:    %s\n", saved.Branch)
-		fmt.Printf("  auto-pull: %v\n", boolWord(saved.AutoPull))
+		fmt.Printf("  root:             %s\n", saved.Root)
+		fmt.Printf("  remote:           %s\n", saved.Remote)
+		fmt.Printf("  branch:           %s\n", saved.Branch)
+		fmt.Printf("  auto-pull:        %v\n", boolWord(saved.AutoPull))
+		fmt.Printf("  instruction-glob: %s\n", saved.Structure.InstructionGlob)
 
 		// Warn if the root path does not exist yet.
 		if _, err := os.Stat(args[1]); os.IsNotExist(err) {
@@ -342,6 +353,7 @@ func init() {
 
 	sourceAddCmd.Flags().StringVar(&addBranch, "branch", "main", "branch to track")
 	sourceAddCmd.Flags().BoolVar(&addAutoPull, "auto-pull", true, "pull on 'weft source sync'")
+	sourceAddCmd.Flags().StringVar(&addInstructionGlob, "instruction-glob", source.DefaultStructure().InstructionGlob, `glob pattern for instruction files: "CLAUDE.md" (root only) or "**/*.md" (full hierarchy)`)
 	sourcePushCmd.Flags().BoolVarP(&pushForce, "force", "f", false, "skip confirmation prompt")
 }
 
