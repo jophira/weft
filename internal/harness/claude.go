@@ -2,7 +2,6 @@ package harness
 
 import (
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 )
@@ -33,30 +32,5 @@ func (c *ClaudeCode) Apply(stagedRoot string) error {
 	if err := os.MkdirAll(target, 0o755); err != nil {
 		return fmt.Errorf("ensuring ~/.claude exists: %w", err)
 	}
-
-	return filepath.WalkDir(stagedRoot, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			return nil
-		}
-		rel, err := filepath.Rel(stagedRoot, path)
-		if err != nil {
-			return err
-		}
-		dst := filepath.Join(target, rel)
-		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-			return fmt.Errorf("creating parent dir for %s: %w", rel, err)
-		}
-		return copyFile(path, dst)
-	})
-}
-
-func copyFile(src, dst string) error {
-	data, err := os.ReadFile(src)
-	if err != nil {
-		return fmt.Errorf("reading %s: %w", src, err)
-	}
-	return os.WriteFile(dst, data, 0o644) //nolint:gosec // dst is filepath.Join(~/.claude, rel) where rel comes from filepath.Rel — clean by construction
+	return copyWithRename(stagedRoot, target, nil)
 }
