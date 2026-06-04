@@ -56,7 +56,8 @@ func ReadCache(path string) (Cache, error) {
 		return Cache{}, err
 	}
 	var c Cache
-	return c, json.Unmarshal(data, &c)
+	err = json.Unmarshal(data, &c)
+	return c, err
 }
 
 func WriteCache(path string, c Cache) error {
@@ -73,11 +74,11 @@ func WriteCache(path string, c Cache) error {
 func fetchLatest() (string, error) {
 	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/releases/latest", repoOwner, repoName)
 	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Get(url) //nolint:gosec
+	resp, err := client.Get(url) //nolint:gosec // URL is constructed from known constant owner/repo, not user input
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("GitHub API returned %d", resp.StatusCode)
 	}
@@ -192,7 +193,7 @@ func parseSemver(v string) [3]int {
 		if i >= 3 {
 			break
 		}
-		fmt.Sscanf(p, "%d", &out[i]) //nolint:errcheck
+		fmt.Sscanf(p, "%d", &out[i]) //nolint:errcheck,gosec // invalid semver parts treated as 0
 	}
 	return out
 }

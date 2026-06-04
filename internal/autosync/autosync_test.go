@@ -135,7 +135,9 @@ func TestReadState_missingFile_returnsEmpty(t *testing.T) {
 
 func TestReadState_corruptedFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "bad.json")
-	os.WriteFile(path, []byte("not json"), 0o644)
+	if err := os.WriteFile(path, []byte("not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := ReadState(path); err == nil {
 		t.Error("corrupted file: expected error")
 	}
@@ -176,7 +178,7 @@ func TestRun_skipsNonAutoPullSources(t *testing.T) {
 	syncFn := func(_ source.Source) (bool, error) { called = true; return false, nil }
 
 	sources := []source.Source{src("work", false)}
-	run(sources, path, 0, epoch, syncFn, &bytes.Buffer{})
+	_ = run(sources, path, 0, epoch, syncFn, &bytes.Buffer{})
 
 	if called {
 		t.Error("auto_pull=false: syncFn should not be called")
@@ -186,13 +188,15 @@ func TestRun_skipsNonAutoPullSources(t *testing.T) {
 func TestRun_skipsRecentlySyncedSource(t *testing.T) {
 	path := stateFile(t)
 	recent := epoch.Add(-1 * time.Minute)
-	WriteState(path, State{Sources: map[string]time.Time{"work": recent}})
+	if err := WriteState(path, State{Sources: map[string]time.Time{"work": recent}}); err != nil {
+		t.Fatal(err)
+	}
 
 	called := false
 	syncFn := func(_ source.Source) (bool, error) { called = true; return false, nil }
 
 	sources := []source.Source{src("work", true)}
-	run(sources, path, 5*time.Minute, epoch, syncFn, &bytes.Buffer{})
+	_ = run(sources, path, 5*time.Minute, epoch, syncFn, &bytes.Buffer{})
 
 	if called {
 		t.Error("recently synced: syncFn should not be called")
@@ -202,13 +206,15 @@ func TestRun_skipsRecentlySyncedSource(t *testing.T) {
 func TestRun_syncsStaleSource(t *testing.T) {
 	path := stateFile(t)
 	old := epoch.Add(-10 * time.Minute)
-	WriteState(path, State{Sources: map[string]time.Time{"work": old}})
+	if err := WriteState(path, State{Sources: map[string]time.Time{"work": old}}); err != nil {
+		t.Fatal(err)
+	}
 
 	called := false
 	syncFn := func(_ source.Source) (bool, error) { called = true; return false, nil }
 
 	sources := []source.Source{src("work", true)}
-	run(sources, path, 5*time.Minute, epoch, syncFn, &bytes.Buffer{})
+	_ = run(sources, path, 5*time.Minute, epoch, syncFn, &bytes.Buffer{})
 
 	if !called {
 		t.Error("stale source: syncFn should have been called")
@@ -218,7 +224,7 @@ func TestRun_syncsStaleSource(t *testing.T) {
 func TestRun_updatesStateAfterSuccessfulSync(t *testing.T) {
 	path := stateFile(t)
 	sources := []source.Source{src("work", true)}
-	run(sources, path, 0, epoch, noop, &bytes.Buffer{})
+	_ = run(sources, path, 0, epoch, noop, &bytes.Buffer{})
 
 	s, err := ReadState(path)
 	if err != nil {
@@ -232,7 +238,7 @@ func TestRun_updatesStateAfterSuccessfulSync(t *testing.T) {
 func TestRun_doesNotUpdateStateOnSyncError(t *testing.T) {
 	path := stateFile(t)
 	sources := []source.Source{src("work", true)}
-	run(sources, path, 0, epoch, failing, &bytes.Buffer{})
+	_ = run(sources, path, 0, epoch, failing, &bytes.Buffer{})
 
 	s, _ := ReadState(path)
 	if _, ok := s.Sources["work"]; ok {
@@ -252,7 +258,7 @@ func TestRun_continuesAfterSyncError(t *testing.T) {
 	}
 
 	sources := []source.Source{src("bad", true), src("good", true)}
-	run(sources, path, 0, epoch, syncFn, &bytes.Buffer{})
+	_ = run(sources, path, 0, epoch, syncFn, &bytes.Buffer{})
 
 	if calls != 2 {
 		t.Errorf("expected 2 sync calls, got %d", calls)
@@ -272,7 +278,7 @@ func TestRun_silentOnNoChange(t *testing.T) {
 	path := stateFile(t)
 	var out bytes.Buffer
 	sources := []source.Source{src("work", true)}
-	run(sources, path, 0, epoch, noop, &out)
+	_ = run(sources, path, 0, epoch, noop, &out)
 
 	if out.Len() != 0 {
 		t.Errorf("no change: expected no output, got %q", out.String())
@@ -283,7 +289,7 @@ func TestRun_printsOnUpdate(t *testing.T) {
 	path := stateFile(t)
 	var out bytes.Buffer
 	sources := []source.Source{src("work", true)}
-	run(sources, path, 0, epoch, updated, &out)
+	_ = run(sources, path, 0, epoch, updated, &out)
 
 	if !strings.Contains(out.String(), "work") {
 		t.Errorf("update: expected source name in output, got %q", out.String())
@@ -294,7 +300,7 @@ func TestRun_printsErrorForFailedSource(t *testing.T) {
 	path := stateFile(t)
 	var out bytes.Buffer
 	sources := []source.Source{src("bad", true)}
-	run(sources, path, 0, epoch, failing, &out)
+	_ = run(sources, path, 0, epoch, failing, &out)
 
 	if !strings.Contains(out.String(), "bad") {
 		t.Errorf("error: expected source name in output, got %q", out.String())
@@ -303,10 +309,12 @@ func TestRun_printsErrorForFailedSource(t *testing.T) {
 
 func TestRun_multipleSourcesPartialStale(t *testing.T) {
 	path := stateFile(t)
-	WriteState(path, State{Sources: map[string]time.Time{
+	if err := WriteState(path, State{Sources: map[string]time.Time{
 		"fresh": epoch.Add(-1 * time.Minute),
 		"stale": epoch.Add(-10 * time.Minute),
-	}})
+	}}); err != nil {
+		t.Fatal(err)
+	}
 
 	var synced []string
 	syncFn := func(s source.Source) (bool, error) {
@@ -315,7 +323,7 @@ func TestRun_multipleSourcesPartialStale(t *testing.T) {
 	}
 
 	sources := []source.Source{src("fresh", true), src("stale", true)}
-	run(sources, path, 5*time.Minute, epoch, syncFn, &bytes.Buffer{})
+	_ = run(sources, path, 5*time.Minute, epoch, syncFn, &bytes.Buffer{})
 
 	if len(synced) != 1 || synced[0] != "stale" {
 		t.Errorf("expected only 'stale' synced, got %v", synced)
@@ -335,7 +343,7 @@ func TestRun_mixedAutoPull(t *testing.T) {
 		src("disabled", false),
 		src("alsoEnabled", true),
 	}
-	run(sources, path, 0, epoch, syncFn, &bytes.Buffer{})
+	_ = run(sources, path, 0, epoch, syncFn, &bytes.Buffer{})
 
 	for _, name := range synced {
 		if name == "disabled" {

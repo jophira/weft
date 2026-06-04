@@ -124,10 +124,12 @@ func TestCheckWith_freshCache_noNetworkCall(t *testing.T) {
 	now := time.Now()
 
 	// Prime cache with a version that would look newer.
-	update.WriteCache(path, update.Cache{
+	if err := update.WriteCache(path, update.Cache{
 		CheckedAt: now.Add(-1 * time.Hour), // well within 24h
 		Latest:    "0.2.0",
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	fetched := false
 	opts := update.CheckOptions{
@@ -154,10 +156,12 @@ func TestCheckWith_staleCache_fetchesNetwork(t *testing.T) {
 	path := tempCache(t)
 	now := time.Now()
 
-	update.WriteCache(path, update.Cache{
+	if err := update.WriteCache(path, update.Cache{
 		CheckedAt: now.Add(-25 * time.Hour), // past 24h
 		Latest:    "0.1.0",
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	fetched := false
 	opts := update.CheckOptions{
@@ -233,11 +237,13 @@ func TestCheckWith_staleCache_preservesIgnoredVersion(t *testing.T) {
 	path := tempCache(t)
 	now := time.Now()
 
-	update.WriteCache(path, update.Cache{
+	if err := update.WriteCache(path, update.Cache{
 		CheckedAt:      now.Add(-25 * time.Hour),
 		Latest:         "0.1.0",
 		IgnoredVersion: "0.2.0",
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	opts := update.CheckOptions{
 		CachePath: path,
@@ -261,11 +267,13 @@ func TestCheckWith_ignoredVersion_suppressesNotice(t *testing.T) {
 	path := tempCache(t)
 	now := time.Now()
 
-	update.WriteCache(path, update.Cache{
+	if err := update.WriteCache(path, update.Cache{
 		CheckedAt:      now.Add(-1 * time.Hour),
 		Latest:         "0.2.0",
 		IgnoredVersion: "0.2.0",
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	opts := update.CheckOptions{
 		CachePath: path,
@@ -282,11 +290,13 @@ func TestCheckWith_ignoredVersion_clearedByNewerRelease(t *testing.T) {
 	path := tempCache(t)
 	now := time.Now()
 
-	update.WriteCache(path, update.Cache{
+	if err := update.WriteCache(path, update.Cache{
 		CheckedAt:      now.Add(-25 * time.Hour),
 		Latest:         "0.2.0",
 		IgnoredVersion: "0.2.0",
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	opts := update.CheckOptions{
 		CachePath: path,
@@ -305,12 +315,16 @@ func TestIgnoreVersion_writesIgnoredVersion(t *testing.T) {
 	// IgnoreVersion uses the real CacheFilePath (HOME), so exercise it via
 	// WriteCache/ReadCache with a temp path instead.
 	path := tempCache(t)
-	update.WriteCache(path, update.Cache{Latest: "0.2.0"})
-	update.WriteCache(path, update.Cache{
+	if err := update.WriteCache(path, update.Cache{Latest: "0.2.0"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := update.WriteCache(path, update.Cache{
 		CheckedAt:      time.Now(),
 		Latest:         "0.2.0",
 		IgnoredVersion: "0.2.0",
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 	c, err := update.ReadCache(path)
 	if err != nil {
 		t.Fatal(err)
@@ -322,16 +336,18 @@ func TestIgnoreVersion_writesIgnoredVersion(t *testing.T) {
 
 func TestIgnoreVersion_stripsVPrefix(t *testing.T) {
 	path := tempCache(t)
-	update.WriteCache(path, update.Cache{
+	if err := update.WriteCache(path, update.Cache{
 		CheckedAt:      time.Now(),
 		Latest:         "0.2.0",
 		IgnoredVersion: "v0.2.0",
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 	c, _ := update.ReadCache(path)
 	// IgnoredVersion stored without "v" prefix compares equal to stripped Latest
 	latest := "0.2.0"
 	ignored := c.IgnoredVersion
-	if len(ignored) > 0 && ignored[0] == 'v' {
+	if ignored != "" && ignored[0] == 'v' {
 		ignored = ignored[1:]
 	}
 	if ignored != latest {

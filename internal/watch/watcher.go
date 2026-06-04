@@ -46,7 +46,7 @@ func Debounced(roots []string, debounce time.Duration, fn func()) (stop func(), 
 
 	done := make(chan struct{})
 	go func() {
-		defer w.Close()
+		defer func() { _ = w.Close() }()
 		timer := time.NewTimer(0)
 		if !timer.Stop() {
 			<-timer.C

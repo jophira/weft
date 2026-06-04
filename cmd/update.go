@@ -92,7 +92,7 @@ func selfUpdate(latest string) error {
 	if err != nil {
 		return fmt.Errorf("creating temp dir: %w", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	archivePath := filepath.Join(tmpDir, "weft.tar.gz")
 	if err := downloadFile(url, archivePath); err != nil {
@@ -136,12 +136,16 @@ func releaseURL(version string) string {
 	)
 }
 
-func downloadFile(url, dest string) error {
-	resp, err := http.Get(url) //nolint:gosec
+func downloadFile(url, dest string) (retErr error) {
+	resp, err := http.Get(url) //nolint:gosec // URL is constructed from known constant owner/repo, not user input
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if cerr := resp.Body.Close(); cerr != nil && retErr == nil {
+			retErr = cerr
+		}
+	}()
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("server returned %s", resp.Status)
 	}
@@ -149,7 +153,11 @@ func downloadFile(url, dest string) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() {
+		if cerr := f.Close(); cerr != nil && retErr == nil {
+			retErr = cerr
+		}
+	}()
 	_, err = io.Copy(f, resp.Body)
 	return err
 }
@@ -159,13 +167,13 @@ func extractBinary(archivePath, dest string) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	gz, err := gzip.NewReader(f)
 	if err != nil {
 		return err
 	}
-	defer gz.Close()
+	defer func() { _ = gz.Close() }()
 
 	tr := tar.NewReader(gz)
 	for {
@@ -181,9 +189,9 @@ func extractBinary(archivePath, dest string) error {
 			if err != nil {
 				return err
 			}
-			defer out.Close()
-			_, err = io.Copy(out, io.LimitReader(tr, 50<<20)) // 50 MB cap
-			return err
+			_, copyErr := io.Copy(out, io.LimitReader(tr, 50<<20)) // 50 MB cap
+			_ = out.Close()
+			return copyErr
 		}
 	}
 	return fmt.Errorf("binary not found in archive")
