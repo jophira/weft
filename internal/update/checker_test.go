@@ -10,6 +10,16 @@ import (
 	"github.com/jophira/weft/internal/update"
 )
 
+// TestMain clears the CI environment variable before the suite runs so that
+// tests which exercise the update-check logic are not silently skipped by the
+// CI guard in CheckWith. Individual tests that need CI=true set it themselves
+// via t.Setenv, which scopes the change to that test and restores the value
+// afterward.
+func TestMain(m *testing.M) {
+	os.Unsetenv("CI") //nolint:errcheck // Unsetenv only errors on Windows with invalid var names; "CI" is always valid
+	os.Exit(m.Run())
+}
+
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 func tempCache(t *testing.T) string {
