@@ -44,6 +44,9 @@ weft profile create hybrid --sources personal,work
 # Activate the profile (merges sources, writes to harness config)
 weft profile use hybrid
 
+# Keep the profile live — re-applies automatically when any source file changes
+weft profile use hybrid --watch
+
 # Apply to a specific harness
 weft target apply claude-code
 
@@ -56,7 +59,7 @@ weft doctor
 | Command | Description |
 |---|---|
 | `source add/list/sync/push/status/remove` | Manage rule sources |
-| `profile create/list/use/diff/delete` | Manage named profiles |
+| `profile create/list/use/diff/delete` | Manage named profiles (`use --watch` for live reload) |
 | `target list/apply` | Manage AI harness targets |
 | `hook add/list/run/remove` | Manage lifecycle hooks |
 | `doctor` | Health check — shows discovered harnesses and config issues |

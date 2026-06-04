@@ -3,9 +3,12 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"text/tabwriter"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -15,6 +18,7 @@ import (
 	"github.com/jophira/weft/internal/merge"
 	"github.com/jophira/weft/internal/profile"
 	"github.com/jophira/weft/internal/source"
+	"github.com/jophira/weft/internal/watch"
 )
 
 // newProfileManager builds a FileManager using the configured profiles directory.
@@ -80,7 +84,60 @@ var (
 	profileSources string
 	profileOverlay string
 	profileTarget  string
+	profileWatch   bool
 )
+
+// mergeAndApply runs the merge+apply pipeline for a resolved profile.
+// quiet suppresses informational output (used during watch re-applies).
+func mergeAndApply(p *profile.Profile, roots []string, srcs []source.Source, cfgDir string, quiet bool) error {
+	stagedDir := filepath.Join(cfgDir, "staged", p.Name)
+	if err := os.RemoveAll(stagedDir); err != nil {
+		return fmt.Errorf("clearing staged dir: %w", err)
+	}
+
+	if !quiet {
+		fmt.Printf("Merging %d source(s) [%s] with strategy %q...\n",
+			len(roots), strings.Join(p.Sources, ", "), p.Overlay)
+	}
+	manifest, err := merge.New(p.Overlay).
+		WithFilter(managedFilter(srcs)).
+		MergeRoots(roots, stagedDir)
+	if err != nil {
+		return fmt.Errorf("merging sources: %w", err)
+	}
+	if !quiet {
+		fmt.Printf("  %d file(s) merged into staging\n", len(manifest))
+	}
+
+	target := p.ActiveTarget
+	if target == "" {
+		if (&harness.ClaudeCode{}).Detect() {
+			target = "claude-code"
+			if !quiet {
+				fmt.Printf("  no target set — auto-detected: claude-code\n")
+			}
+		}
+	}
+	if target == "" {
+		if !quiet {
+			fmt.Println("  no harness target — staged output is at:", stagedDir)
+		}
+		return nil
+	}
+
+	hReg := harness.NewRegistry(harness.Instances()...)
+	h, ok := hReg.Get(target)
+	if !ok {
+		return fmt.Errorf("unknown harness %q — run 'weft target list' to see supported harnesses", target)
+	}
+	if !quiet {
+		fmt.Printf("Applying to %s...\n", target)
+	}
+	if err := h.Apply(stagedDir); err != nil {
+		return fmt.Errorf("applying to %s: %w", target, err)
+	}
+	return nil
+}
 
 // ── Commands ──────────────────────────────────────────────────────────────────
 
@@ -179,7 +236,11 @@ var profileListCmd = &cobra.Command{
 var profileUseCmd = &cobra.Command{
 	Use:   "use <name>",
 	Short: "Activate a profile: merge sources and apply to the target harness",
-	Args:  cobra.ExactArgs(1),
+	Long: `Activate a profile by merging its sources and writing the result to the harness config.
+
+With --watch the command stays running and re-applies automatically whenever a
+file inside any source root changes. Press Ctrl-C to stop watching.`,
+	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
 
@@ -209,61 +270,51 @@ var profileUseCmd = &cobra.Command{
 			srcs = append(srcs, *s)
 		}
 
-		// 3. Prepare the staging directory.
+		// 3. Resolve config dir (used for staging).
 		cfgDir, err := config.DefaultDir()
 		if err != nil {
 			return err
 		}
 		stagedDir := filepath.Join(cfgDir, "staged", name)
-		// Clean previous staged output so removed files don't linger.
-		if err := os.RemoveAll(stagedDir); err != nil {
-			return fmt.Errorf("clearing staged dir: %w", err)
+
+		// 4. Initial merge + apply.
+		if err := mergeAndApply(p, roots, srcs, cfgDir, false); err != nil {
+			return err
 		}
 
-		// 4. Merge managed paths from each source into the staging directory.
-		fmt.Printf("Merging %d source(s) [%s] with strategy %q...\n",
-			len(roots), strings.Join(p.Sources, ", "), p.Overlay)
-		manifest, err := merge.New(p.Overlay).
-			WithFilter(managedFilter(srcs)).
-			MergeRoots(roots, stagedDir)
-		if err != nil {
-			return fmt.Errorf("merging sources: %w", err)
-		}
-		fmt.Printf("  %d file(s) merged into staging\n", len(manifest))
-
-		// 5. Apply staged output to the harness target.
-		target := p.ActiveTarget
-		if target == "" {
-			// Auto-detect: prefer claude-code if ~/.claude is present.
-			if (&harness.ClaudeCode{}).Detect() {
-				target = "claude-code"
-				fmt.Printf("  no target set — auto-detected: claude-code\n")
-			}
-		}
-		if target != "" {
-			hReg := harness.NewRegistry(harness.Instances()...)
-			h, ok := hReg.Get(target)
-			if !ok {
-				return fmt.Errorf("unknown harness %q — run 'weft target list' to see supported harnesses", target)
-			}
-			fmt.Printf("Applying to %s...\n", target)
-			if err := h.Apply(stagedDir); err != nil {
-				return fmt.Errorf("applying to %s: %w", target, err)
-			}
-		} else {
-			fmt.Println("  no harness target — staged output is at:", stagedDir)
-		}
-
-		// 6. Persist the active profile in config.yaml.
+		// 5. Persist the active profile in config.yaml.
 		if err := config.SetActiveProfile(name); err != nil {
 			return fmt.Errorf("saving active profile: %w", err)
 		}
 
 		fmt.Printf("\n✓ Profile %q is now active\n", name)
-		if target != "" {
-			fmt.Printf("  target: %s\n", target)
+		if p.ActiveTarget != "" {
+			fmt.Printf("  target: %s\n", p.ActiveTarget)
 		}
 		fmt.Printf("  staged: %s\n", stagedDir)
+
+		// 6. Enter watch mode if requested.
+		if profileWatch {
+			fmt.Println("\nWatching for changes... (Ctrl-C to stop)")
+			stop, err := watch.Debounced(roots, 300*time.Millisecond, func() {
+				fmt.Printf("\n[weft] change detected — re-applying...\n")
+				if applyErr := mergeAndApply(p, roots, srcs, cfgDir, true); applyErr != nil {
+					fmt.Fprintf(os.Stderr, "[weft] error: %v\n", applyErr)
+					return
+				}
+				fmt.Printf("[weft] ✓ applied at %s\n", time.Now().Format("15:04:05"))
+			})
+			if err != nil {
+				return fmt.Errorf("starting watcher: %w", err)
+			}
+
+			sig := make(chan os.Signal, 1)
+			signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
+			<-sig
+			stop()
+			fmt.Println("\nWatcher stopped.")
+		}
+
 		return nil
 	},
 }
@@ -306,4 +357,6 @@ func init() {
 	profileCreateCmd.Flags().StringVar(&profileOverlay, "overlay", "cascade", "cascade|merge|last-wins")
 	profileCreateCmd.Flags().StringVar(&profileTarget, "target", "", "default harness: claude-code|cursor|warp")
 	_ = profileCreateCmd.MarkFlagRequired("sources")
+
+	profileUseCmd.Flags().BoolVar(&profileWatch, "watch", false, "re-apply automatically when source files change")
 }
