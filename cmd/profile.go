@@ -15,6 +15,7 @@ import (
 
 	"github.com/jophira/weft/internal/collect"
 	"github.com/jophira/weft/internal/config"
+	"github.com/jophira/weft/internal/diff"
 	"github.com/jophira/weft/internal/harness"
 	"github.com/jophira/weft/internal/merge"
 	"github.com/jophira/weft/internal/profile"
@@ -99,6 +100,47 @@ func buildAssembler(roots []string, srcs []source.Source) merge.Assembler {
 	}
 }
 
+// resolveProfileRoots loads a profile by name, expands every source root, and
+// verifies each root exists on disk. Returns the profile, expanded root paths,
+// and the corresponding Source values in the same order.
+func resolveProfileRoots(name string) (*profile.Profile, []string, []source.Source, error) {
+	p, err := newProfileManager().Get(name)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	reg := newRegistry()
+	var roots []string
+	var srcs []source.Source
+	for _, srcName := range p.Sources {
+		s, err := reg.Get(srcName)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("source %q referenced by profile not found: %w", srcName, err)
+		}
+		expanded := source.ExpandHome(s.Root)
+		if _, err := os.Stat(expanded); err != nil {
+			return nil, nil, nil, fmt.Errorf(
+				"source %q root %s does not exist — clone or create it first",
+				s.Name, s.Root,
+			)
+		}
+		roots = append(roots, expanded)
+		srcs = append(srcs, *s)
+	}
+	return p, roots, srcs, nil
+}
+
+// stageProfile merges the profile's sources into outputDir and returns the
+// manifest. It does not apply the result to any harness.
+func stageProfile(p *profile.Profile, roots []string, srcs []source.Source, outputDir string) ([]string, error) {
+	if err := os.RemoveAll(outputDir); err != nil {
+		return nil, fmt.Errorf("clearing output dir: %w", err)
+	}
+	return merge.New(p.Overlay).
+		WithFilter(managedFilter(srcs)).
+		WithAssembler(buildAssembler(roots, srcs)).
+		MergeRoots(roots, outputDir)
+}
+
 // parseSources splits a comma-separated source list and trims whitespace.
 func parseSources(raw string) []string {
 	var names []string
@@ -129,18 +171,12 @@ var (
 // quiet suppresses informational output (used during watch re-applies).
 func mergeAndApply(p *profile.Profile, roots []string, srcs []source.Source, cfgDir string, quiet bool) error {
 	stagedDir := filepath.Join(cfgDir, "staged", p.Name)
-	if err := os.RemoveAll(stagedDir); err != nil {
-		return fmt.Errorf("clearing staged dir: %w", err)
-	}
 
 	if !quiet {
 		fmt.Printf("Merging %d source(s) [%s] with strategy %q...\n",
 			len(roots), strings.Join(p.Sources, ", "), p.Overlay)
 	}
-	manifest, err := merge.New(p.Overlay).
-		WithFilter(managedFilter(srcs)).
-		WithAssembler(buildAssembler(roots, srcs)).
-		MergeRoots(roots, stagedDir)
+	manifest, err := stageProfile(p, roots, srcs, stagedDir)
 	if err != nil {
 		return fmt.Errorf("merging sources: %w", err)
 	}
@@ -283,33 +319,13 @@ file inside any source root changes. Press Ctrl-C to stop watching.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
 
-		// 1. Load the profile.
-		p, err := newProfileManager().Get(name)
+		// 1. Load the profile and resolve source roots.
+		p, roots, srcs, err := resolveProfileRoots(name)
 		if err != nil {
 			return err
 		}
 
-		// 2. Resolve source roots, verify each exists on disk.
-		reg := newRegistry()
-		var roots []string
-		var srcs []source.Source
-		for _, srcName := range p.Sources {
-			s, err := reg.Get(srcName)
-			if err != nil {
-				return fmt.Errorf("source %q referenced by profile not found: %w", srcName, err)
-			}
-			expanded := source.ExpandHome(s.Root)
-			if _, err := os.Stat(expanded); err != nil {
-				return fmt.Errorf(
-					"source %q root %s does not exist — clone or create it first",
-					s.Name, s.Root,
-				)
-			}
-			roots = append(roots, expanded)
-			srcs = append(srcs, *s)
-		}
-
-		// 3. Resolve config dir (used for staging).
+		// 2. Resolve config dir (used for staging).
 		cfgDir, err := config.DefaultDir()
 		if err != nil {
 			return err
@@ -358,15 +374,129 @@ file inside any source root changes. Press Ctrl-C to stop watching.`,
 	},
 }
 
+var diffVerbose bool
+
 var profileDiffCmd = &cobra.Command{
 	Use:   "diff <profile-a> <profile-b>",
-	Short: "Show what changes when switching from one profile to another",
-	Args:  cobra.ExactArgs(2),
+	Short: "Show what changes when switching from profile-a to profile-b",
+	Long: `Stage both profiles and compare the merged outputs file by file.
+
+Summary (default): lists added, removed, and changed files with counts.
+Verbose (--verbose / -v): also shows line-level diffs for every changed,
+added, or removed file.`,
+	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// TODO: implement file-level diff between merged profiles
-		fmt.Printf("profile diff — not yet implemented\n")
+		nameA, nameB := args[0], args[1]
+
+		// 1. Resolve both profiles.
+		pA, rootsA, srcsA, err := resolveProfileRoots(nameA)
+		if err != nil {
+			return fmt.Errorf("profile %q: %w", nameA, err)
+		}
+		pB, rootsB, srcsB, err := resolveProfileRoots(nameB)
+		if err != nil {
+			return fmt.Errorf("profile %q: %w", nameB, err)
+		}
+
+		// 2. Stage both into temp directories.
+		dirA, err := os.MkdirTemp("", "weft-diff-a-*")
+		if err != nil {
+			return fmt.Errorf("creating temp dir: %w", err)
+		}
+		defer func() { _ = os.RemoveAll(dirA) }()
+
+		dirB, err := os.MkdirTemp("", "weft-diff-b-*")
+		if err != nil {
+			return fmt.Errorf("creating temp dir: %w", err)
+		}
+		defer func() { _ = os.RemoveAll(dirB) }()
+
+		if _, err := stageProfile(pA, rootsA, srcsA, dirA); err != nil {
+			return fmt.Errorf("staging %q: %w", nameA, err)
+		}
+		if _, err := stageProfile(pB, rootsB, srcsB, dirB); err != nil {
+			return fmt.Errorf("staging %q: %w", nameB, err)
+		}
+
+		// 3. Compare.
+		files, err := diff.Compare(dirA, dirB)
+		if err != nil {
+			return fmt.Errorf("comparing profiles: %w", err)
+		}
+
+		// 4. Print.
+		printProfileDiff(nameA, nameB, pA, pB, files, dirA, dirB, diffVerbose)
 		return nil
 	},
+}
+
+func printProfileDiff(nameA, nameB string, pA, pB *profile.Profile, files []diff.File, dirA, dirB string, verbose bool) {
+	fmt.Printf("Diff  %s → %s\n", nameA, nameB)
+	if pA.Overlay != pB.Overlay {
+		fmt.Printf("  strategy: %s → %s\n", pA.Overlay, pB.Overlay)
+	}
+	fmt.Println()
+
+	var added, removed, changed, same int
+	for _, f := range files {
+		switch f.Kind {
+		case diff.Added:
+			added++
+		case diff.Removed:
+			removed++
+		case diff.Changed:
+			changed++
+		case diff.Same:
+			same++
+		}
+	}
+
+	if added+removed+changed == 0 {
+		fmt.Println("  No differences — profiles produce identical output.")
+		fmt.Printf("  %d file(s) unchanged\n", same)
+		return
+	}
+
+	if !verbose {
+		// Summary: one line per non-same file.
+		for _, f := range files {
+			switch f.Kind {
+			case diff.Added:
+				fmt.Printf("  + %s\n", f.Rel)
+			case diff.Removed:
+				fmt.Printf("  - %s\n", f.Rel)
+			case diff.Changed:
+				fmt.Printf("  ~ %s\n", f.Rel)
+			}
+		}
+		fmt.Println()
+		fmt.Printf("  %d added  %d removed  %d changed  %d unchanged\n",
+			added, removed, changed, same)
+		return
+	}
+
+	// Verbose: line-level diff per changed/added/removed file.
+	const separator = "────────────────────────────────────────────────────────"
+	for _, f := range files {
+		switch f.Kind {
+		case diff.Same:
+			continue
+		case diff.Changed:
+			fmt.Printf("~ %s\n%s\n", f.Rel, separator)
+			contA, _ := os.ReadFile(filepath.Join(dirA, f.Rel))
+			contB, _ := os.ReadFile(filepath.Join(dirB, f.Rel))
+			fmt.Print(diff.LineDiff(string(contA), string(contB)))
+		case diff.Added:
+			fmt.Printf("+ %s\n%s\n", f.Rel, separator)
+			fmt.Print(diff.ContentLines(filepath.Join(dirB, f.Rel), "+ ", diff.ColorCodeGreen))
+		case diff.Removed:
+			fmt.Printf("- %s\n%s\n", f.Rel, separator)
+			fmt.Print(diff.ContentLines(filepath.Join(dirA, f.Rel), "- ", diff.ColorCodeRed))
+		}
+		fmt.Println()
+	}
+	fmt.Printf("%d added  %d removed  %d changed  %d unchanged\n",
+		added, removed, changed, same)
 }
 
 var profileInspectCmd = &cobra.Command{
@@ -382,29 +512,12 @@ Formats:
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
 
-		p, err := newProfileManager().Get(name)
+		p, roots, srcs, err := resolveProfileRoots(name)
 		if err != nil {
 			return err
 		}
 
-		reg := newRegistry()
-		var roots []string
-		var sourceNames []string
-		var srcs []source.Source
-		for _, srcName := range p.Sources {
-			s, err := reg.Get(srcName)
-			if err != nil {
-				return fmt.Errorf("source %q referenced by profile not found: %w", srcName, err)
-			}
-			expanded := source.ExpandHome(s.Root)
-			if _, err := os.Stat(expanded); err != nil {
-				return fmt.Errorf("source %q root %s does not exist", s.Name, s.Root)
-			}
-			roots = append(roots, expanded)
-			sourceNames = append(sourceNames, srcName)
-			srcs = append(srcs, *s)
-		}
-
+		sourceNames := p.Sources
 		report, err := merge.New(p.Overlay).
 			WithFilter(managedFilter(srcs)).
 			Inspect(roots)
@@ -586,4 +699,6 @@ func init() {
 	profileUseCmd.Flags().BoolVar(&profileWatch, "watch", false, "re-apply automatically when source files change")
 
 	profileInspectCmd.Flags().StringVar(&inspectFormat, "format", "text", "output format: text|mermaid")
+
+	profileDiffCmd.Flags().BoolVarP(&diffVerbose, "verbose", "v", false, "show line-level diff for changed, added, and removed files")
 }

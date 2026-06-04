@@ -30,9 +30,9 @@ func newRegistry() *source.FileRegistry {
 // ── Flags ─────────────────────────────────────────────────────────────────────
 
 var (
-	addBranch           string
-	addAutoPull         bool
-	addInstructionGlob  string
+	addBranch          string
+	addAutoPull        bool
+	addInstructionGlob string
 )
 
 // ── Commands ──────────────────────────────────────────────────────────────────
