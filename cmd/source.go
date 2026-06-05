@@ -258,14 +258,19 @@ func runSync(s source.Source, out io.Writer) (bool, error) {
 	return updated, nil
 }
 
-var pushForce bool
+var (
+	pushForce   bool
+	pushMessage string
+)
 
 var sourcePushCmd = &cobra.Command{
 	Use:   "push <name>",
 	Short: "Push local commits to the source remote",
 	Long: `Push commits from the local source directory to its configured remote.
 
-Asks for confirmation unless --force is given. Never force-pushes.`,
+If the working tree is dirty and --message is given, all changes are staged
+and committed before pushing. Without --message, a dirty tree aborts with a
+hint. --force skips the confirmation prompt but does not auto-commit.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		s, err := newRegistry().Get(args[0])
@@ -282,6 +287,27 @@ Asks for confirmation unless --force is given. Never force-pushes.`,
 		r, err := git.Open(expanded)
 		if err != nil {
 			return err
+		}
+
+		// Check for uncommitted changes.
+		clean, err := r.IsClean()
+		if err != nil {
+			return fmt.Errorf("checking working tree: %w", err)
+		}
+		if !clean {
+			if pushMessage == "" {
+				return fmt.Errorf(
+					"%s has uncommitted changes\n"+
+						"  commit first:  cd %s && git commit -am \"your message\"\n"+
+						"  or let weft commit: weft source push %s --message \"your message\"",
+					s.Name, expanded, s.Name,
+				)
+			}
+			fmt.Printf("Committing changes in %s...\n", s.Name)
+			if err := r.CommitAll(pushMessage); err != nil {
+				return fmt.Errorf("commit failed: %w", err)
+			}
+			fmt.Printf("  ✓ committed: %s\n", pushMessage)
 		}
 
 		branch, err := r.HeadBranch()
@@ -397,6 +423,7 @@ func init() {
 	sourceAddCmd.Flags().BoolVar(&addAutoPull, "auto-pull", true, "pull on 'weft source sync'")
 	sourceAddCmd.Flags().StringVar(&addInstructionGlob, "instruction-glob", source.DefaultStructure().InstructionGlob, `glob pattern for instruction files: "CLAUDE.md" (root only) or "**/*.md" (full hierarchy)`)
 	sourcePushCmd.Flags().BoolVarP(&pushForce, "force", "f", false, "skip confirmation prompt")
+	sourcePushCmd.Flags().StringVarP(&pushMessage, "message", "m", "", "stage all changes, commit with this message, then push")
 }
 
 // boolWord renders a bool as "yes" / "no" for display.
