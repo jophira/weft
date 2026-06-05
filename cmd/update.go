@@ -39,6 +39,10 @@ var updateCmd = &cobra.Command{
 			return nil
 		}
 
+		if result.Current == "" {
+			fmt.Println("weft is a dev build — update is not applicable.")
+			return nil
+		}
 		if !result.Newer {
 			fmt.Printf("weft is already up to date (v%s).\n", result.Current)
 			return nil
