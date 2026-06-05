@@ -125,7 +125,7 @@ func trackAndWriteFile(absPath, rel, harnessName string, content []byte, ctx App
 		}
 	}
 
-	if err := os.WriteFile(absPath, content, 0o644); err != nil { //nolint:gosec
+	if err := os.WriteFile(absPath, content, 0o644); err != nil { //nolint:gosec // path is resolved from harness config, not user input
 		return fmt.Errorf("writing %s: %w", absPath, err)
 	}
 
@@ -152,7 +152,7 @@ func backupConflicts(conflicts []conflictFile, harnessName, cfgDir string) (stri
 		if err != nil {
 			return "", fmt.Errorf("reading %s for backup: %w", c.rel, err)
 		}
-		if err := os.WriteFile(dst, data, 0o644); err != nil { //nolint:gosec
+		if err := os.WriteFile(dst, data, 0o644); err != nil { //nolint:gosec // dst is derived from config backup dir, not user input
 			return "", fmt.Errorf("backing up %s: %w", c.rel, err)
 		}
 	}

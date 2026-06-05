@@ -2,12 +2,14 @@ package git
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/go-git/go-git/v5/plumbing/transport"
 	gossh "github.com/go-git/go-git/v5/plumbing/transport/ssh"
+	"golang.org/x/crypto/ssh/agent"
 )
 
 // ResolveAuth returns the best available auth method for remote.
@@ -21,9 +23,14 @@ func ResolveAuth(remote string) (transport.AuthMethod, error) {
 }
 
 func resolveSSH() (transport.AuthMethod, error) {
-	// Prefer SSH agent — zero config for developers with ssh-add loaded.
-	if auth, err := gossh.NewSSHAgentAuth("git"); err == nil {
-		return auth, nil
+	// Prefer SSH agent, but only when it actually has identities loaded.
+	// NewSSHAgentAuth succeeds as long as the socket exists; it does not verify
+	// that any keys are loaded, so we check explicitly to avoid a runtime failure
+	// and fall through to key files when the agent is empty.
+	if agentHasIdentities() {
+		if auth, err := gossh.NewSSHAgentAuth("git"); err == nil {
+			return auth, nil
+		}
 	}
 
 	// Fall back to the first available default key file.
@@ -44,10 +51,26 @@ func resolveSSH() (transport.AuthMethod, error) {
 	}
 
 	return nil, fmt.Errorf(
-		"no SSH auth available: SSH agent is not running and no key files found in ~/.ssh/\n" +
-			"  start the agent:  eval $(ssh-agent) && ssh-add\n" +
-			"  or generate a key: ssh-keygen -t ed25519",
+		"no SSH auth available: SSH agent has no identities and no usable key files found in ~/.ssh/\n" +
+			"  load a key:       ssh-add ~/.ssh/id_ed25519\n" +
+			"  or generate one:  ssh-keygen -t ed25519",
 	)
+}
+
+// agentHasIdentities reports whether the SSH agent socket is reachable and
+// has at least one identity loaded.
+func agentHasIdentities() bool {
+	sock := os.Getenv("SSH_AUTH_SOCK")
+	if sock == "" {
+		return false
+	}
+	conn, err := net.Dial("unix", sock) //nolint:gosec // SSH_AUTH_SOCK is a well-known user-session socket, not external input
+	if err != nil {
+		return false
+	}
+	defer func() { _ = conn.Close() }()
+	keys, err := agent.NewClient(conn).List()
+	return err == nil && len(keys) > 0
 }
 
 // isSSH returns true for git@ and ssh:// remote URLs.

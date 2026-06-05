@@ -114,6 +114,27 @@ func (r *Repo) HeadBranch() (string, error) {
 	return head.Name().Short(), nil
 }
 
+// OriginRemote returns the fetch URL of the "origin" remote, or "" if the
+// repo has no origin configured.
+func (r *Repo) OriginRemote() (string, error) {
+	repo, err := gogit.PlainOpen(r.path)
+	if err != nil {
+		return "", fmt.Errorf("opening repo: %w", err)
+	}
+	remote, err := repo.Remote("origin")
+	if err == gogit.ErrRemoteNotFound {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("reading origin remote: %w", err)
+	}
+	urls := remote.Config().URLs
+	if len(urls) == 0 {
+		return "", nil
+	}
+	return urls[0], nil
+}
+
 // Push pushes all local commits on the current branch to origin.
 // Returns nil when there is nothing new to push (already up to date).
 func (r *Repo) Push(auth transport.AuthMethod) error {

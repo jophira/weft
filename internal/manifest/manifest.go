@@ -53,7 +53,7 @@ func Save(cfgDir string, m *Manifest) error {
 	if err != nil {
 		return fmt.Errorf("serialising manifest: %w", err)
 	}
-	return os.WriteFile(p, data, 0o644) //nolint:gosec
+	return os.WriteFile(p, data, 0o644) //nolint:gosec // path is derived from config dir, not user input
 }
 
 // HashFile returns the sha256 hex digest of the file at path.

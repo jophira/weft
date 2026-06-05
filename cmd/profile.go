@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"text/tabwriter"
@@ -144,7 +145,7 @@ func stageProfile(p *profile.Profile, roots []string, srcs []source.Source, outp
 // parseSources splits a comma-separated source list and trims whitespace.
 func parseSources(raw string) []string {
 	var names []string
-	for _, s := range strings.Split(raw, ",") {
+	for s := range strings.SplitSeq(raw, ",") {
 		if name := strings.TrimSpace(s); name != "" {
 			names = append(names, name)
 		}
@@ -237,14 +238,32 @@ var profileCreateCmd = &cobra.Command{
 			return fmt.Errorf("--sources is required and cannot be empty")
 		}
 
+		// Validate overlay.
+		if err := validateOverlay(profileOverlay); err != nil {
+			return err
+		}
+
+		// Validate target (optional field — only checked when provided).
+		if profileTarget != "" {
+			if err := validateTarget(profileTarget); err != nil {
+				return err
+			}
+		}
+
 		// Verify every referenced source is registered.
 		reg := newRegistry()
 		for _, name := range names {
 			if _, err := reg.Get(name); err != nil {
-				return fmt.Errorf(
-					"source %q not found — register it first with:\n  weft source add %s <path> <remote>",
-					name, name,
-				)
+				registered, _ := reg.List()
+				names := make([]string, len(registered))
+				for i, s := range registered {
+					names[i] = s.Name
+				}
+				hint := "no sources registered yet — add one with: weft source add <name> <path>"
+				if len(names) > 0 {
+					hint = "registered sources: " + strings.Join(names, ", ")
+				}
+				return fmt.Errorf("source %q not found — %s", name, hint)
 			}
 		}
 
@@ -267,6 +286,33 @@ var profileCreateCmd = &cobra.Command{
 		fmt.Printf("\nActivate with: weft profile use %s\n", p.Name)
 		return nil
 	},
+}
+
+// validateOverlay returns an error if s is not a known overlay strategy.
+func validateOverlay(s string) error {
+	valid := []profile.Overlay{profile.OverlayCascade, profile.OverlayMerge, profile.OverlayLastWins}
+	if slices.Contains(valid, profile.Overlay(s)) {
+		return nil
+	}
+	names := make([]string, len(valid))
+	for i, v := range valid {
+		names[i] = string(v)
+	}
+	return fmt.Errorf("unknown overlay %q — valid values: %s", s, strings.Join(names, ", "))
+}
+
+// validateTarget returns an error if s is not a known harness name.
+func validateTarget(s string) error {
+	reg := harness.NewRegistry(harness.Instances()...)
+	if _, ok := reg.Get(s); ok {
+		return nil
+	}
+	all := harness.All()
+	names := make([]string, len(all))
+	for i, h := range all {
+		names[i] = h.H.Name()
+	}
+	return fmt.Errorf("unknown target %q — valid values: %s", s, strings.Join(names, ", "))
 }
 
 var profileListCmd = &cobra.Command{
@@ -693,7 +739,7 @@ func init() {
 
 	profileCreateCmd.Flags().StringVar(&profileSources, "sources", "", "comma-separated source names (required)")
 	profileCreateCmd.Flags().StringVar(&profileOverlay, "overlay", "cascade", "cascade|merge|last-wins")
-	profileCreateCmd.Flags().StringVar(&profileTarget, "target", "", "default harness: claude-code|cursor|warp")
+	profileCreateCmd.Flags().StringVar(&profileTarget, "target", "", "default harness (see: weft target list)")
 	_ = profileCreateCmd.MarkFlagRequired("sources")
 
 	profileUseCmd.Flags().BoolVar(&profileWatch, "watch", false, "re-apply automatically when source files change")

@@ -201,7 +201,7 @@ the next apply will treat them as externally owned.`,
 			if err != nil {
 				return fmt.Errorf("reading backup file %s: %w", rel, err)
 			}
-			if err := os.WriteFile(dst, data, 0o644); err != nil { //nolint:gosec
+			if err := os.WriteFile(dst, data, 0o644); err != nil { //nolint:gosec // dst is resolved from manifest target root, not user input
 				return fmt.Errorf("restoring %s: %w", rel, err)
 			}
 			fmt.Printf("  ✓ %s\n", rel)

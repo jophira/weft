@@ -76,7 +76,7 @@ func TestHashBytes_Deterministic(t *testing.T) {
 	if h1 != h2 {
 		t.Errorf("HashBytes not deterministic: %q vs %q", h1, h2)
 	}
-	if len(h1) == 0 {
+	if h1 == "" {
 		t.Error("expected non-empty hash")
 	}
 }

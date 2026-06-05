@@ -104,7 +104,7 @@ func run(sources []source.Source, stateFile string, interval time.Duration, now 
 
 	var firstErr error
 	for _, s := range sources {
-		if !s.AutoPull {
+		if !s.AutoPull || s.Remote == "" {
 			continue
 		}
 		if !ShouldSync(state, s.Name, now, interval) {
