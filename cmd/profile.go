@@ -208,7 +208,7 @@ func mergeAndApply(p *profile.Profile, roots []string, srcs []source.Source, cfg
 	if !quiet {
 		fmt.Printf("Applying to %s...\n", target)
 	}
-	if err := h.Apply(stagedDir); err != nil {
+	if err := h.Apply(stagedDir, harness.ApplyCtx{ProfileName: p.Name, CfgDir: cfgDir}); err != nil {
 		return fmt.Errorf("applying to %s: %w", target, err)
 	}
 	return nil

@@ -2,10 +2,8 @@ package harness
 
 import (
 	"fmt"
-	"io/fs"
 	"os"
 	"os/exec"
-	"path/filepath"
 
 	"github.com/jophira/weft/internal/locate"
 )
@@ -50,7 +48,7 @@ func (g *GenericHarness) ConfigPath() string {
 	return locate.Display(g.candidates)
 }
 
-func (g *GenericHarness) Apply(stagedRoot string) error {
+func (g *GenericHarness) Apply(stagedRoot string, ctx ApplyCtx) error {
 	if g.root == "" {
 		if !g.Detect() {
 			return fmt.Errorf("%s not detected — install it or create its config directory", g.name)
@@ -59,18 +57,5 @@ func (g *GenericHarness) Apply(stagedRoot string) error {
 	if err := os.MkdirAll(g.root, 0o755); err != nil {
 		return fmt.Errorf("ensuring %s exists: %w", g.root, err)
 	}
-	return filepath.WalkDir(stagedRoot, func(path string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return err
-		}
-		rel, err := filepath.Rel(stagedRoot, path)
-		if err != nil {
-			return err
-		}
-		dst := filepath.Join(g.root, rel)
-		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-			return fmt.Errorf("creating parent dir for %s: %w", rel, err)
-		}
-		return copyFile(path, dst)
-	})
+	return applyWithManifest(stagedRoot, g.root, g.name, ctx, nil)
 }

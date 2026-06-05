@@ -26,7 +26,7 @@ func (c *Codex) Detect() bool {
 }
 
 // Apply copies files from stagedRoot into ~/.codex/, renaming CLAUDE.md → AGENTS.md.
-func (c *Codex) Apply(stagedRoot string) error {
+func (c *Codex) Apply(stagedRoot string, ctx ApplyCtx) error {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("resolving home directory: %w", err)
@@ -35,7 +35,7 @@ func (c *Codex) Apply(stagedRoot string) error {
 	if err := os.MkdirAll(target, 0o755); err != nil {
 		return fmt.Errorf("ensuring ~/.codex exists: %w", err)
 	}
-	return copyWithRename(stagedRoot, target, map[string]string{
+	return applyWithManifest(stagedRoot, target, c.Name(), ctx, map[string]string{
 		"CLAUDE.md": "AGENTS.md",
 	})
 }

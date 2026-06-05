@@ -26,7 +26,7 @@ func (g *GeminiCLI) Detect() bool {
 }
 
 // Apply copies files from stagedRoot into ~/.gemini/, renaming CLAUDE.md → GEMINI.md.
-func (g *GeminiCLI) Apply(stagedRoot string) error {
+func (g *GeminiCLI) Apply(stagedRoot string, ctx ApplyCtx) error {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("resolving home directory: %w", err)
@@ -35,7 +35,7 @@ func (g *GeminiCLI) Apply(stagedRoot string) error {
 	if err := os.MkdirAll(target, 0o755); err != nil {
 		return fmt.Errorf("ensuring ~/.gemini exists: %w", err)
 	}
-	return copyWithRename(stagedRoot, target, map[string]string{
+	return applyWithManifest(stagedRoot, target, g.Name(), ctx, map[string]string{
 		"CLAUDE.md": "GEMINI.md",
 	})
 }

@@ -21,9 +21,9 @@ func (c *ClaudeCode) Detect() bool {
 }
 
 // Apply copies every file from stagedRoot into ~/.claude/, creating
-// subdirectories as needed. Existing files are overwritten; files not present
-// in stagedRoot are left untouched.
-func (c *ClaudeCode) Apply(stagedRoot string) error {
+// subdirectories as needed. Existing files owned by weft are overwritten
+// silently; externally-modified files are backed up first.
+func (c *ClaudeCode) Apply(stagedRoot string, ctx ApplyCtx) error {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("resolving home directory: %w", err)
@@ -32,5 +32,5 @@ func (c *ClaudeCode) Apply(stagedRoot string) error {
 	if err := os.MkdirAll(target, 0o755); err != nil {
 		return fmt.Errorf("ensuring ~/.claude exists: %w", err)
 	}
-	return copyWithRename(stagedRoot, target, nil)
+	return applyWithManifest(stagedRoot, target, c.Name(), ctx, nil)
 }
