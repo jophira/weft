@@ -5,16 +5,9 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/jophira/weft/internal/harness"
 	"github.com/spf13/cobra"
 )
-
-// knownRuleDirs are common AI harness config locations to scan.
-var knownRuleDirs = []string{
-	"~/.claude",
-	"~/.cursor",
-	"~/.warp",
-	"~/.config/aider",
-}
 
 var doctorCmd = &cobra.Command{
 	Use:   "doctor",
@@ -33,12 +26,16 @@ var doctorCmd = &cobra.Command{
 		}
 
 		fmt.Println("\nScanning for AI rule folders:")
-		for _, d := range knownRuleDirs {
-			expanded := filepath.Join(home, d[1:])
-			if _, err := os.Stat(expanded); err == nil {
-				fmt.Printf("  ✓ Found: %s\n", d)
+		for _, k := range harness.All() {
+			detected := k.H.Detect()
+			displayPath := k.ConfigPath
+			if cp, ok := k.H.(harness.ConfigPather); ok {
+				displayPath = cp.ConfigPath()
+			}
+			if detected {
+				fmt.Printf("  ✓ Found: %s\n", displayPath)
 			} else {
-				fmt.Printf("  – Not found: %s\n", d)
+				fmt.Printf("  – Not found: %s\n", displayPath)
 			}
 		}
 		return nil
