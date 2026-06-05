@@ -21,6 +21,7 @@ import (
 	"github.com/jophira/weft/internal/merge"
 	"github.com/jophira/weft/internal/profile"
 	"github.com/jophira/weft/internal/source"
+	"github.com/jophira/weft/internal/validate"
 	"github.com/jophira/weft/internal/watch"
 )
 
@@ -168,6 +169,90 @@ var (
 	inspectFormat  string
 )
 
+// sourceContrib describes one source's byte contribution to the merged CLAUDE.md.
+type sourceContrib struct {
+	name  string
+	bytes int
+}
+
+// computeProvenance calls collect.Collect for each source root and returns the
+// per-source byte counts for the instruction file.
+func computeProvenance(roots []string, srcs []source.Source) []sourceContrib {
+	contribs := make([]sourceContrib, len(roots))
+	for i, root := range roots {
+		s := srcs[i]
+		glob := s.Structure.InstructionGlob
+		if glob == "" {
+			glob = source.DefaultStructure().InstructionGlob
+		}
+		var excludes []string
+		for _, d := range []string{
+			s.Structure.Commands, s.Structure.Agents,
+			s.Structure.Skills, s.Structure.Memory, s.Structure.Hooks,
+		} {
+			if d = strings.TrimRight(strings.TrimSpace(d), "/\\"); d != "" {
+				excludes = append(excludes, d)
+			}
+		}
+		data, _ := collect.Collect(root, glob, excludes...)
+		contribs[i] = sourceContrib{name: s.Name, bytes: len(data)}
+	}
+	return contribs
+}
+
+// fmtBytes formats a byte count as "X B" or "X.Y KB".
+func fmtBytes(n int) string {
+	if n < 1024 {
+		return fmt.Sprintf("%d B", n)
+	}
+	return fmt.Sprintf("%.1f KB", float64(n)/1024)
+}
+
+// printQualityReport reads the staged CLAUDE.md, prints a provenance line, and
+// emits any size or duplicate-block warnings.
+func printQualityReport(stagedDir string, p *profile.Profile, roots []string, srcs []source.Source) {
+	content, err := os.ReadFile(filepath.Join(stagedDir, "CLAUDE.md"))
+	if err != nil {
+		return // no instruction file; nothing to report
+	}
+
+	contribs := computeProvenance(roots, srcs)
+
+	if p.Overlay == profile.OverlayMerge && len(contribs) > 1 {
+		parts := make([]string, len(contribs))
+		for i, c := range contribs {
+			parts[i] = fmt.Sprintf("%s: %s", c.name, fmtBytes(c.bytes))
+		}
+		fmt.Printf("  CLAUDE.md: %s  (%s)\n", fmtBytes(len(content)), strings.Join(parts, ", "))
+	} else {
+		var winner string
+		for i := len(contribs) - 1; i >= 0; i-- {
+			if contribs[i].bytes > 0 {
+				winner = contribs[i].name
+				break
+			}
+		}
+		if winner != "" {
+			fmt.Printf("  CLAUDE.md: %s  (from: %s)\n", fmtBytes(len(content)), winner)
+		} else {
+			fmt.Printf("  CLAUDE.md: %s\n", fmtBytes(len(content)))
+		}
+	}
+
+	warnKB := viper.GetInt("warn_instruction_size_kb")
+	if warnKB <= 0 {
+		warnKB = validate.DefaultWarnSizeKB
+	}
+	r := validate.Instruction(content, warnKB)
+	if r.SizeWarning {
+		fmt.Printf("  ! CLAUDE.md is %s — long instruction files may reduce model compliance\n", fmtBytes(len(content)))
+		fmt.Printf("    (change threshold: weft config set warn-size <KB>)\n")
+	}
+	for _, dupe := range r.DuplicateBlocks {
+		fmt.Printf("  ! duplicate block: %q\n", dupe)
+	}
+}
+
 // mergeAndApply runs the merge+apply pipeline for a resolved profile.
 // quiet suppresses informational output (used during watch re-applies).
 func mergeAndApply(p *profile.Profile, roots []string, srcs []source.Source, cfgDir string, quiet bool) error {
@@ -183,6 +268,7 @@ func mergeAndApply(p *profile.Profile, roots []string, srcs []source.Source, cfg
 	}
 	if !quiet {
 		fmt.Printf("  %d file(s) merged into staging\n", len(manifest))
+		printQualityReport(stagedDir, p, roots, srcs)
 	}
 
 	target := p.ActiveTarget
@@ -582,6 +668,19 @@ Formats:
 		default:
 			printInspectText(report, rootToName, sourceNames, p)
 		}
+
+		// Stage to a temp dir so we can run the quality report on merged content.
+		tmpDir, err := os.MkdirTemp("", "weft-inspect-*")
+		if err != nil {
+			return fmt.Errorf("creating temp dir: %w", err)
+		}
+		defer func() { _ = os.RemoveAll(tmpDir) }()
+		if _, stageErr := stageProfile(p, roots, srcs, tmpDir); stageErr == nil {
+			fmt.Println()
+			fmt.Println("Quality report:")
+			printQualityReport(tmpDir, p, roots, srcs)
+		}
+
 		return nil
 	},
 }

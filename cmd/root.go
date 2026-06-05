@@ -10,6 +10,7 @@ import (
 	"github.com/jophira/weft/internal/autosync"
 	"github.com/jophira/weft/internal/source"
 	"github.com/jophira/weft/internal/update"
+	"github.com/jophira/weft/internal/validate"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -132,6 +133,7 @@ func initConfig() {
 		viper.SetConfigName("config")
 		viper.SetConfigType("yaml")
 	}
+	viper.SetDefault("warn_instruction_size_kb", validate.DefaultWarnSizeKB)
 	viper.AutomaticEnv()
 	_ = viper.ReadInConfig()
 }
