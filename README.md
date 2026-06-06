@@ -50,11 +50,11 @@ weft source sync
 # Combine sources into a named profile
 weft profile create hybrid --sources personal,work
 
-# Activate the profile (merges sources, writes to harness config)
+# Activate the profile — merges sources, applies to all harnesses, and watches for changes
 weft profile use hybrid
 
-# Keep the profile live — re-applies automatically when any source file changes
-weft profile use hybrid --watch
+# One-shot apply only (no watch — useful in CI/scripts)
+weft profile use hybrid --no-watch
 
 # Apply to a specific harness
 weft target apply claude-code
@@ -63,28 +63,27 @@ weft target apply claude-code
 weft doctor
 ```
 
-## Safe apply — manifest and backups
+## Safe apply — manifest, write-back and backups
 
-When weft writes files to a harness config directory it keeps a manifest
-(`~/.config/weft/manifests/<harness>.json`) that records the sha256 hash of
-every file it wrote. On the next apply:
+Weft keeps a manifest (`~/.config/weft/manifests/<harness>.json`) recording the sha256 hash of
+every file it wrote. On startup, before applying, it checks each managed file:
 
-- **File not on disk** — written silently.
-- **File exists, hash matches manifest** — weft owns it, overwritten silently.
-- **File exists, hash differs** — externally modified; weft backs it up to
-  `~/.config/weft/backups/<harness>/<timestamp>/` (preserving the full
-  relative path structure), writes the new content, and prints which files
-  were backed up.
+- **File not on disk** — written silently (`✓ wrote`).
+- **File unchanged** (hash matches manifest) — skipped (`· skip`).
+- **File externally modified** — written back to its source repo first, then apply is a no-op.
+- **Unresolvable file** (no owning source) — backed up to
+  `~/.config/weft/backups/<harness>/<timestamp>/` with a warning; apply skips it.
 
 Files weft has never touched (e.g. `~/.claude/projects/`) are never modified.
 
 ```
-  ! 2 file(s) externally modified — backed up to ~/.config/weft/backups/claude-code/20260605-143022
-      CLAUDE.md
-      commands/backend/java.md
+[weft] startup write-back: CLAUDE.md → ai-rules-personal-tech
+Applying to claude-code...
+  · skip   CLAUDE.md
+  ✓ wrote  commands/backend/java.md
 ```
 
-To restore a backup:
+To restore a backup (last-resort cases only):
 
 ```bash
 weft target revert claude-code                    # restore latest backup
@@ -102,7 +101,7 @@ weft target backups claude-code                   # list all available backups
 | `source push <name>` | Push commits; aborts if working tree is dirty — use `-m` to commit first |
 | `source push <name> -m "msg"` | Stage all changes, commit with message, then push |
 | `profile create/list/use/diff/inspect/delete` | Manage named profiles; `--overlay`, `--target`, and `--sources` are validated on create |
-| `profile use <name> --watch` | Activate profile with live reload on source file changes |
+| `profile use <name>` | Activate profile: merge sources, apply to all targets, and watch for changes (use `--no-watch` to apply once and exit) |
 | `target list/apply/backups/revert` | Manage AI harness targets; inspect and restore backups |
 | `hook add/list/run/remove` | Manage lifecycle hooks |
 | `doctor` | Health check — shows discovered harnesses and config issues |
