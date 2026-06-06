@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
@@ -83,15 +84,8 @@ func Debounced(roots []string, debounce time.Duration, fn func()) (stop func(), 
 		}
 	}()
 
-	once := make(chan struct{})
-	return func() {
-		select {
-		case <-once:
-		default:
-			close(once)
-			close(done)
-		}
-	}, nil
+	var once sync.Once
+	return func() { once.Do(func() { close(done) }) }, nil
 }
 
 // TargetChange describes a file that was modified externally inside a target directory.
@@ -183,15 +177,8 @@ func DebouncedTarget(roots []string, debounce time.Duration, guard *ApplyGuard, 
 		}
 	}()
 
-	once := make(chan struct{})
-	return func() {
-		select {
-		case <-once:
-		default:
-			close(once)
-			close(done)
-		}
-	}, nil
+	var once sync.Once
+	return func() { once.Do(func() { close(done) }) }, nil
 }
 
 // targetRoot finds which root contains absPath and returns the root and relative path.
