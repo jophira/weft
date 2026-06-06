@@ -40,13 +40,14 @@ make build        # binary at ./bin/weft
 | `make test` | Run the test suite (`go test ./...`) |
 | `make lint` | Run `golangci-lint` |
 
-> **`make dev` is not the same as watch mode.**  
-> `make dev` is for *developing weft* — it rebuilds the binary on Go source changes.
-> To use weft's write-back / live-reload feature, run `weft profile use <profile> --watch`
-> in a separate terminal. If you want both at once (editing Go source while testing watch
-> mode), pass the args through air:
+> **`make dev` includes watch mode.**  
+> It rebuilds the binary on Go source changes *and* runs `weft profile use <active-profile>`,
+> which watches sources and targets by default. The active profile is read from
+> `~/.config/weft/config.yaml` — set it once with `weft profile use <profile> --no-watch`,
+> then `make dev` picks it up automatically on every restart.  
+> To target a different profile without changing the active one:
 > ```bash
-> make dev ARGS="profile use tech --watch"
+> make dev ARGS="profile use other-profile"
 > ```
 
 ## Quick start

@@ -3,6 +3,7 @@ package cmd
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/jophira/weft/internal/manifest"
@@ -161,6 +162,32 @@ func TestWriteBackSingleSource_NewFile_UsesWriteBackDefault(t *testing.T) {
 	got := readFile(t, filepath.Join(srcARoot, "new-file.md"))
 	if got != "new content from harness" {
 		t.Errorf("source file = %q, want %q", got, "new content from harness")
+	}
+}
+
+// TestOwningSource_UnexpandedTildeRoot documents the contract: source roots must
+// be expanded (via source.ExpandHome) before being passed to owningSource.
+// Unexpanded "~/..." roots are not shell-expanded by filepath.Join, so os.Stat
+// fails silently and write-back is skipped. resolveProfileRoots sets s.Root to
+// the expanded path before storing in srcs to uphold this contract.
+func TestOwningSource_UnexpandedTildeRoot_Unresolvable(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("cannot determine home dir")
+	}
+	srcRoot := t.TempDir()
+	if !strings.HasPrefix(srcRoot, home) {
+		t.Skip("temp dir not under HOME — tilde substitution not applicable")
+	}
+	writeFile(t, filepath.Join(srcRoot, "CLAUDE.md"), "content")
+
+	tildeRoot := "~" + srcRoot[len(home):]
+	srcs := []source.Source{newSource("personal", tildeRoot)}
+	p := newProfile(srcs)
+
+	_, _, ok := owningSource("CLAUDE.md", p, srcs)
+	if ok {
+		t.Error("unexpanded tilde root must not resolve — callers must expand via source.ExpandHome first")
 	}
 }
 

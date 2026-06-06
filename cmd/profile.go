@@ -127,6 +127,7 @@ func resolveProfileRoots(name string) (*profile.Profile, []string, []source.Sour
 				s.Name, s.Root,
 			)
 		}
+		s.Root = expanded
 		roots = append(roots, expanded)
 		srcs = append(srcs, *s)
 	}
