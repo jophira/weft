@@ -8,7 +8,8 @@ type Harness interface {
 	// Detect reports whether this harness is installed on the current machine.
 	Detect() bool
 	// Apply writes the merged profile into the harness config location.
-	Apply(mergedRoot string) error
+	// ctx carries the profile name and config dir for manifest tracking.
+	Apply(stagedRoot string, ctx ApplyCtx) error
 }
 
 // ConfigPather is an optional extension of Harness for adapters whose config

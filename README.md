@@ -34,11 +34,14 @@ make build        # binary at ./bin/weft
 ## Quick start
 
 ```bash
-# Register a rule source (local path + git remote)
-weft source add work ~/.rules/work git@github.com:you/work-rules.git
+# Register a rule source — remote is inferred from the repo's origin when omitted
+weft source add work ~/.rules/work
+
+# Specify the remote explicitly (or override an existing origin)
+weft source add work ~/.rules/work --remote git@github.com:you/work-rules.git
 
 # Register a source with a domain hierarchy (Backend/, Frontend/, …)
-weft source add work-private ~/.rules/work-private git@github.com:you/work-private.git \
+weft source add work-private ~/.rules/work-private \
   --instruction-glob "**/*.md"
 
 # Pull latest from all remotes
@@ -60,13 +63,47 @@ weft target apply claude-code
 weft doctor
 ```
 
+## Safe apply — manifest and backups
+
+When weft writes files to a harness config directory it keeps a manifest
+(`~/.config/weft/manifests/<harness>.json`) that records the sha256 hash of
+every file it wrote. On the next apply:
+
+- **File not on disk** — written silently.
+- **File exists, hash matches manifest** — weft owns it, overwritten silently.
+- **File exists, hash differs** — externally modified; weft backs it up to
+  `~/.config/weft/backups/<harness>/<timestamp>/` (preserving the full
+  relative path structure), writes the new content, and prints which files
+  were backed up.
+
+Files weft has never touched (e.g. `~/.claude/projects/`) are never modified.
+
+```
+  ! 2 file(s) externally modified — backed up to ~/.config/weft/backups/claude-code/20260605-143022
+      CLAUDE.md
+      commands/backend/java.md
+```
+
+To restore a backup:
+
+```bash
+weft target revert claude-code                    # restore latest backup
+weft target revert claude-code --backup 20260605-143022  # restore a specific one
+weft target backups claude-code                   # list all available backups
+```
+
 ## Commands
 
 | Command | Description |
 |---|---|
-| `source add/list/sync/push/status/remove` | Manage rule sources |
-| `profile create/list/use/diff/delete` | Manage named profiles (`use --watch` for live reload) |
-| `target list/apply` | Manage AI harness targets |
+| `source add <name> <path>` | Register a source; remote inferred from repo origin or set with `--remote` |
+| `source list/status/remove` | List, inspect git state, or deregister sources |
+| `source sync [name]` | Pull latest from remotes (auto-synced in background; use to force immediately) |
+| `source push <name>` | Push commits; aborts if working tree is dirty — use `-m` to commit first |
+| `source push <name> -m "msg"` | Stage all changes, commit with message, then push |
+| `profile create/list/use/diff/inspect/delete` | Manage named profiles; `--overlay`, `--target`, and `--sources` are validated on create |
+| `profile use <name> --watch` | Activate profile with live reload on source file changes |
+| `target list/apply/backups/revert` | Manage AI harness targets; inspect and restore backups |
 | `hook add/list/run/remove` | Manage lifecycle hooks |
 | `doctor` | Health check — shows discovered harnesses and config issues |
 | `version` | Print version, commit, and build date |

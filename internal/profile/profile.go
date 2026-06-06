@@ -12,12 +12,21 @@ const (
 	OverlayLastWins Overlay = "last-wins"
 )
 
+// WriteBack configures which source receives edits when a merged target file
+// is changed outside weft. Single-source files always write back to their sole
+// owning source and never consult this config.
+type WriteBack struct {
+	Default   string            `yaml:"default"   mapstructure:"default"`
+	Overrides map[string]string `yaml:"overrides" mapstructure:"overrides"`
+}
+
 // Profile is a named combination of sources with a merge strategy.
 type Profile struct {
-	Name         string   `yaml:"name"          mapstructure:"name"`
-	Sources      []string `yaml:"sources"       mapstructure:"sources"`
-	Overlay      Overlay  `yaml:"overlay"       mapstructure:"overlay"`
-	ActiveTarget string   `yaml:"active_target" mapstructure:"active_target"`
+	Name         string    `yaml:"name"          mapstructure:"name"`
+	Sources      []string  `yaml:"sources"       mapstructure:"sources"`
+	Overlay      Overlay   `yaml:"overlay"       mapstructure:"overlay"`
+	ActiveTarget string    `yaml:"active_target" mapstructure:"active_target"`
+	WriteBack    WriteBack `yaml:"write_back"    mapstructure:"write_back"`
 }
 
 // Manager handles profile persistence and activation.

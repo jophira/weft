@@ -6,6 +6,12 @@ import (
 	"testing"
 )
 
+// testCtx returns an ApplyCtx backed by a temp directory.
+func testCtx(t *testing.T) ApplyCtx {
+	t.Helper()
+	return ApplyCtx{ProfileName: "test", CfgDir: t.TempDir()}
+}
+
 // seedStaged creates a minimal staged directory with CLAUDE.md and one extra file.
 func seedStaged(t *testing.T, content string) string {
 	t.Helper()
@@ -85,6 +91,146 @@ func TestCopyWithRename_EmptySourceDir(t *testing.T) {
 	}
 }
 
+// ── applyWithManifest ─────────────────────────────────────────────────────────
+
+func TestApplyWithManifest_FirstApply_NoConflict(t *testing.T) {
+	staged := t.TempDir()
+	write(t, filepath.Join(staged, "CLAUDE.md"), "rules v1")
+	write(t, filepath.Join(staged, "commands", "foo.md"), "cmd")
+
+	target := t.TempDir()
+	ctx := testCtx(t)
+
+	if err := applyWithManifest(staged, target, "claude-code", ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := readFile(t, filepath.Join(target, "CLAUDE.md")); got != "rules v1" {
+		t.Errorf("CLAUDE.md = %q, want %q", got, "rules v1")
+	}
+	// No backup should be created on first apply.
+	backupsDir := filepath.Join(ctx.CfgDir, "backups", "claude-code")
+	if entries, _ := os.ReadDir(backupsDir); len(entries) > 0 {
+		t.Errorf("expected no backups on first apply, got %d", len(entries))
+	}
+}
+
+func TestApplyWithManifest_OwnedFile_SilentOverwrite(t *testing.T) {
+	staged := t.TempDir()
+	write(t, filepath.Join(staged, "CLAUDE.md"), "rules v1")
+
+	target := t.TempDir()
+	ctx := testCtx(t)
+
+	// First apply — weft takes ownership.
+	if err := applyWithManifest(staged, target, "claude-code", ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	// Second apply with updated content — weft owns the file, no backup.
+	write(t, filepath.Join(staged, "CLAUDE.md"), "rules v2")
+	if err := applyWithManifest(staged, target, "claude-code", ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := readFile(t, filepath.Join(target, "CLAUDE.md")); got != "rules v2" {
+		t.Errorf("CLAUDE.md = %q, want %q", got, "rules v2")
+	}
+	backupsDir := filepath.Join(ctx.CfgDir, "backups", "claude-code")
+	if entries, _ := os.ReadDir(backupsDir); len(entries) > 0 {
+		t.Errorf("expected no backups when weft owns the file, got %d", len(entries))
+	}
+}
+
+func TestApplyWithManifest_ExternallyModified_BackupCreated(t *testing.T) {
+	staged := t.TempDir()
+	write(t, filepath.Join(staged, "CLAUDE.md"), "rules v1")
+
+	target := t.TempDir()
+	ctx := testCtx(t)
+
+	// First apply — weft owns it.
+	if err := applyWithManifest(staged, target, "claude-code", ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	// User edits the file externally.
+	write(t, filepath.Join(target, "CLAUDE.md"), "my custom rules")
+
+	// Second apply — conflict detected, backup created.
+	write(t, filepath.Join(staged, "CLAUDE.md"), "rules v2")
+	if err := applyWithManifest(staged, target, "claude-code", ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	// Target should have the new staged content.
+	if got := readFile(t, filepath.Join(target, "CLAUDE.md")); got != "rules v2" {
+		t.Errorf("CLAUDE.md = %q, want %q", got, "rules v2")
+	}
+
+	// Backup should contain the user's external edits.
+	backupsDir := filepath.Join(ctx.CfgDir, "backups", "claude-code")
+	entries, err := os.ReadDir(backupsDir)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("expected 1 backup dir, got %d (err: %v)", len(entries), err)
+	}
+	backedUp := readFile(t, filepath.Join(backupsDir, entries[0].Name(), "CLAUDE.md"))
+	if backedUp != "my custom rules" {
+		t.Errorf("backup CLAUDE.md = %q, want %q", backedUp, "my custom rules")
+	}
+}
+
+func TestApplyWithManifest_UnknownExistingFile_BackupCreated(t *testing.T) {
+	staged := t.TempDir()
+	write(t, filepath.Join(staged, "CLAUDE.md"), "rules v1")
+
+	target := t.TempDir()
+	ctx := testCtx(t)
+
+	// Pre-existing file in target — not in manifest (weft has never run).
+	write(t, filepath.Join(target, "CLAUDE.md"), "hand-crafted rules")
+
+	if err := applyWithManifest(staged, target, "claude-code", ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	// Backup should contain the pre-existing content.
+	backupsDir := filepath.Join(ctx.CfgDir, "backups", "claude-code")
+	entries, _ := os.ReadDir(backupsDir)
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 backup dir, got %d", len(entries))
+	}
+	backedUp := readFile(t, filepath.Join(backupsDir, entries[0].Name(), "CLAUDE.md"))
+	if backedUp != "hand-crafted rules" {
+		t.Errorf("backup CLAUDE.md = %q, want %q", backedUp, "hand-crafted rules")
+	}
+}
+
+func TestApplyWithManifest_SubdirBackupPreservesPath(t *testing.T) {
+	staged := t.TempDir()
+	write(t, filepath.Join(staged, "commands", "backend", "java.md"), "java rules")
+
+	target := t.TempDir()
+	ctx := testCtx(t)
+
+	// Pre-existing nested file — should be backed up with full relative path.
+	write(t, filepath.Join(target, "commands", "backend", "java.md"), "old java rules")
+
+	if err := applyWithManifest(staged, target, "claude-code", ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	backupsDir := filepath.Join(ctx.CfgDir, "backups", "claude-code")
+	entries, _ := os.ReadDir(backupsDir)
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 backup dir, got %d", len(entries))
+	}
+	backedUp := readFile(t, filepath.Join(backupsDir, entries[0].Name(), "commands", "backend", "java.md"))
+	if backedUp != "old java rules" {
+		t.Errorf("nested backup = %q, want %q", backedUp, "old java rules")
+	}
+}
+
 // ── Codex ─────────────────────────────────────────────────────────────────────
 
 func TestCodexApply_WritesAgentsMD(t *testing.T) {
@@ -92,7 +238,7 @@ func TestCodexApply_WritesAgentsMD(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	if err := (&Codex{}).Apply(staged); err != nil {
+	if err := (&Codex{}).Apply(staged, testCtx(t)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -109,7 +255,7 @@ func TestCodexApply_PreservesOtherFiles(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	if err := (&Codex{}).Apply(staged); err != nil {
+	if err := (&Codex{}).Apply(staged, testCtx(t)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -125,7 +271,7 @@ func TestWindsurfApply_WritesGlobalRules(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	if err := (&Windsurf{}).Apply(staged); err != nil {
+	if err := (&Windsurf{}).Apply(staged, testCtx(t)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -145,7 +291,7 @@ func TestGeminiCLIApply_WritesGeminiMD(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	if err := (&GeminiCLI{}).Apply(staged); err != nil {
+	if err := (&GeminiCLI{}).Apply(staged, testCtx(t)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -165,7 +311,7 @@ func TestCursorApply_WritesMDCWithFrontmatter(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	if err := (&Cursor{}).Apply(staged); err != nil {
+	if err := (&Cursor{}).Apply(staged, testCtx(t)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -181,7 +327,7 @@ func TestCursorApply_NoCLAUDEMD_NoError(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	if err := (&Cursor{}).Apply(staged); err != nil {
+	if err := (&Cursor{}).Apply(staged, testCtx(t)); err != nil {
 		t.Fatalf("expected no error when CLAUDE.md absent, got: %v", err)
 	}
 }
@@ -193,7 +339,7 @@ func TestAiderApply_WritesConventionsMD(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	if err := (&Aider{}).Apply(staged); err != nil {
+	if err := (&Aider{}).Apply(staged, testCtx(t)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -213,11 +359,28 @@ func TestClaudeCodeApply_PreservesFilename(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	if err := (&ClaudeCode{}).Apply(staged); err != nil {
+	if err := (&ClaudeCode{}).Apply(staged, testCtx(t)); err != nil {
 		t.Fatal(err)
 	}
 
 	if got := readFile(t, filepath.Join(home, ".claude", "CLAUDE.md")); got != "claude rules" {
 		t.Errorf("CLAUDE.md = %q, want %q", got, "claude rules")
+	}
+}
+
+func TestClaudeCodeApply_UntouchedFilesNotRemoved(t *testing.T) {
+	staged := seedStaged(t, "claude rules")
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	// Pre-existing file that weft does not stage — should survive apply.
+	write(t, filepath.Join(home, ".claude", "todos.md"), "my todos")
+
+	if err := (&ClaudeCode{}).Apply(staged, testCtx(t)); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := readFile(t, filepath.Join(home, ".claude", "todos.md")); got != "my todos" {
+		t.Errorf("todos.md = %q, want %q (should not be removed)", got, "my todos")
 	}
 }

@@ -10,6 +10,7 @@ import (
 	"github.com/jophira/weft/internal/autosync"
 	"github.com/jophira/weft/internal/source"
 	"github.com/jophira/weft/internal/update"
+	"github.com/jophira/weft/internal/validate"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -49,8 +50,10 @@ var rootCmd = &cobra.Command{
 			}
 		}
 
-		// Auto-sync — runs on every invocation except CI.
-		runAutoSync()
+		// Auto-sync — skip read-only/informational commands.
+		if !isReadOnlyCmd(cmd) {
+			runAutoSync()
+		}
 	},
 }
 
@@ -77,6 +80,26 @@ func isInteractiveTTY() bool {
 		return false
 	}
 	return fi.Mode()&os.ModeCharDevice != 0
+}
+
+// skipAutoSyncCmds are leaf command names that should not trigger background
+// auto-sync — either because they are read-only (no point pulling) or because
+// they already perform their own network operation (sync, push) and a
+// concurrent auto-sync would just double the noise on failure.
+var skipAutoSyncCmds = map[string]bool{
+	"list":    true,
+	"status":  true,
+	"backups": true,
+	"version": true,
+	"help":    true,
+	"diff":    true,
+	"sync":    true,
+	"push":    true,
+}
+
+// isReadOnlyCmd reports whether cmd should skip background auto-sync.
+func isReadOnlyCmd(cmd *cobra.Command) bool {
+	return skipAutoSyncCmds[cmd.Name()]
 }
 
 func runAutoSync() {
@@ -110,6 +133,7 @@ func initConfig() {
 		viper.SetConfigName("config")
 		viper.SetConfigType("yaml")
 	}
+	viper.SetDefault("warn_instruction_size_kb", validate.DefaultWarnSizeKB)
 	viper.AutomaticEnv()
 	_ = viper.ReadInConfig()
 }

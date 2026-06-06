@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	gogit "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/go-git/go-git/v5/plumbing/transport"
 )
 
@@ -101,6 +103,48 @@ func (r *Repo) IsClean() (bool, error) {
 	return s == "", nil
 }
 
+// CommitAll stages every change in the working tree and creates a commit.
+// Author name and email are read from the repo's local/global git config;
+// if absent, "weft" / "weft@local" are used as fallbacks.
+func (r *Repo) CommitAll(message string) error {
+	repo, err := gogit.PlainOpen(r.path)
+	if err != nil {
+		return fmt.Errorf("opening repo: %w", err)
+	}
+	wt, err := repo.Worktree()
+	if err != nil {
+		return fmt.Errorf("getting worktree: %w", err)
+	}
+	if err := wt.AddWithOptions(&gogit.AddOptions{All: true}); err != nil {
+		return fmt.Errorf("staging changes: %w", err)
+	}
+	name, email := authorFromConfig(repo)
+	_, err = wt.Commit(message, &gogit.CommitOptions{
+		Author: &object.Signature{Name: name, Email: email, When: time.Now()},
+	})
+	if err != nil {
+		return fmt.Errorf("committing: %w", err)
+	}
+	return nil
+}
+
+// authorFromConfig reads user.name and user.email from the repo's git config,
+// falling back to "weft" / "weft@local" when not set.
+func authorFromConfig(repo *gogit.Repository) (name, email string) {
+	name, email = "weft", "weft@local"
+	cfg, err := repo.ConfigScoped(0) // 0 = local + global merged
+	if err != nil {
+		return
+	}
+	if cfg.User.Name != "" {
+		name = cfg.User.Name
+	}
+	if cfg.User.Email != "" {
+		email = cfg.User.Email
+	}
+	return
+}
+
 // HeadBranch returns the name of the currently checked-out branch (e.g. "main").
 func (r *Repo) HeadBranch() (string, error) {
 	repo, err := gogit.PlainOpen(r.path)
@@ -112,6 +156,27 @@ func (r *Repo) HeadBranch() (string, error) {
 		return "", fmt.Errorf("getting HEAD: %w", err)
 	}
 	return head.Name().Short(), nil
+}
+
+// OriginRemote returns the fetch URL of the "origin" remote, or "" if the
+// repo has no origin configured.
+func (r *Repo) OriginRemote() (string, error) {
+	repo, err := gogit.PlainOpen(r.path)
+	if err != nil {
+		return "", fmt.Errorf("opening repo: %w", err)
+	}
+	remote, err := repo.Remote("origin")
+	if err == gogit.ErrRemoteNotFound {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("reading origin remote: %w", err)
+	}
+	urls := remote.Config().URLs
+	if len(urls) == 0 {
+		return "", nil
+	}
+	return urls[0], nil
 }
 
 // Push pushes all local commits on the current branch to origin.
