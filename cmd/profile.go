@@ -184,7 +184,7 @@ func activeProfileName() string {
 var (
 	profileSources string
 	profileOverlay string
-	profileTarget  string
+	profileTargets []string
 	profileWatch   bool
 	inspectFormat  string
 )
@@ -291,7 +291,11 @@ func mergeAndApply(p *profile.Profile, roots []string, srcs []source.Source, cfg
 		printQualityReport(stagedDir, p, roots, srcs)
 	}
 
-	target := p.ActiveTarget
+	resolvedTargets := p.ResolvedTargets()
+	target := ""
+	if len(resolvedTargets) > 0 {
+		target = resolvedTargets[0]
+	}
 	if target == "" {
 		if (&harness.ClaudeCode{}).Detect() {
 			target = "claude-code"
@@ -356,7 +360,7 @@ var profileCreateCmd = &cobra.Command{
   <name>       profile identifier, e.g. "hybrid" or "work-only"
   --sources    comma-separated source names that must already be registered
   --overlay    how to resolve conflicts: cascade (default) | merge | last-wins
-  --target     default harness to apply to: claude-code | cursor | warp`,
+  --target     harness to apply to; repeat for multiple: --target claude-code --target codex`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		names := parseSources(profileSources)
@@ -369,9 +373,9 @@ var profileCreateCmd = &cobra.Command{
 			return err
 		}
 
-		// Validate target (optional field — only checked when provided).
-		if profileTarget != "" {
-			if err := validateTarget(profileTarget); err != nil {
+		// Validate targets (optional field — only checked when provided).
+		for _, t := range profileTargets {
+			if err := validateTarget(t); err != nil {
 				return err
 			}
 		}
@@ -394,10 +398,10 @@ var profileCreateCmd = &cobra.Command{
 		}
 
 		p := profile.Profile{
-			Name:         args[0],
-			Sources:      names,
-			Overlay:      profile.Overlay(profileOverlay),
-			ActiveTarget: profileTarget,
+			Name:    args[0],
+			Sources: names,
+			Overlay: profile.Overlay(profileOverlay),
+			Targets: profileTargets,
 		}
 		if err := newProfileManager().Create(p); err != nil {
 			return err
@@ -406,8 +410,8 @@ var profileCreateCmd = &cobra.Command{
 		fmt.Printf("✓ Profile %q created\n", p.Name)
 		fmt.Printf("  sources:  %s\n", strings.Join(names, ", "))
 		fmt.Printf("  overlay:  %s\n", p.Overlay)
-		if p.ActiveTarget != "" {
-			fmt.Printf("  target:   %s\n", p.ActiveTarget)
+		if len(p.Targets) > 0 {
+			fmt.Printf("  targets:  %s\n", strings.Join(p.Targets, ", "))
 		}
 		fmt.Printf("\nActivate with: weft profile use %s\n", p.Name)
 		return nil
@@ -458,21 +462,22 @@ var profileListCmd = &cobra.Command{
 		active := activeProfileName()
 
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
-		fmt.Fprintln(w, "NAME\tSOURCES\tOVERLAY\tTARGET\tSTATUS")
+		fmt.Fprintln(w, "NAME\tSOURCES\tOVERLAY\tTARGETS\tSTATUS")
 		for _, p := range profiles {
 			status := ""
 			if active != "" && p.Name == active {
 				status = "active"
 			}
-			target := p.ActiveTarget
-			if target == "" {
-				target = "-"
+			targets := p.ResolvedTargets()
+			targetStr := "-"
+			if len(targets) > 0 {
+				targetStr = strings.Join(targets, ", ")
 			}
 			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
 				p.Name,
 				strings.Join(p.Sources, ", "),
 				p.Overlay,
-				target,
+				targetStr,
 				status,
 			)
 		}
@@ -515,8 +520,8 @@ file inside any source root changes. Press Ctrl-C to stop watching.`,
 		}
 
 		fmt.Printf("\n✓ Profile %q is now active\n", name)
-		if p.ActiveTarget != "" {
-			fmt.Printf("  target: %s\n", p.ActiveTarget)
+		if resolvedTargets := p.ResolvedTargets(); len(resolvedTargets) > 0 {
+			fmt.Printf("  targets: %s\n", strings.Join(resolvedTargets, ", "))
 		}
 		fmt.Printf("  staged: %s\n", stagedDir)
 
@@ -542,7 +547,11 @@ file inside any source root changes. Press Ctrl-C to stop watching.`,
 
 			// Target watcher: detect harness writes to the target directory.
 			var stopTarget func()
-			target := p.ActiveTarget
+			resolvedTargets := p.ResolvedTargets()
+			target := ""
+			if len(resolvedTargets) > 0 {
+				target = resolvedTargets[0]
+			}
 			if target == "" && (&harness.ClaudeCode{}).Detect() {
 				target = "claude-code"
 			}
@@ -787,6 +796,9 @@ func printInspectText(report *merge.InspectReport, rootToName map[string]string,
 	fmt.Printf("Profile %q — inspect\n", p.Name)
 	fmt.Printf("  strategy: %s\n", p.Overlay)
 	fmt.Printf("  sources:  %s\n", strings.Join(sourceNames, " → "))
+	if targets := p.ResolvedTargets(); len(targets) > 0 {
+		fmt.Printf("  targets:  %s\n", strings.Join(targets, ", "))
+	}
 	fmt.Println()
 
 	if len(conflicts) > 0 {
@@ -932,7 +944,7 @@ func init() {
 
 	profileCreateCmd.Flags().StringVar(&profileSources, "sources", "", "comma-separated source names (required)")
 	profileCreateCmd.Flags().StringVar(&profileOverlay, "overlay", "cascade", "cascade|merge|last-wins")
-	profileCreateCmd.Flags().StringVar(&profileTarget, "target", "", "default harness (see: weft target list)")
+	profileCreateCmd.Flags().StringArrayVar(&profileTargets, "target", nil, "harness to apply to; repeat for multiple (see: weft target list)")
 	_ = profileCreateCmd.MarkFlagRequired("sources")
 
 	profileUseCmd.Flags().BoolVar(&profileWatch, "watch", false, "re-apply automatically when source files change")

@@ -25,8 +25,23 @@ type Profile struct {
 	Name         string    `yaml:"name"          mapstructure:"name"`
 	Sources      []string  `yaml:"sources"       mapstructure:"sources"`
 	Overlay      Overlay   `yaml:"overlay"       mapstructure:"overlay"`
-	ActiveTarget string    `yaml:"active_target" mapstructure:"active_target"`
+	ActiveTarget string    `yaml:"active_target,omitempty" mapstructure:"active_target"`
+	Targets      []string  `yaml:"targets,omitempty"      mapstructure:"targets"`
 	WriteBack    WriteBack `yaml:"write_back"    mapstructure:"write_back"`
+}
+
+// ResolvedTargets returns the effective target list for the profile.
+// It prefers the Targets field when non-empty; otherwise it falls back to
+// wrapping the legacy ActiveTarget in a single-element slice. Returns nil when
+// neither field is set.
+func (p *Profile) ResolvedTargets() []string {
+	if len(p.Targets) > 0 {
+		return p.Targets
+	}
+	if p.ActiveTarget != "" {
+		return []string{p.ActiveTarget}
+	}
+	return nil
 }
 
 // Manager handles profile persistence and activation.
