@@ -18,6 +18,7 @@ import (
 	"github.com/jophira/weft/internal/config"
 	"github.com/jophira/weft/internal/diff"
 	"github.com/jophira/weft/internal/harness"
+	"github.com/jophira/weft/internal/manifest"
 	"github.com/jophira/weft/internal/merge"
 	"github.com/jophira/weft/internal/profile"
 	"github.com/jophira/weft/internal/source"
@@ -262,12 +263,12 @@ func mergeAndApply(p *profile.Profile, roots []string, srcs []source.Source, cfg
 		fmt.Printf("Merging %d source(s) [%s] with strategy %q...\n",
 			len(roots), strings.Join(p.Sources, ", "), p.Overlay)
 	}
-	manifest, err := stageProfile(p, roots, srcs, stagedDir)
+	staged, err := stageProfile(p, roots, srcs, stagedDir)
 	if err != nil {
 		return fmt.Errorf("merging sources: %w", err)
 	}
 	if !quiet {
-		fmt.Printf("  %d file(s) merged into staging\n", len(manifest))
+		fmt.Printf("  %d file(s) merged into staging\n", len(staged))
 		printQualityReport(stagedDir, p, roots, srcs)
 	}
 
@@ -299,6 +300,16 @@ func mergeAndApply(p *profile.Profile, roots []string, srcs []source.Source, cfg
 		return fmt.Errorf("applying to %s: %w", target, err)
 	}
 	return nil
+}
+
+// harnessTargetRoot returns the target directory last written by the given
+// harness, as recorded in its manifest. Returns "" when no manifest exists yet.
+func harnessTargetRoot(cfgDir, harnessName string) string {
+	m, err := manifest.Load(cfgDir, harnessName)
+	if err != nil || m.TargetRoot == "" {
+		return ""
+	}
+	return m.TargetRoot
 }
 
 // ── Commands ──────────────────────────────────────────────────────────────────
@@ -484,24 +495,53 @@ file inside any source root changes. Press Ctrl-C to stop watching.`,
 		if profileWatch {
 			fmt.Println("\nWatching for changes... (Ctrl-C to stop)")
 			var guard watch.ApplyGuard
-			stop, err := watch.Debounced(roots, 300*time.Millisecond, func() {
-				fmt.Printf("\n[weft] change detected — re-applying...\n")
+
+			// Source watcher: re-apply when source files change.
+			stopSrc, err := watch.Debounced(roots, 300*time.Millisecond, func() {
+				fmt.Printf("\n[weft] source change detected — re-applying...\n")
 				guard.Lock()
 				defer guard.Unlock()
 				if applyErr := mergeAndApply(p, roots, srcs, cfgDir, true); applyErr != nil {
 					fmt.Fprintf(os.Stderr, "[weft] error: %v\n", applyErr)
 					return
 				}
-				fmt.Printf("[weft] ✓ applied at %s\n", time.Now().Format("15:04:05"))
+				fmt.Printf("[weft] applied at %s\n", time.Now().Format("15:04:05"))
 			})
 			if err != nil {
-				return fmt.Errorf("starting watcher: %w", err)
+				return fmt.Errorf("starting source watcher: %w", err)
+			}
+
+			// Target watcher: detect harness writes to the target directory.
+			var stopTarget func()
+			target := p.ActiveTarget
+			if target == "" && (&harness.ClaudeCode{}).Detect() {
+				target = "claude-code"
+			}
+			if target != "" {
+				targetRoot := harnessTargetRoot(cfgDir, target)
+				if targetRoot != "" {
+					stopTarget, err = watch.DebouncedTarget(
+						[]string{targetRoot}, 300*time.Millisecond, &guard,
+						func(changes []watch.TargetChange) {
+							for _, c := range changes {
+								fmt.Printf("\n[weft] target file changed: %s\n", c.Rel)
+							}
+						},
+					)
+					if err != nil {
+						stopSrc()
+						return fmt.Errorf("starting target watcher: %w", err)
+					}
+				}
 			}
 
 			sig := make(chan os.Signal, 1)
 			signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
 			<-sig
-			stop()
+			stopSrc()
+			if stopTarget != nil {
+				stopTarget()
+			}
 			fmt.Println("\nWatcher stopped.")
 		}
 

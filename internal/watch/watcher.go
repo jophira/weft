@@ -94,6 +94,120 @@ func Debounced(roots []string, debounce time.Duration, fn func()) (stop func(), 
 	}, nil
 }
 
+// TargetChange describes a file that was modified externally inside a target directory.
+type TargetChange struct {
+	Root string // absolute path of the target root
+	Rel  string // file path relative to Root
+}
+
+// DebouncedTarget watches dirs for file changes not caused by weft apply writes.
+// Events that occur while guard.Active() is true are silently skipped (weft's
+// own target writes). After debounce elapses with no further unguarded events,
+// fn is called with the accumulated (deduplicated) set of changed paths.
+//
+// Returns a stop function that shuts down the watcher.
+func DebouncedTarget(roots []string, debounce time.Duration, guard *ApplyGuard, fn func([]TargetChange)) (stop func(), err error) {
+	w, err := fsnotify.NewWatcher()
+	if err != nil {
+		return nil, fmt.Errorf("creating target watcher: %w", err)
+	}
+
+	watched := 0
+	for _, root := range roots {
+		n, addErr := addRecursive(w, root, maxWatchDirs-watched)
+		if addErr != nil {
+			_ = w.Close()
+			return nil, addErr
+		}
+		watched += n
+	}
+	if watched == 0 {
+		_ = w.Close()
+		return nil, fmt.Errorf("no watchable target directories found")
+	}
+
+	pending := map[string]TargetChange{} // key = "root:rel" for deduplication
+	done := make(chan struct{})
+	go func() {
+		defer func() { _ = w.Close() }()
+		timer := time.NewTimer(0)
+		if !timer.Stop() {
+			<-timer.C
+		}
+		for {
+			select {
+			case <-done:
+				timer.Stop()
+				return
+			case ev, ok := <-w.Events:
+				if !ok {
+					return
+				}
+				// Track new directories so we watch them too.
+				if ev.Has(fsnotify.Create) {
+					if info, statErr := os.Stat(ev.Name); statErr == nil && info.IsDir() {
+						_, _ = addRecursive(w, ev.Name, maxWatchDirs)
+						continue
+					}
+				}
+				// Ignore events caused by weft's own apply writes.
+				if guard.Active() {
+					continue
+				}
+				root, rel, found := targetRoot(roots, ev.Name)
+				if !found {
+					continue
+				}
+				pending[root+":"+rel] = TargetChange{Root: root, Rel: rel}
+				if !timer.Stop() {
+					select {
+					case <-timer.C:
+					default:
+					}
+				}
+				timer.Reset(debounce)
+			case _, ok := <-w.Errors:
+				if !ok {
+					return
+				}
+			case <-timer.C:
+				if len(pending) > 0 {
+					changes := make([]TargetChange, 0, len(pending))
+					for _, c := range pending {
+						changes = append(changes, c)
+					}
+					pending = map[string]TargetChange{}
+					fn(changes)
+				}
+			}
+		}
+	}()
+
+	once := make(chan struct{})
+	return func() {
+		select {
+		case <-once:
+		default:
+			close(once)
+			close(done)
+		}
+	}, nil
+}
+
+// targetRoot finds which root contains absPath and returns the root and relative path.
+// Returns ok=false when absPath is not under any of the watched roots.
+func targetRoot(roots []string, absPath string) (root, rel string, ok bool) {
+	for _, r := range roots {
+		if absPath == r || strings.HasPrefix(absPath, r+string(filepath.Separator)) {
+			rel, err := filepath.Rel(r, absPath)
+			if err == nil {
+				return r, rel, true
+			}
+		}
+	}
+	return "", "", false
+}
+
 // addRecursive walks root and registers every non-hidden directory with w up
 // to limit directories. Returns an error if limit is exceeded.
 func addRecursive(w *fsnotify.Watcher, root string, limit int) (int, error) {
