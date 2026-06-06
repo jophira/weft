@@ -2,6 +2,7 @@ package harness
 
 import (
 	"fmt"
+	"io"
 	"io/fs"
 	"maps"
 	"os"
@@ -17,6 +18,16 @@ type ApplyCtx struct {
 	ProfileName       string
 	CfgDir            string
 	SourceAttribution map[string][]string // rel path -> ordered source names (merged files only)
+	Out               io.Writer           // destination for per-file apply logs; nil → io.Discard
+}
+
+// out returns the writer from ctx, defaulting to io.Discard when unset.
+// cf. Java: Optional.orElse(OutputStream.nullOutputStream())
+func applyOut(ctx ApplyCtx) io.Writer {
+	if ctx.Out != nil {
+		return ctx.Out
+	}
+	return io.Discard
 }
 
 type conflictFile struct {
@@ -24,83 +35,126 @@ type conflictFile struct {
 	abs string // absolute path on disk
 }
 
-// applyWithManifest is the manifest-aware replacement for copyWithRename.
+// fileEntry records what needs to happen for one staged file.
+type fileEntry struct {
+	srcPath    string // absolute path in staged dir
+	dst        string // rel path in target (post-rename)
+	stagedHash string
+	skip       bool // content identical — no write needed
+	conflict   bool // externally modified — back up before writing
+}
+
+// applyWithManifest is the manifest-aware apply for all harnesses that copy a
+// directory tree to a target root.
 //
-// For each file that would be written to targetRoot:
-//   - File does not exist: write silently.
-//   - File exists, hash matches manifest (weft owns it): overwrite silently.
-//   - File exists, hash differs (externally modified): back up then overwrite.
+// For each staged file:
+//   - Not on disk yet (new): write, log "✓ wrote".
+//   - Owned by weft, content unchanged (skip): no write, log "· skip".
+//   - Owned by weft, content changed (update): write, log "✓ wrote".
+//   - Externally modified (conflict): back up, then write, log "! backed up".
 //
-// All conflicts are backed up together in one timestamped directory before any
-// write occurs. The manifest is updated with new hashes after a successful apply.
+// All conflicts are backed up before any writes occur. The manifest is updated
+// with new hashes after a successful apply.
 func applyWithManifest(stagedRoot, targetRoot, harnessName string, ctx ApplyCtx, renames map[string]string) error {
+	out := applyOut(ctx)
+
 	m, err := manifest.Load(ctx.CfgDir, harnessName)
 	if err != nil {
 		return fmt.Errorf("loading manifest: %w", err)
 	}
 
+	var entries []fileEntry
 	var conflicts []conflictFile
-	newFiles := map[string]string{} // dest rel path → sha256 of staged content
+	newHashes := map[string]string{} // dst rel → staged sha256
 
 	err = filepath.WalkDir(stagedRoot, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return err
 		}
-		rel, err := filepath.Rel(stagedRoot, path)
-		if err != nil {
-			return err
+		rel, relErr := filepath.Rel(stagedRoot, path)
+		if relErr != nil {
+			return relErr
 		}
 		dst := rel
 		if renamed, ok := renames[rel]; ok {
 			dst = renamed
 		}
-		stagedHash, err := manifest.HashFile(path)
-		if err != nil {
-			return err
+		stagedHash, hashErr := manifest.HashFile(path)
+		if hashErr != nil {
+			return hashErr
 		}
-		newFiles[dst] = stagedHash
+		newHashes[dst] = stagedHash
+
+		fe := fileEntry{srcPath: path, dst: dst, stagedHash: stagedHash}
 
 		fullDst := filepath.Join(targetRoot, dst)
 		existing, readErr := os.ReadFile(fullDst)
-		if os.IsNotExist(readErr) {
-			return nil
-		}
-		if readErr != nil {
+		switch {
+		case os.IsNotExist(readErr):
+			// new file — nothing on disk yet
+		case readErr != nil:
 			return fmt.Errorf("reading %s: %w", fullDst, readErr)
+		default:
+			existingHash := manifest.HashBytes(existing)
+			if knownHash, owned := m.Files[dst]; owned && existingHash == knownHash {
+				// weft owns this file and nothing changed on disk externally
+				if stagedHash == knownHash {
+					fe.skip = true // staged content identical to what we last wrote
+				}
+				// else: weft-owned update — write new content
+			} else {
+				// not owned or externally modified
+				fe.conflict = true
+				conflicts = append(conflicts, conflictFile{rel: dst, abs: fullDst})
+			}
 		}
-		if knownHash, owned := m.Files[dst]; owned && manifest.HashBytes(existing) == knownHash {
-			return nil // weft owns it and it hasn't been touched externally
-		}
-		conflicts = append(conflicts, conflictFile{rel: dst, abs: fullDst})
+		entries = append(entries, fe)
 		return nil
 	})
 	if err != nil {
 		return err
 	}
 
+	// Back up all conflicts before any write so the user never sees partial state.
 	if len(conflicts) > 0 {
-		backupDir, err := backupConflicts(conflicts, harnessName, ctx.CfgDir)
-		if err != nil {
-			return err
+		backupDir, bErr := backupConflicts(conflicts, harnessName, ctx.CfgDir)
+		if bErr != nil {
+			return bErr
 		}
-		fmt.Printf("  ! %d file(s) externally modified — backed up to %s\n",
+		fmt.Fprintf(out, "  ! %d file(s) externally modified — backed up to %s\n",
 			len(conflicts), locate.Tilde(backupDir))
 		for _, c := range conflicts {
-			fmt.Printf("      %s\n", c.rel)
+			fmt.Fprintf(out, "      %s\n", c.rel)
 		}
 	}
 
-	if err := copyWithRename(stagedRoot, targetRoot, renames); err != nil {
-		return err
+	// Write each file; skip unchanged ones.
+	for _, fe := range entries {
+		if fe.skip {
+			fmt.Fprintf(out, "  · skip   %s\n", fe.dst)
+			continue
+		}
+		fullDst := filepath.Join(targetRoot, fe.dst)
+		if mkErr := os.MkdirAll(filepath.Dir(fullDst), 0o755); mkErr != nil {
+			return fmt.Errorf("creating parent dir for %s: %w", fe.dst, mkErr)
+		}
+		data, rdErr := os.ReadFile(fe.srcPath)
+		if rdErr != nil {
+			return fmt.Errorf("reading staged %s: %w", fe.dst, rdErr)
+		}
+		if wErr := os.WriteFile(fullDst, data, 0o644); wErr != nil { //nolint:gosec // path derived from harness config
+			return fmt.Errorf("writing %s: %w", fe.dst, wErr)
+		}
+		fmt.Fprintf(out, "  ✓ wrote  %s\n", fe.dst)
 	}
 
 	m.Harness = harnessName
 	m.Profile = ctx.ProfileName
 	m.TargetRoot = targetRoot
 	m.AppliedAt = time.Now()
-	maps.Copy(m.Files, newFiles)
+	maps.Copy(m.Files, newHashes)
 	for rel, sources := range ctx.SourceAttribution {
-		if _, ok := newFiles[rel]; ok {
+		if _, ok := newHashes[rel]; ok {
 			if m.SourceFiles == nil {
 				m.SourceFiles = make(map[string][]string)
 			}
@@ -114,35 +168,53 @@ func applyWithManifest(stagedRoot, targetRoot, harnessName string, ctx ApplyCtx,
 // a single computed file (e.g. Cursor prepends frontmatter before writing).
 // content is the final bytes written to absPath; rel is its path relative to the parent dir.
 func trackAndWriteFile(absPath, rel, harnessName string, content []byte, ctx ApplyCtx) error {
+	out := applyOut(ctx)
+
 	m, err := manifest.Load(ctx.CfgDir, harnessName)
 	if err != nil {
 		return fmt.Errorf("loading manifest: %w", err)
 	}
 
+	contentHash := manifest.HashBytes(content)
+
 	existing, readErr := os.ReadFile(absPath)
-	if readErr != nil && !os.IsNotExist(readErr) {
+	switch {
+	case os.IsNotExist(readErr):
+		// new file — fall through to write
+
+	case readErr != nil:
 		return fmt.Errorf("reading %s: %w", absPath, readErr)
-	}
-	if readErr == nil {
-		if knownHash, owned := m.Files[rel]; !owned || manifest.HashBytes(existing) != knownHash {
-			backupDir, err := backupConflicts([]conflictFile{{rel: rel, abs: absPath}}, harnessName, ctx.CfgDir)
-			if err != nil {
-				return err
+
+	default:
+		existingHash := manifest.HashBytes(existing)
+		if knownHash, owned := m.Files[rel]; owned && existingHash == knownHash {
+			if contentHash == knownHash {
+				// content identical — skip write
+				fmt.Fprintf(out, "  · skip   %s\n", rel)
+				return nil
 			}
-			fmt.Printf("  ! 1 file externally modified — backed up to %s\n", locate.Tilde(backupDir))
-			fmt.Printf("      %s\n", rel)
+			// weft-owned update — fall through to write
+		} else {
+			// externally modified — back up first
+			backupDir, bErr := backupConflicts([]conflictFile{{rel: rel, abs: absPath}}, harnessName, ctx.CfgDir)
+			if bErr != nil {
+				return bErr
+			}
+			fmt.Fprintf(out, "  ! 1 file(s) externally modified — backed up to %s\n", locate.Tilde(backupDir))
+			fmt.Fprintf(out, "      %s\n", rel)
 		}
 	}
 
 	if err := os.WriteFile(absPath, content, 0o644); err != nil { //nolint:gosec // path is resolved from harness config, not user input
 		return fmt.Errorf("writing %s: %w", absPath, err)
 	}
+	fmt.Fprintf(out, "  ✓ wrote  %s\n", rel)
 
 	m.Harness = harnessName
 	m.Profile = ctx.ProfileName
 	m.TargetRoot = filepath.Dir(absPath)
 	m.AppliedAt = time.Now()
-	m.Files[rel] = manifest.HashBytes(content)
+	m.Files[rel] = contentHash
 	return manifest.Save(ctx.CfgDir, m)
 }
 

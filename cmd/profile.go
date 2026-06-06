@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -314,10 +315,15 @@ func mergeAndApply(p *profile.Profile, roots []string, srcs []source.Source, cfg
 	if !quiet {
 		fmt.Printf("Applying to %s...\n", target)
 	}
+	var applyOut io.Writer
+	if !quiet {
+		applyOut = os.Stdout
+	}
 	ctx := harness.ApplyCtx{
 		ProfileName:       p.Name,
 		CfgDir:            cfgDir,
 		SourceAttribution: sourceAttribution(rootAttribution, srcs),
+		Out:               applyOut,
 	}
 	if err := h.Apply(stagedDir, ctx); err != nil {
 		return fmt.Errorf("applying to %s: %w", target, err)
