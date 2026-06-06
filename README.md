@@ -31,6 +31,24 @@ git clone https://github.com/jophira/weft.git && cd weft
 make build        # binary at ./bin/weft
 ```
 
+## Development
+
+| Command | What it does |
+|---|---|
+| `make build` | Compile binary to `./bin/weft` |
+| `make dev` | Run [`air`](https://github.com/air-verse/air) — rebuilds and restarts the binary whenever a `.go` file changes. For hacking on weft itself. |
+| `make test` | Run the test suite (`go test ./...`) |
+| `make lint` | Run `golangci-lint` |
+
+> **`make dev` is not the same as watch mode.**  
+> `make dev` is for *developing weft* — it rebuilds the binary on Go source changes.
+> To use weft's write-back / live-reload feature, run `weft profile use <profile> --watch`
+> in a separate terminal. If you want both at once (editing Go source while testing watch
+> mode), pass the args through air:
+> ```bash
+> make dev ARGS="profile use tech --watch"
+> ```
+
 ## Quick start
 
 ```bash
