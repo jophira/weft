@@ -316,6 +316,16 @@ func mergeAndApply(p *profile.Profile, roots []string, srcs []source.Source, cfg
 	if !ok {
 		return fmt.Errorf("unknown harness %q — run 'weft target list' to see supported harnesses", target)
 	}
+
+	// On the initial (non-quiet) apply, write back any externally-modified target
+	// files to their source before overwriting them. This preserves edits made
+	// directly to the target (e.g. ~/.claude/CLAUDE.md) since the last apply.
+	if !quiet {
+		if wbErr := startupWriteBack(stagedDir, target, cfgDir, p, srcs); wbErr != nil {
+			fmt.Fprintf(os.Stderr, "[weft] startup write-back warning: %v\n", wbErr)
+		}
+	}
+
 	if !quiet {
 		fmt.Printf("Applying to %s...\n", target)
 	}
