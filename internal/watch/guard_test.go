@@ -14,17 +14,12 @@ func TestApplyGuard_InitiallyInactive(t *testing.T) {
 	}
 }
 
-func TestApplyGuard_LockActivates(t *testing.T) {
+func TestApplyGuard_LockUnlock(t *testing.T) {
 	var g watch.ApplyGuard
 	g.Lock()
 	if !g.Active() {
 		t.Error("guard should be active after Lock")
 	}
-}
-
-func TestApplyGuard_UnlockDeactivates(t *testing.T) {
-	var g watch.ApplyGuard
-	g.Lock()
 	g.Unlock()
 	if g.Active() {
 		t.Error("guard should be inactive after Unlock")
