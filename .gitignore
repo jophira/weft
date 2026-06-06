@@ -23,6 +23,10 @@ vendor/
 *.pem
 *.key
 
+# ── Claude Code (local / user-specific) ──────────────────────────────────────
+.claude/settings.local.json
+.claude/worktrees/
+
 # ── IDE and editors ───────────────────────────────────────────────────────────
 .idea/
 *.iml
