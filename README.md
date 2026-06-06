@@ -125,6 +125,43 @@ weft target backups claude-code                   # list all available backups
 | `doctor` | Health check — shows discovered harnesses and config issues |
 | `version` | Print version, commit, and build date |
 
+## MCP server
+
+`weft mcp serve` starts a [Model Context Protocol](https://modelcontextprotocol.io) server on stdio,
+letting any MCP-aware agent (Claude Code, Cursor, Codex, …) introspect and control weft at runtime.
+
+**Wire it into Claude Code** (`.claude/settings.json` or `~/.claude/settings.json`):
+
+```json
+{
+  "mcpServers": {
+    "weft": { "command": "weft", "args": ["mcp", "serve"] }
+  }
+}
+```
+
+### Tools
+
+| Tool | What it does |
+|---|---|
+| `weft_profile_list` | List all profiles with sources, targets, and active status |
+| `weft_profile_inspect` | Full detail for one profile |
+| `weft_source_list` | List sources with basic git state |
+| `weft_source_status` | Detailed git status for one source |
+| `weft_source_sync` | Pull from remote (one source or all) |
+| `weft_source_push` | Stage → commit → push; `message` param is required |
+| `weft_doctor` | Health check: config dir, detected harnesses, target health |
+
+### Resources
+
+| URI | Content |
+|---|---|
+| `weft://profile/active` | Merged instruction text from the active profile |
+| `weft://source/{name}/instructions` | Raw instruction content from a named source |
+| `weft://harness/{name}/current` | What weft last wrote to a harness on disk |
+
+Resources can be included in an agent's context at session start so it knows exactly which rules govern it. See the [MCP guide](https://github.com/jophira/weft/wiki) for end-to-end workflow examples.
+
 ## Supported harnesses
 
 | Harness | Written as |
