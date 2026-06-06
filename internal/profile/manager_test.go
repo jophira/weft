@@ -178,3 +178,76 @@ func TestList_preservesSources(t *testing.T) {
 		t.Errorf("Sources len = %d, want 3", len(profiles[0].Sources))
 	}
 }
+
+// ── WriteBack ─────────────────────────────────────────────────────────────────
+
+func TestCreate_writeBackOmitted(t *testing.T) {
+	m := newMgr(t)
+	if err := m.Create(fixture("hybrid")); err != nil {
+		t.Fatalf("Create without write_back: %v", err)
+	}
+}
+
+func TestCreate_writeBackDefaultValid(t *testing.T) {
+	m := newMgr(t)
+	p := fixture("hybrid") // sources: work, personal
+	p.WriteBack = profile.WriteBack{Default: "work"}
+	if err := m.Create(p); err != nil {
+		t.Fatalf("Create with valid write_back.default: %v", err)
+	}
+}
+
+func TestCreate_writeBackDefaultInvalid(t *testing.T) {
+	m := newMgr(t)
+	p := fixture("hybrid")
+	p.WriteBack = profile.WriteBack{Default: "unknown-source"}
+	if err := m.Create(p); err == nil {
+		t.Fatal("expected error for write_back.default not in sources, got nil")
+	}
+}
+
+func TestCreate_writeBackOverrideValid(t *testing.T) {
+	m := newMgr(t)
+	p := fixture("hybrid") // sources: work, personal
+	p.WriteBack = profile.WriteBack{
+		Default:   "work",
+		Overrides: map[string]string{"CLAUDE.md": "personal"},
+	}
+	if err := m.Create(p); err != nil {
+		t.Fatalf("Create with valid write_back.overrides: %v", err)
+	}
+}
+
+func TestCreate_writeBackOverrideInvalid(t *testing.T) {
+	m := newMgr(t)
+	p := fixture("hybrid")
+	p.WriteBack = profile.WriteBack{
+		Default:   "work",
+		Overrides: map[string]string{"CLAUDE.md": "ghost-source"},
+	}
+	if err := m.Create(p); err == nil {
+		t.Fatal("expected error for write_back.overrides value not in sources, got nil")
+	}
+}
+
+func TestCreate_writeBackRoundTrip(t *testing.T) {
+	m := newMgr(t)
+	p := fixture("hybrid")
+	p.WriteBack = profile.WriteBack{
+		Default:   "personal",
+		Overrides: map[string]string{"CLAUDE.md": "work"},
+	}
+	if err := m.Create(p); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	got, err := m.Get("hybrid")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.WriteBack.Default != "personal" {
+		t.Errorf("WriteBack.Default = %q, want %q", got.WriteBack.Default, "personal")
+	}
+	if got.WriteBack.Overrides["CLAUDE.md"] != "work" {
+		t.Errorf("WriteBack.Overrides[CLAUDE.md] = %q, want %q", got.WriteBack.Overrides["CLAUDE.md"], "work")
+	}
+}

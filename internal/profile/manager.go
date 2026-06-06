@@ -41,6 +41,9 @@ func (m *FileManager) Create(p Profile) error {
 	if !isValidOverlay(p.Overlay) {
 		return fmt.Errorf("invalid overlay %q: must be one of cascade, merge, last-wins", p.Overlay)
 	}
+	if err := validateWriteBack(p.WriteBack, p.Sources); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(m.dir, 0o755); err != nil {
 		return fmt.Errorf("creating profiles directory: %w", err)
 	}
@@ -117,6 +120,22 @@ func (m *FileManager) Activate(name string) error {
 
 func (m *FileManager) filePath(name string) string {
 	return filepath.Join(m.dir, name+".yaml")
+}
+
+func validateWriteBack(wb WriteBack, sources []string) error {
+	srcSet := make(map[string]bool, len(sources))
+	for _, s := range sources {
+		srcSet[s] = true
+	}
+	if wb.Default != "" && !srcSet[wb.Default] {
+		return fmt.Errorf("write_back.default %q is not in the profile's sources", wb.Default)
+	}
+	for file, src := range wb.Overrides {
+		if !srcSet[src] {
+			return fmt.Errorf("write_back.overrides[%q] = %q is not in the profile's sources", file, src)
+		}
+	}
+	return nil
 }
 
 func isValidOverlay(o Overlay) bool {
