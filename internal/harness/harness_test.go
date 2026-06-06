@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/jophira/weft/internal/manifest"
 )
 
 // testCtx returns an ApplyCtx backed by a temp directory.
@@ -382,5 +384,57 @@ func TestClaudeCodeApply_UntouchedFilesNotRemoved(t *testing.T) {
 
 	if got := readFile(t, filepath.Join(home, ".claude", "todos.md")); got != "my todos" {
 		t.Errorf("todos.md = %q, want %q (should not be removed)", got, "my todos")
+	}
+}
+
+// ── Source attribution in manifest ────────────────────────────────────────────
+
+func TestApplyWithManifest_SourceAttribution_Persisted(t *testing.T) {
+	staged := t.TempDir()
+	write(t, filepath.Join(staged, "CLAUDE.md"), "merged rules")
+
+	target := t.TempDir()
+	ctx := ApplyCtx{
+		ProfileName: "hybrid",
+		CfgDir:      t.TempDir(),
+		SourceAttribution: map[string][]string{
+			"CLAUDE.md": {"work", "personal"},
+		},
+	}
+
+	if err := applyWithManifest(staged, target, "claude-code", ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	m, err := manifest.Load(ctx.CfgDir, "claude-code")
+	if err != nil {
+		t.Fatalf("loading manifest: %v", err)
+	}
+	srcs, ok := m.SourceFiles["CLAUDE.md"]
+	if !ok {
+		t.Fatal("manifest.SourceFiles[CLAUDE.md] missing after apply with attribution")
+	}
+	if len(srcs) != 2 || srcs[0] != "work" || srcs[1] != "personal" {
+		t.Errorf("SourceFiles[CLAUDE.md] = %v, want [work personal]", srcs)
+	}
+}
+
+func TestApplyWithManifest_NoSourceAttribution_NoSourceFiles(t *testing.T) {
+	staged := t.TempDir()
+	write(t, filepath.Join(staged, "CLAUDE.md"), "single-source rules")
+
+	target := t.TempDir()
+	ctx := testCtx(t)
+
+	if err := applyWithManifest(staged, target, "claude-code", ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	m, err := manifest.Load(ctx.CfgDir, "claude-code")
+	if err != nil {
+		t.Fatalf("loading manifest: %v", err)
+	}
+	if len(m.SourceFiles) != 0 {
+		t.Errorf("expected no SourceFiles for single-source apply, got %v", m.SourceFiles)
 	}
 }

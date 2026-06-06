@@ -53,10 +53,12 @@ func (m *Merger) WithAssembler(fn Assembler) *Merger {
 
 // MergeRoots walks every root, collects unique relative file paths, folds each
 // file through the strategy (left to right, so later roots act as the overlay),
-// and writes results to outputDir. Returns a sorted manifest of written paths.
+// and writes results to outputDir. Returns a sorted manifest of written paths
+// and an attribution map (rel path -> contributing root indices) for files
+// assembled from more than one root.
 //
 // Hidden directories (e.g. .git) and hidden files are skipped.
-func (m *Merger) MergeRoots(roots []string, outputDir string) ([]string, error) {
+func (m *Merger) MergeRoots(roots []string, outputDir string) ([]string, map[string][]int, error) {
 	// Collect the union of relative file paths across all roots.
 	seen := map[string]struct{}{}
 	// When an assembler is configured, ensure the instruction file is always
@@ -67,63 +69,70 @@ func (m *Merger) MergeRoots(roots []string, outputDir string) ([]string, error) 
 	}
 	for _, root := range roots {
 		if err := collectPaths(root, seen); err != nil {
-			return nil, fmt.Errorf("scanning %s: %w", root, err)
+			return nil, nil, fmt.Errorf("scanning %s: %w", root, err)
 		}
 	}
 
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
-		return nil, fmt.Errorf("creating output directory: %w", err)
+		return nil, nil, fmt.Errorf("creating output directory: %w", err)
 	}
 
 	var manifest []string
+	attribution := map[string][]int{} // rel -> contributing root indices (populated when >1 root contributes)
 	for rel := range seen {
 		if m.filter != nil && !m.filter(rel) {
 			continue
 		}
-		merged, err := m.foldFile(rel, roots)
+		merged, contributors, err := m.foldFile(rel, roots)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if merged == nil {
 			continue
 		}
 		dst := filepath.Join(outputDir, rel)
 		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-			return nil, fmt.Errorf("creating parent dir for %s: %w", rel, err)
+			return nil, nil, fmt.Errorf("creating parent dir for %s: %w", rel, err)
 		}
 		if err := os.WriteFile(dst, merged, 0o644); err != nil {
-			return nil, fmt.Errorf("writing %s: %w", rel, err)
+			return nil, nil, fmt.Errorf("writing %s: %w", rel, err)
 		}
 		manifest = append(manifest, rel)
+		if len(contributors) > 1 {
+			attribution[rel] = contributors
+		}
 	}
 	sort.Strings(manifest)
-	return manifest, nil
+	return manifest, attribution, nil
 }
 
 // foldFile reads rel from each root and folds the contents using the strategy.
 // Roots that don't have the file are skipped. Returns nil if no root has it.
 // When an Assembler is configured and rel is the instruction file, the assembler
-// is called instead of reading from disk.
-func (m *Merger) foldFile(rel string, roots []string) ([]byte, error) {
+// is called instead of reading from disk. The returned []int is the set of root
+// indices that contributed content (in order).
+func (m *Merger) foldFile(rel string, roots []string) ([]byte, []int, error) {
 	var acc []byte
-	for _, root := range roots {
+	var contributors []int
+	for i, root := range roots {
 		data, err := m.readContent(rel, root)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if data == nil {
 			continue
 		}
+		contributors = append(contributors, i)
 		if acc == nil {
 			acc = data
 			continue
 		}
 		acc, err = m.strategy(acc, data)
 		if err != nil {
-			return nil, fmt.Errorf("merging %s: %w", rel, err)
+			return nil, nil, fmt.Errorf("merging %s: %w", rel, err)
 		}
 	}
-	return acc, nil
+	return acc, contributors, nil
 }
 
 // readContent returns the content for rel from root. When an assembler is set
