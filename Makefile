@@ -16,7 +16,18 @@ dev:
 		echo "Installing air..."; \
 		go install github.com/air-verse/air@latest; \
 	fi
-	air -- $(ARGS)
+	@_ARGS="$(ARGS)"; \
+	if [ -z "$$_ARGS" ]; then \
+		_PROFILE=$$(grep '^active_profile:' ~/.config/weft/config.yaml 2>/dev/null | awk '{print $$2}'); \
+		if [ -z "$$_PROFILE" ]; then \
+			echo "error: no active profile set — run 'weft profile use <name>' first"; \
+			echo "  or: make dev ARGS=\"profile use <name>\""; \
+			exit 1; \
+		fi; \
+		echo "[dev] using active profile: $$_PROFILE"; \
+		_ARGS="profile use $$_PROFILE"; \
+	fi; \
+	air -- $$_ARGS
 
 test:
 	$(GO) test ./...
