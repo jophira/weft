@@ -112,6 +112,62 @@ func TestHashFile_MissingFile(t *testing.T) {
 	}
 }
 
+// ── SourceFiles ───────────────────────────────────────────────────────────────
+
+func TestSaveAndLoad_SourceFilesRoundTrip(t *testing.T) {
+	cfgDir := t.TempDir()
+	m := &Manifest{
+		Harness:    "claude-code",
+		Profile:    "hybrid",
+		TargetRoot: "/home/user/.claude",
+		AppliedAt:  time.Now().UTC().Truncate(time.Second),
+		Files: map[string]string{
+			"CLAUDE.md": "sha256:abc",
+		},
+		SourceFiles: map[string][]string{
+			"CLAUDE.md": {"work", "personal"},
+		},
+	}
+	if err := Save(cfgDir, m); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load(cfgDir, "claude-code")
+	if err != nil {
+		t.Fatal(err)
+	}
+	srcs, ok := got.SourceFiles["CLAUDE.md"]
+	if !ok {
+		t.Fatal("SourceFiles[CLAUDE.md] missing after round-trip")
+	}
+	if len(srcs) != 2 || srcs[0] != "work" || srcs[1] != "personal" {
+		t.Errorf("SourceFiles[CLAUDE.md] = %v, want [work personal]", srcs)
+	}
+}
+
+func TestLoad_OldManifestWithoutSourceFiles_LoadsClean(t *testing.T) {
+	cfgDir := t.TempDir()
+	// Write a manifest JSON that pre-dates the source_files field.
+	raw := `{"harness":"claude-code","profile":"work","target_root":"/home/user/.claude","applied_at":"2024-01-01T00:00:00Z","files":{"CLAUDE.md":"sha256:abc"}}`
+	p := filepath.Join(cfgDir, "manifests", "claude-code.json")
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, []byte(raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := Load(cfgDir, "claude-code")
+	if err != nil {
+		t.Fatalf("Load failed on old manifest: %v", err)
+	}
+	if got.SourceFiles != nil {
+		t.Errorf("expected nil SourceFiles for old manifest, got %v", got.SourceFiles)
+	}
+	if got.Files["CLAUDE.md"] != "sha256:abc" {
+		t.Errorf("Files[CLAUDE.md] = %q, want sha256:abc", got.Files["CLAUDE.md"])
+	}
+}
+
 func TestLoad_IsolatedByHarnessName(t *testing.T) {
 	cfgDir := t.TempDir()
 

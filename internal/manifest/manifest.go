@@ -16,8 +16,8 @@ type Manifest struct {
 	Profile     string              `json:"profile"`
 	TargetRoot  string              `json:"target_root"`
 	AppliedAt   time.Time           `json:"applied_at"`
-	Files       map[string]string   `json:"files"`                  // rel path → "sha256:<hex>"
-	SourceFiles map[string][]string `json:"source_files,omitempty"` // rel path → ordered source names (AppendStrategy files only)
+	Files       map[string]string   `json:"files"`                  // rel path -> "sha256:<hex>"
+	SourceFiles map[string][]string `json:"source_files,omitempty"` // rel path -> ordered source names (AppendStrategy files only)
 }
 
 func manifestPath(cfgDir, harnessName string) string {

@@ -14,8 +14,9 @@ import (
 
 // ApplyCtx carries per-apply metadata needed for manifest tracking and backups.
 type ApplyCtx struct {
-	ProfileName string
-	CfgDir      string
+	ProfileName       string
+	CfgDir            string
+	SourceAttribution map[string][]string // rel path -> ordered source names (merged files only)
 }
 
 type conflictFile struct {
@@ -98,6 +99,14 @@ func applyWithManifest(stagedRoot, targetRoot, harnessName string, ctx ApplyCtx,
 	m.TargetRoot = targetRoot
 	m.AppliedAt = time.Now()
 	maps.Copy(m.Files, newFiles)
+	for rel, sources := range ctx.SourceAttribution {
+		if _, ok := newFiles[rel]; ok {
+			if m.SourceFiles == nil {
+				m.SourceFiles = make(map[string][]string)
+			}
+			m.SourceFiles[rel] = sources
+		}
+	}
 	return manifest.Save(ctx.CfgDir, m)
 }
 

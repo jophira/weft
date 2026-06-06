@@ -18,6 +18,7 @@ import (
 	"github.com/jophira/weft/internal/config"
 	"github.com/jophira/weft/internal/diff"
 	"github.com/jophira/weft/internal/harness"
+	"github.com/jophira/weft/internal/manifest"
 	"github.com/jophira/weft/internal/merge"
 	"github.com/jophira/weft/internal/profile"
 	"github.com/jophira/weft/internal/source"
@@ -131,16 +132,34 @@ func resolveProfileRoots(name string) (*profile.Profile, []string, []source.Sour
 	return p, roots, srcs, nil
 }
 
-// stageProfile merges the profile's sources into outputDir and returns the
-// manifest. It does not apply the result to any harness.
-func stageProfile(p *profile.Profile, roots []string, srcs []source.Source, outputDir string) ([]string, error) {
+// stageProfile merges the profile's sources into outputDir. Returns the sorted
+// list of written paths and an attribution map (rel -> contributing root
+// indices) for files assembled from more than one root.
+func stageProfile(p *profile.Profile, roots []string, srcs []source.Source, outputDir string) ([]string, map[string][]int, error) {
 	if err := os.RemoveAll(outputDir); err != nil {
-		return nil, fmt.Errorf("clearing output dir: %w", err)
+		return nil, nil, fmt.Errorf("clearing output dir: %w", err)
 	}
 	return merge.New(p.Overlay).
 		WithFilter(managedFilter(srcs)).
 		WithAssembler(buildAssembler(roots, srcs)).
 		MergeRoots(roots, outputDir)
+}
+
+// sourceAttribution converts root-index attribution from stageProfile into
+// source-name attribution suitable for storing in the manifest.
+func sourceAttribution(attribution map[string][]int, srcs []source.Source) map[string][]string {
+	if len(attribution) == 0 {
+		return nil
+	}
+	result := make(map[string][]string, len(attribution))
+	for rel, indices := range attribution {
+		names := make([]string, len(indices))
+		for i, idx := range indices {
+			names[i] = srcs[idx].Name
+		}
+		result[rel] = names
+	}
+	return result
 }
 
 // parseSources splits a comma-separated source list and trims whitespace.
@@ -262,12 +281,12 @@ func mergeAndApply(p *profile.Profile, roots []string, srcs []source.Source, cfg
 		fmt.Printf("Merging %d source(s) [%s] with strategy %q...\n",
 			len(roots), strings.Join(p.Sources, ", "), p.Overlay)
 	}
-	manifest, err := stageProfile(p, roots, srcs, stagedDir)
+	staged, rootAttribution, err := stageProfile(p, roots, srcs, stagedDir)
 	if err != nil {
 		return fmt.Errorf("merging sources: %w", err)
 	}
 	if !quiet {
-		fmt.Printf("  %d file(s) merged into staging\n", len(manifest))
+		fmt.Printf("  %d file(s) merged into staging\n", len(staged))
 		printQualityReport(stagedDir, p, roots, srcs)
 	}
 
@@ -295,10 +314,25 @@ func mergeAndApply(p *profile.Profile, roots []string, srcs []source.Source, cfg
 	if !quiet {
 		fmt.Printf("Applying to %s...\n", target)
 	}
-	if err := h.Apply(stagedDir, harness.ApplyCtx{ProfileName: p.Name, CfgDir: cfgDir}); err != nil {
+	ctx := harness.ApplyCtx{
+		ProfileName:       p.Name,
+		CfgDir:            cfgDir,
+		SourceAttribution: sourceAttribution(rootAttribution, srcs),
+	}
+	if err := h.Apply(stagedDir, ctx); err != nil {
 		return fmt.Errorf("applying to %s: %w", target, err)
 	}
 	return nil
+}
+
+// harnessTargetRoot returns the target directory last written by the given
+// harness, as recorded in its manifest. Returns "" when no manifest exists yet.
+func harnessTargetRoot(cfgDir, harnessName string) string {
+	m, err := manifest.Load(cfgDir, harnessName)
+	if err != nil || m.TargetRoot == "" {
+		return ""
+	}
+	return m.TargetRoot
 }
 
 // ── Commands ──────────────────────────────────────────────────────────────────
@@ -484,24 +518,53 @@ file inside any source root changes. Press Ctrl-C to stop watching.`,
 		if profileWatch {
 			fmt.Println("\nWatching for changes... (Ctrl-C to stop)")
 			var guard watch.ApplyGuard
-			stop, err := watch.Debounced(roots, 300*time.Millisecond, func() {
-				fmt.Printf("\n[weft] change detected — re-applying...\n")
+
+			// Source watcher: re-apply when source files change.
+			stopSrc, err := watch.Debounced(roots, 300*time.Millisecond, func() {
+				fmt.Printf("\n[weft] source change detected — re-applying...\n")
 				guard.Lock()
 				defer guard.Unlock()
 				if applyErr := mergeAndApply(p, roots, srcs, cfgDir, true); applyErr != nil {
 					fmt.Fprintf(os.Stderr, "[weft] error: %v\n", applyErr)
 					return
 				}
-				fmt.Printf("[weft] ✓ applied at %s\n", time.Now().Format("15:04:05"))
+				fmt.Printf("[weft] applied at %s\n", time.Now().Format("15:04:05"))
 			})
 			if err != nil {
-				return fmt.Errorf("starting watcher: %w", err)
+				return fmt.Errorf("starting source watcher: %w", err)
+			}
+
+			// Target watcher: detect harness writes to the target directory.
+			var stopTarget func()
+			target := p.ActiveTarget
+			if target == "" && (&harness.ClaudeCode{}).Detect() {
+				target = "claude-code"
+			}
+			if target != "" {
+				targetRoot := harnessTargetRoot(cfgDir, target)
+				if targetRoot != "" {
+					stopTarget, err = watch.DebouncedTarget(
+						[]string{targetRoot}, 300*time.Millisecond, &guard,
+						func(changes []watch.TargetChange) {
+							for _, c := range changes {
+								fmt.Printf("\n[weft] target file changed: %s\n", c.Rel)
+							}
+						},
+					)
+					if err != nil {
+						stopSrc()
+						return fmt.Errorf("starting target watcher: %w", err)
+					}
+				}
 			}
 
 			sig := make(chan os.Signal, 1)
 			signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
 			<-sig
-			stop()
+			stopSrc()
+			if stopTarget != nil {
+				stopTarget()
+			}
 			fmt.Println("\nWatcher stopped.")
 		}
 
@@ -546,10 +609,10 @@ added, or removed file.`,
 		}
 		defer func() { _ = os.RemoveAll(dirB) }()
 
-		if _, err := stageProfile(pA, rootsA, srcsA, dirA); err != nil {
+		if _, _, err := stageProfile(pA, rootsA, srcsA, dirA); err != nil {
 			return fmt.Errorf("staging %q: %w", nameA, err)
 		}
-		if _, err := stageProfile(pB, rootsB, srcsB, dirB); err != nil {
+		if _, _, err := stageProfile(pB, rootsB, srcsB, dirB); err != nil {
 			return fmt.Errorf("staging %q: %w", nameB, err)
 		}
 
@@ -678,7 +741,7 @@ Formats:
 			return fmt.Errorf("creating temp dir: %w", err)
 		}
 		defer func() { _ = os.RemoveAll(tmpDir) }()
-		if _, stageErr := stageProfile(p, roots, srcs, tmpDir); stageErr == nil {
+		if _, _, stageErr := stageProfile(p, roots, srcs, tmpDir); stageErr == nil {
 			fmt.Println()
 			fmt.Println("Quality report:")
 			printQualityReport(tmpDir, p, roots, srcs)
