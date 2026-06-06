@@ -556,10 +556,17 @@ file inside any source root changes. Press Ctrl-C to stop watching.`,
 								performed, wbErr := writeBackSingleSource(m, c, p, srcs)
 								if wbErr != nil {
 									fmt.Fprintf(os.Stderr, "[weft] write-back error for %s: %v\n", c.Rel, wbErr)
-								} else if performed {
+									continue
+								}
+								if !performed && len(m.SourceFiles[c.Rel]) > 1 {
+									performed, wbErr = writeBackMergedSource(m, c, p, srcs)
+									if wbErr != nil {
+										fmt.Fprintf(os.Stderr, "[weft] write-back error for %s: %v\n", c.Rel, wbErr)
+										continue
+									}
+								}
+								if performed {
 									fmt.Printf("[weft] wrote %s back to source (source watcher will re-apply)\n", c.Rel)
-								} else if len(m.SourceFiles[c.Rel]) > 1 {
-									fmt.Printf("[weft] %s: merged-file write-back not yet implemented\n", c.Rel)
 								} else {
 									fmt.Printf("[weft] %s: no owning source found — set write_back.default in profile\n", c.Rel)
 								}
