@@ -185,7 +185,7 @@ var (
 	profileSources string
 	profileOverlay string
 	profileTargets []string
-	profileWatch   bool
+	profileNoWatch bool
 	inspectFormat  string
 )
 
@@ -500,8 +500,9 @@ var profileUseCmd = &cobra.Command{
 	Short: "Activate a profile: merge sources and apply to the target harness",
 	Long: `Activate a profile by merging its sources and writing the result to the harness config.
 
-With --watch the command stays running and re-applies automatically whenever a
-file inside any source root changes. Press Ctrl-C to stop watching.`,
+By default the command stays running and re-applies automatically whenever a
+file inside any source root changes. Pass --no-watch to apply once and exit
+(useful in CI or scripts).`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
@@ -535,8 +536,8 @@ file inside any source root changes. Press Ctrl-C to stop watching.`,
 		}
 		fmt.Printf("  staged: %s\n", stagedDir)
 
-		// 6. Enter watch mode if requested.
-		if profileWatch {
+		// 6. Enter watch mode unless opted out.
+		if !profileNoWatch {
 			fmt.Println("\nWatching for changes... (Ctrl-C to stop)")
 			var guard watch.ApplyGuard
 
@@ -957,7 +958,7 @@ func init() {
 	profileCreateCmd.Flags().StringArrayVar(&profileTargets, "target", nil, "harness to apply to; repeat for multiple (see: weft target list)")
 	_ = profileCreateCmd.MarkFlagRequired("sources")
 
-	profileUseCmd.Flags().BoolVar(&profileWatch, "watch", false, "re-apply automatically when source files change")
+	profileUseCmd.Flags().BoolVar(&profileNoWatch, "no-watch", false, "apply once and exit without watching for changes")
 
 	profileInspectCmd.Flags().StringVar(&inspectFormat, "format", "text", "output format: text|mermaid")
 
