@@ -1,17 +1,25 @@
 package harness
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/jophira/weft/internal/manifest"
 )
 
-// testCtx returns an ApplyCtx backed by a temp directory.
+// testCtx returns an ApplyCtx backed by a temp directory (output discarded).
 func testCtx(t *testing.T) ApplyCtx {
 	t.Helper()
 	return ApplyCtx{ProfileName: "test", CfgDir: t.TempDir()}
+}
+
+// testCtxWithOut returns an ApplyCtx that captures apply log output.
+func testCtxWithOut(t *testing.T, buf *bytes.Buffer) ApplyCtx {
+	t.Helper()
+	return ApplyCtx{ProfileName: "test", CfgDir: t.TempDir(), Out: buf}
 }
 
 // seedStaged creates a minimal staged directory with CLAUDE.md and one extra file.
@@ -230,6 +238,92 @@ func TestApplyWithManifest_SubdirBackupPreservesPath(t *testing.T) {
 	backedUp := readFile(t, filepath.Join(backupsDir, entries[0].Name(), "commands", "backend", "java.md"))
 	if backedUp != "old java rules" {
 		t.Errorf("nested backup = %q, want %q", backedUp, "old java rules")
+	}
+}
+
+func TestApplyWithManifest_UnchangedFile_Skipped(t *testing.T) {
+	staged := t.TempDir()
+	write(t, filepath.Join(staged, "CLAUDE.md"), "rules v1")
+
+	target := t.TempDir()
+	var buf bytes.Buffer
+	ctx := testCtxWithOut(t, &buf)
+
+	// First apply — weft takes ownership.
+	if err := applyWithManifest(staged, target, "claude-code", ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	buf.Reset()
+
+	// Second apply with identical staged content — should be skipped, not rewritten.
+	if err := applyWithManifest(staged, target, "claude-code", ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "· skip") {
+		t.Errorf("expected skip log line, got: %q", out)
+	}
+	if strings.Contains(out, "✓ wrote") {
+		t.Errorf("expected no write for unchanged file, got: %q", out)
+	}
+}
+
+func TestApplyWithManifest_NewFile_LoggedAsWrote(t *testing.T) {
+	staged := t.TempDir()
+	write(t, filepath.Join(staged, "CLAUDE.md"), "rules v1")
+
+	target := t.TempDir()
+	var buf bytes.Buffer
+	ctx := testCtxWithOut(t, &buf)
+
+	if err := applyWithManifest(staged, target, "claude-code", ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "✓ wrote") || !strings.Contains(out, "CLAUDE.md") {
+		t.Errorf("expected '✓ wrote CLAUDE.md' in output, got: %q", out)
+	}
+}
+
+func TestApplyWithManifest_UpdatedFile_LoggedAsWrote(t *testing.T) {
+	staged := t.TempDir()
+	write(t, filepath.Join(staged, "CLAUDE.md"), "rules v1")
+
+	target := t.TempDir()
+	var buf bytes.Buffer
+	ctx := testCtxWithOut(t, &buf)
+
+	if err := applyWithManifest(staged, target, "claude-code", ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	buf.Reset()
+
+	// Update staged content — weft owns the file, so no backup, just a write.
+	write(t, filepath.Join(staged, "CLAUDE.md"), "rules v2")
+	if err := applyWithManifest(staged, target, "claude-code", ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "✓ wrote") || !strings.Contains(out, "CLAUDE.md") {
+		t.Errorf("expected '✓ wrote CLAUDE.md' for owned update, got: %q", out)
+	}
+	if strings.Contains(out, "· skip") {
+		t.Errorf("unexpected skip for changed content: %q", out)
+	}
+}
+
+func TestApplyWithManifest_NilOut_NoOutput(t *testing.T) {
+	// ctx.Out is nil — applyOut should fall back to io.Discard, no panic.
+	staged := t.TempDir()
+	write(t, filepath.Join(staged, "CLAUDE.md"), "rules")
+	target := t.TempDir()
+	ctx := testCtx(t) // Out is nil
+
+	if err := applyWithManifest(staged, target, "claude-code", ctx, nil); err != nil {
+		t.Fatalf("nil Out should not cause error: %v", err)
 	}
 }
 
