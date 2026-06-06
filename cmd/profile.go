@@ -483,8 +483,11 @@ file inside any source root changes. Press Ctrl-C to stop watching.`,
 		// 6. Enter watch mode if requested.
 		if profileWatch {
 			fmt.Println("\nWatching for changes... (Ctrl-C to stop)")
+			var guard watch.ApplyGuard
 			stop, err := watch.Debounced(roots, 300*time.Millisecond, func() {
 				fmt.Printf("\n[weft] change detected — re-applying...\n")
+				guard.Lock()
+				defer guard.Unlock()
 				if applyErr := mergeAndApply(p, roots, srcs, cfgDir, true); applyErr != nil {
 					fmt.Fprintf(os.Stderr, "[weft] error: %v\n", applyErr)
 					return
