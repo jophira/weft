@@ -1,5 +1,7 @@
 version: 2
 
+project_name: weft
+
 before:
   hooks:
     - go mod tidy
@@ -66,8 +68,10 @@ changelog:
     - title: Other
       order: 999
 
-brews:
+homebrew_casks:
   - name: weft
+    binaries:
+      - weft
     repository:
       owner: jophira
       name: homebrew-tap
@@ -78,11 +82,6 @@ brews:
     commit_msg_template: "chore: update weft to {{ .Tag }}"
     homepage: "https://github.com/jophira/weft-releases"
     description: "weft — a tool for managing git source sync and hooks"
-    license: "MIT"
-    install: |
-      bin.install "weft"
-    test: |
-      system "#{bin}/weft", "version"
 
 release:
   github:
