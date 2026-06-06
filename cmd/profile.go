@@ -567,62 +567,61 @@ file inside any source root changes. Pass --no-watch to apply once and exit
 				return fmt.Errorf("starting source watcher: %w", err)
 			}
 
-			// Target watcher: detect harness writes to the target directory.
-			var stopTarget func()
-			resolvedTargets := p.ResolvedTargets()
-			target := ""
-			if len(resolvedTargets) > 0 {
-				target = resolvedTargets[0]
-			}
-			if target == "" && (&harness.ClaudeCode{}).Detect() {
-				target = "claude-code"
-			}
-			if target != "" {
-				targetRoot := harnessTargetRoot(cfgDir, target)
-				if targetRoot != "" {
-					stopTarget, err = watch.DebouncedTarget(
-						[]string{targetRoot}, 300*time.Millisecond, &guard,
-						func(changes []watch.TargetChange) {
-							m, loadErr := manifest.Load(cfgDir, target)
-							if loadErr != nil {
-								fmt.Fprintf(os.Stderr, "[weft] loading manifest: %v\n", loadErr)
-								return
+			// Target watchers: watch each configured target directory for external edits.
+			var stopTargets []func()
+			for _, tgt := range resolveApplyTargets(p, true) {
+				targetRoot := harnessTargetRoot(cfgDir, tgt)
+				if targetRoot == "" {
+					continue
+				}
+				// tgt is per-iteration in Go 1.22+ (cf. Java: effectively final in lambda)
+				tgt := tgt
+				stopTgt, watchErr := watch.DebouncedTarget(
+					[]string{targetRoot}, 300*time.Millisecond, &guard,
+					func(changes []watch.TargetChange) {
+						m, loadErr := manifest.Load(cfgDir, tgt)
+						if loadErr != nil {
+							fmt.Fprintf(os.Stderr, "[weft] loading manifest: %v\n", loadErr)
+							return
+						}
+						for _, c := range changes {
+							fmt.Printf("\n[weft] target changed: %s\n", c.Rel)
+							performed, wbErr := writeBackSingleSource(m, c, p, srcs)
+							if wbErr != nil {
+								fmt.Fprintf(os.Stderr, "[weft] write-back error for %s: %v\n", c.Rel, wbErr)
+								continue
 							}
-							for _, c := range changes {
-								fmt.Printf("\n[weft] target changed: %s\n", c.Rel)
-								performed, wbErr := writeBackSingleSource(m, c, p, srcs)
+							if !performed && len(m.SourceFiles[c.Rel]) > 1 {
+								performed, wbErr = writeBackMergedSource(m, c, p, srcs)
 								if wbErr != nil {
 									fmt.Fprintf(os.Stderr, "[weft] write-back error for %s: %v\n", c.Rel, wbErr)
 									continue
 								}
-								if !performed && len(m.SourceFiles[c.Rel]) > 1 {
-									performed, wbErr = writeBackMergedSource(m, c, p, srcs)
-									if wbErr != nil {
-										fmt.Fprintf(os.Stderr, "[weft] write-back error for %s: %v\n", c.Rel, wbErr)
-										continue
-									}
-								}
-								if performed {
-									fmt.Printf("[weft] wrote %s back to source (source watcher will re-apply)\n", c.Rel)
-								} else {
-									fmt.Printf("[weft] %s: no owning source found — set write_back.default in profile\n", c.Rel)
-								}
 							}
-						},
-					)
-					if err != nil {
-						stopSrc()
-						return fmt.Errorf("starting target watcher: %w", err)
+							if performed {
+								fmt.Printf("[weft] wrote %s back to source (source watcher will re-apply)\n", c.Rel)
+							} else {
+								fmt.Printf("[weft] %s: no owning source found — set write_back.default in profile\n", c.Rel)
+							}
+						}
+					},
+				)
+				if watchErr != nil {
+					stopSrc()
+					for _, s := range stopTargets {
+						s()
 					}
+					return fmt.Errorf("starting target watcher for %s: %w", tgt, watchErr)
 				}
+				stopTargets = append(stopTargets, stopTgt)
 			}
 
 			sig := make(chan os.Signal, 1)
 			signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
 			<-sig
 			stopSrc()
-			if stopTarget != nil {
-				stopTarget()
+			for _, s := range stopTargets {
+				s()
 			}
 			fmt.Println("\nWatcher stopped.")
 		}
