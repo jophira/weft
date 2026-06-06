@@ -45,7 +45,7 @@ checksum:
 
 changelog:
   sort: asc
-  use: github
+  use: git
   filters:
     exclude:
       - "^docs:"
@@ -76,7 +76,7 @@ brews:
       name: goreleaserbot
       email: bot@goreleaser.com
     commit_msg_template: "chore: update weft to {{ .Tag }}"
-    homepage: "https://github.com/jophira/weft"
+    homepage: "https://github.com/jophira/weft-releases"
     description: "weft — a tool for managing git source sync and hooks"
     license: "MIT"
     install: |
@@ -87,7 +87,7 @@ brews:
 release:
   github:
     owner: jophira
-    name: weft
+    name: weft-releases
   draft: false
   prerelease: auto
   name_template: "v{{.Version}}"
