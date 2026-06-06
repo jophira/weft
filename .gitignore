@@ -1,16 +1,17 @@
 # ── Build output ──────────────────────────────────────────────────────────────
 bin/
 dist/
+tmp/
 *.exe
 *.exe~
 
 # ── Go toolchain ──────────────────────────────────────────────────────────────
-*.test          # go test -c output
-*.out           # go tool cover output
+*.test
+*.out
 coverage.out
 coverage.html
-*.prof          # pprof profiling output (cpu.prof, mem.prof, etc.)
-go.work         # Go workspace (local only, not committed)
+*.prof
+go.work
 go.work.sum
 
 # ── Dependency vendoring (we use modules, not vendor/) ────────────────────────
@@ -23,13 +24,13 @@ vendor/
 *.key
 
 # ── IDE and editors ───────────────────────────────────────────────────────────
-.idea/          # JetBrains (GoLand, IntelliJ)
+.idea/
 *.iml
-.vscode/*       # VS Code / Cursor — ignore personal settings
-!.vscode/settings.json  # but commit shared project settings (lint, format)
+.vscode/*
+!.vscode/settings.json
 *.swp
 *.swo
-*~              # Emacs backups
+*~
 
 # ── OS ────────────────────────────────────────────────────────────────────────
 .DS_Store

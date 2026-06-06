@@ -130,7 +130,7 @@ func colorize(code, s string) string {
 	if code == "" {
 		return s
 	}
-	return code + s + colorCodeReset //nolint:gocritic
+	return code + s + colorCodeReset //nolint:gocritic // appendAssign: intentional concatenation to wrap string with ANSI codes
 }
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
