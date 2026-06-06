@@ -131,16 +131,34 @@ func resolveProfileRoots(name string) (*profile.Profile, []string, []source.Sour
 	return p, roots, srcs, nil
 }
 
-// stageProfile merges the profile's sources into outputDir and returns the
-// manifest. It does not apply the result to any harness.
-func stageProfile(p *profile.Profile, roots []string, srcs []source.Source, outputDir string) ([]string, error) {
+// stageProfile merges the profile's sources into outputDir. Returns the sorted
+// list of written paths and an attribution map (rel -> contributing root
+// indices) for files assembled from more than one root.
+func stageProfile(p *profile.Profile, roots []string, srcs []source.Source, outputDir string) ([]string, map[string][]int, error) {
 	if err := os.RemoveAll(outputDir); err != nil {
-		return nil, fmt.Errorf("clearing output dir: %w", err)
+		return nil, nil, fmt.Errorf("clearing output dir: %w", err)
 	}
 	return merge.New(p.Overlay).
 		WithFilter(managedFilter(srcs)).
 		WithAssembler(buildAssembler(roots, srcs)).
 		MergeRoots(roots, outputDir)
+}
+
+// sourceAttribution converts root-index attribution from stageProfile into
+// source-name attribution suitable for storing in the manifest.
+func sourceAttribution(attribution map[string][]int, srcs []source.Source) map[string][]string {
+	if len(attribution) == 0 {
+		return nil
+	}
+	result := make(map[string][]string, len(attribution))
+	for rel, indices := range attribution {
+		names := make([]string, len(indices))
+		for i, idx := range indices {
+			names[i] = srcs[idx].Name
+		}
+		result[rel] = names
+	}
+	return result
 }
 
 // parseSources splits a comma-separated source list and trims whitespace.
@@ -262,12 +280,12 @@ func mergeAndApply(p *profile.Profile, roots []string, srcs []source.Source, cfg
 		fmt.Printf("Merging %d source(s) [%s] with strategy %q...\n",
 			len(roots), strings.Join(p.Sources, ", "), p.Overlay)
 	}
-	manifest, err := stageProfile(p, roots, srcs, stagedDir)
+	staged, rootAttribution, err := stageProfile(p, roots, srcs, stagedDir)
 	if err != nil {
 		return fmt.Errorf("merging sources: %w", err)
 	}
 	if !quiet {
-		fmt.Printf("  %d file(s) merged into staging\n", len(manifest))
+		fmt.Printf("  %d file(s) merged into staging\n", len(staged))
 		printQualityReport(stagedDir, p, roots, srcs)
 	}
 
@@ -295,7 +313,12 @@ func mergeAndApply(p *profile.Profile, roots []string, srcs []source.Source, cfg
 	if !quiet {
 		fmt.Printf("Applying to %s...\n", target)
 	}
-	if err := h.Apply(stagedDir, harness.ApplyCtx{ProfileName: p.Name, CfgDir: cfgDir}); err != nil {
+	ctx := harness.ApplyCtx{
+		ProfileName:       p.Name,
+		CfgDir:            cfgDir,
+		SourceAttribution: sourceAttribution(rootAttribution, srcs),
+	}
+	if err := h.Apply(stagedDir, ctx); err != nil {
 		return fmt.Errorf("applying to %s: %w", target, err)
 	}
 	return nil
@@ -546,10 +569,10 @@ added, or removed file.`,
 		}
 		defer func() { _ = os.RemoveAll(dirB) }()
 
-		if _, err := stageProfile(pA, rootsA, srcsA, dirA); err != nil {
+		if _, _, err := stageProfile(pA, rootsA, srcsA, dirA); err != nil {
 			return fmt.Errorf("staging %q: %w", nameA, err)
 		}
-		if _, err := stageProfile(pB, rootsB, srcsB, dirB); err != nil {
+		if _, _, err := stageProfile(pB, rootsB, srcsB, dirB); err != nil {
 			return fmt.Errorf("staging %q: %w", nameB, err)
 		}
 
@@ -678,7 +701,7 @@ Formats:
 			return fmt.Errorf("creating temp dir: %w", err)
 		}
 		defer func() { _ = os.RemoveAll(tmpDir) }()
-		if _, stageErr := stageProfile(p, roots, srcs, tmpDir); stageErr == nil {
+		if _, _, stageErr := stageProfile(p, roots, srcs, tmpDir); stageErr == nil {
 			fmt.Println()
 			fmt.Println("Quality report:")
 			printQualityReport(tmpDir, p, roots, srcs)

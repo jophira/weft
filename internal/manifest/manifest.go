@@ -12,11 +12,12 @@ import (
 // Manifest records every file weft last wrote for a given harness.
 // It is used to distinguish weft-owned files from externally-modified ones.
 type Manifest struct {
-	Harness    string            `json:"harness"`
-	Profile    string            `json:"profile"`
-	TargetRoot string            `json:"target_root"`
-	AppliedAt  time.Time         `json:"applied_at"`
-	Files      map[string]string `json:"files"` // rel path → "sha256:<hex>"
+	Harness     string              `json:"harness"`
+	Profile     string              `json:"profile"`
+	TargetRoot  string              `json:"target_root"`
+	AppliedAt   time.Time           `json:"applied_at"`
+	Files       map[string]string   `json:"files"`                  // rel path -> "sha256:<hex>"
+	SourceFiles map[string][]string `json:"source_files,omitempty"` // rel path -> ordered source names (AppendStrategy files only)
 }
 
 func manifestPath(cfgDir, harnessName string) string {
