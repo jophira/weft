@@ -251,3 +251,87 @@ func TestCreate_writeBackRoundTrip(t *testing.T) {
 		t.Errorf("WriteBack.Overrides[CLAUDE.md] = %q, want %q", got.WriteBack.Overrides["CLAUDE.md"], "work")
 	}
 }
+
+// ── ResolvedTargets ───────────────────────────────────────────────────────────
+
+func TestResolvedTargets_targetsField(t *testing.T) {
+	p := profile.Profile{Targets: []string{"claude-code", "codex"}}
+	got := p.ResolvedTargets()
+	if len(got) != 2 || got[0] != "claude-code" || got[1] != "codex" {
+		t.Errorf("ResolvedTargets = %v, want [claude-code codex]", got)
+	}
+}
+
+func TestResolvedTargets_activeTargetFallback(t *testing.T) {
+	p := profile.Profile{ActiveTarget: "claude-code"}
+	got := p.ResolvedTargets()
+	if len(got) != 1 || got[0] != "claude-code" {
+		t.Errorf("ResolvedTargets = %v, want [claude-code]", got)
+	}
+}
+
+func TestResolvedTargets_targetsPreferredOverActiveTarget(t *testing.T) {
+	p := profile.Profile{
+		ActiveTarget: "claude-code",
+		Targets:      []string{"codex", "cursor"},
+	}
+	got := p.ResolvedTargets()
+	if len(got) != 2 || got[0] != "codex" || got[1] != "cursor" {
+		t.Errorf("ResolvedTargets = %v, want [codex cursor]", got)
+	}
+}
+
+func TestResolvedTargets_neitherFieldReturnsNil(t *testing.T) {
+	p := profile.Profile{}
+	if got := p.ResolvedTargets(); got != nil {
+		t.Errorf("ResolvedTargets = %v, want nil", got)
+	}
+}
+
+// ── Backwards-compat: old active_target YAML loads correctly ─────────────────
+
+func TestBackwardsCompat_activeTargetLoadsViaResolvedTargets(t *testing.T) {
+	m := newMgr(t)
+	// fixture sets ActiveTarget: "claude-code" and no Targets field
+	if err := m.Create(fixture("legacy")); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	got, err := m.Get("legacy")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	// Targets field should be empty (old format)
+	if len(got.Targets) != 0 {
+		t.Errorf("Targets = %v, want empty for legacy profile", got.Targets)
+	}
+	// But ResolvedTargets falls back to ActiveTarget
+	resolved := got.ResolvedTargets()
+	if len(resolved) != 1 || resolved[0] != "claude-code" {
+		t.Errorf("ResolvedTargets = %v, want [claude-code]", resolved)
+	}
+}
+
+func TestCreate_targetsRoundTrip(t *testing.T) {
+	m := newMgr(t)
+	p := profile.Profile{
+		Name:    "multi",
+		Sources: []string{"work", "personal"},
+		Overlay: profile.OverlayCascade,
+		Targets: []string{"claude-code", "codex"},
+	}
+	if err := m.Create(p); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	got, err := m.Get("multi")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if len(got.Targets) != 2 || got.Targets[0] != "claude-code" || got.Targets[1] != "codex" {
+		t.Errorf("Targets = %v, want [claude-code codex]", got.Targets)
+	}
+	// ResolvedTargets should return Targets field
+	resolved := got.ResolvedTargets()
+	if len(resolved) != 2 {
+		t.Errorf("ResolvedTargets len = %d, want 2", len(resolved))
+	}
+}
