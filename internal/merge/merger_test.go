@@ -40,7 +40,7 @@ func TestMergeRoots_singleSource(t *testing.T) {
 	writeFile(t, src, "CLAUDE.md", "# Rules")
 	writeFile(t, src, "commands/hello.md", "say hi")
 
-	manifest, err := merge.New(profile.OverlayCascade).MergeRoots([]string{src}, out)
+	manifest, _, err := merge.New(profile.OverlayCascade).MergeRoots([]string{src}, out)
 	if err != nil {
 		t.Fatalf("MergeRoots: %v", err)
 	}
@@ -62,7 +62,7 @@ func TestMergeRoots_cascade_overlayWins(t *testing.T) {
 	writeFile(t, base, "CLAUDE.md", "base rules")
 	writeFile(t, overlay, "CLAUDE.md", "overlay rules")
 
-	_, err := merge.New(profile.OverlayCascade).MergeRoots([]string{base, overlay}, out)
+	_, _, err := merge.New(profile.OverlayCascade).MergeRoots([]string{base, overlay}, out)
 	if err != nil {
 		t.Fatalf("MergeRoots: %v", err)
 	}
@@ -80,7 +80,7 @@ func TestMergeRoots_cascade_baseKeptWhenOverlayMissing(t *testing.T) {
 	writeFile(t, base, "commands/deploy.md", "deploy cmd")
 	// overlay has no commands/deploy.md
 
-	_, err := merge.New(profile.OverlayCascade).MergeRoots([]string{base, overlay}, out)
+	_, _, err := merge.New(profile.OverlayCascade).MergeRoots([]string{base, overlay}, out)
 	if err != nil {
 		t.Fatalf("MergeRoots: %v", err)
 	}
@@ -99,7 +99,7 @@ func TestMergeRoots_append_combinesContent(t *testing.T) {
 	writeFile(t, base, "CLAUDE.md", "# Base")
 	writeFile(t, overlay, "CLAUDE.md", "# Overlay")
 
-	_, err := merge.New(profile.OverlayMerge).MergeRoots([]string{base, overlay}, out)
+	_, _, err := merge.New(profile.OverlayMerge).MergeRoots([]string{base, overlay}, out)
 	if err != nil {
 		t.Fatalf("MergeRoots: %v", err)
 	}
@@ -119,7 +119,7 @@ func TestMergeRoots_lastWins(t *testing.T) {
 	writeFile(t, base, "CLAUDE.md", "base")
 	writeFile(t, overlay, "CLAUDE.md", "last")
 
-	_, err := merge.New(profile.OverlayLastWins).MergeRoots([]string{base, overlay}, out)
+	_, _, err := merge.New(profile.OverlayLastWins).MergeRoots([]string{base, overlay}, out)
 	if err != nil {
 		t.Fatalf("MergeRoots: %v", err)
 	}
@@ -138,7 +138,7 @@ func TestMergeRoots_unionOfPaths(t *testing.T) {
 	writeFile(t, a, "commands/alpha.md", "alpha")
 	writeFile(t, b, "commands/beta.md", "beta")
 
-	manifest, err := merge.New(profile.OverlayCascade).MergeRoots([]string{a, b}, out)
+	manifest, _, err := merge.New(profile.OverlayCascade).MergeRoots([]string{a, b}, out)
 	if err != nil {
 		t.Fatalf("MergeRoots: %v", err)
 	}
@@ -157,7 +157,7 @@ func TestMergeRoots_skipsHidden(t *testing.T) {
 	writeFile(t, src, ".gitignore", "hidden file")
 	writeFile(t, src, ".git/config", "git internals")
 
-	manifest, err := merge.New(profile.OverlayCascade).MergeRoots([]string{src}, out)
+	manifest, _, err := merge.New(profile.OverlayCascade).MergeRoots([]string{src}, out)
 	if err != nil {
 		t.Fatalf("MergeRoots: %v", err)
 	}
@@ -183,7 +183,7 @@ func TestMergeRoots_withFilter(t *testing.T) {
 			strings.HasPrefix(rel, "commands"+string(filepath.Separator))
 	}
 
-	manifest, err := merge.New(profile.OverlayCascade).WithFilter(filter).MergeRoots([]string{src}, out)
+	manifest, _, err := merge.New(profile.OverlayCascade).WithFilter(filter).MergeRoots([]string{src}, out)
 	if err != nil {
 		t.Fatalf("MergeRoots: %v", err)
 	}
@@ -208,7 +208,7 @@ func TestMergeRoots_hiddenRootDirIsWalked(t *testing.T) {
 	writeFile(t, hiddenRoot, "CLAUDE.md", "rules from hidden root")
 
 	out := t.TempDir()
-	manifest, err := merge.New(profile.OverlayCascade).MergeRoots([]string{hiddenRoot}, out)
+	manifest, _, err := merge.New(profile.OverlayCascade).MergeRoots([]string{hiddenRoot}, out)
 	if err != nil {
 		t.Fatalf("MergeRoots: %v", err)
 	}
@@ -227,7 +227,7 @@ func TestMergeRoots_manifestSorted(t *testing.T) {
 	writeFile(t, src, "aaa.md", "a")
 	writeFile(t, src, "mmm.md", "m")
 
-	manifest, err := merge.New(profile.OverlayCascade).MergeRoots([]string{src}, out)
+	manifest, _, err := merge.New(profile.OverlayCascade).MergeRoots([]string{src}, out)
 	if err != nil {
 		t.Fatalf("MergeRoots: %v", err)
 	}
@@ -255,7 +255,7 @@ func TestMergeRoots_assembler_singleRoot_hierarchyAssembled(t *testing.T) {
 	writeFile(t, src, "Backend/BACKEND.md", "backend")
 	writeFile(t, src, "Frontend/FRONTEND.md", "frontend")
 
-	_, err := merge.New(profile.OverlayCascade).
+	_, _, err := merge.New(profile.OverlayCascade).
 		WithAssembler(assemblerFor("**/*.md")).
 		MergeRoots([]string{src}, out)
 	if err != nil {
@@ -278,7 +278,7 @@ func TestMergeRoots_assembler_twoRoots_mergedWithCascade(t *testing.T) {
 	writeFile(t, base, "Backend/BACKEND.md", "base-backend")
 	writeFile(t, overlay, "CLAUDE.md", "overlay-rules")
 
-	_, err := merge.New(profile.OverlayCascade).
+	_, _, err := merge.New(profile.OverlayCascade).
 		WithAssembler(assemblerFor("**/*.md")).
 		MergeRoots([]string{base, overlay}, out)
 	if err != nil {
@@ -299,7 +299,7 @@ func TestMergeRoots_assembler_twoRoots_mergedWithAppend(t *testing.T) {
 	writeFile(t, base, "Backend/BACKEND.md", "base-backend")
 	writeFile(t, overlay, "Frontend/FRONTEND.md", "overlay-frontend")
 
-	_, err := merge.New(profile.OverlayMerge).
+	_, _, err := merge.New(profile.OverlayMerge).
 		WithAssembler(assemblerFor("**/*.md")).
 		MergeRoots([]string{base, overlay}, out)
 	if err != nil {
@@ -319,7 +319,7 @@ func TestMergeRoots_assembler_excludesHonoured(t *testing.T) {
 	writeFile(t, src, "CLAUDE.md", "rules")
 	writeFile(t, src, "skills/my-skill.md", "skill content") // should be excluded
 
-	_, err := merge.New(profile.OverlayCascade).
+	_, _, err := merge.New(profile.OverlayCascade).
 		WithAssembler(assemblerFor("**/*.md", "skills")).
 		MergeRoots([]string{src}, out)
 	if err != nil {
@@ -340,7 +340,7 @@ func TestMergeRoots_assembler_rootNoMatchContributesNothing(t *testing.T) {
 	writeFile(t, base, "commands/foo.yaml", "cmd") // non-matching
 	writeFile(t, overlay, "CLAUDE.md", "overlay-only")
 
-	_, err := merge.New(profile.OverlayCascade).
+	_, _, err := merge.New(profile.OverlayCascade).
 		WithAssembler(assemblerFor("**/*.md")).
 		MergeRoots([]string{base, overlay}, out)
 	if err != nil {
@@ -352,6 +352,78 @@ func TestMergeRoots_assembler_rootNoMatchContributesNothing(t *testing.T) {
 	}
 }
 
+// ── Attribution map ───────────────────────────────────────────────────────────
+
+func TestMergeRoots_attribution_appendStrategy_multipleRoots(t *testing.T) {
+	a := t.TempDir()
+	b := t.TempDir()
+	out := t.TempDir()
+	writeFile(t, a, "CLAUDE.md", "from A")
+	writeFile(t, b, "CLAUDE.md", "from B")
+
+	_, attr, err := merge.New(profile.OverlayMerge).MergeRoots([]string{a, b}, out)
+	if err != nil {
+		t.Fatalf("MergeRoots: %v", err)
+	}
+	got, ok := attr["CLAUDE.md"]
+	if !ok {
+		t.Fatal("attribution missing CLAUDE.md entry for multi-root AppendStrategy file")
+	}
+	if len(got) != 2 || got[0] != 0 || got[1] != 1 {
+		t.Errorf("attribution[CLAUDE.md] = %v, want [0 1]", got)
+	}
+}
+
+func TestMergeRoots_attribution_singleSource_noEntry(t *testing.T) {
+	src := t.TempDir()
+	out := t.TempDir()
+	writeFile(t, src, "CLAUDE.md", "rules")
+
+	_, attr, err := merge.New(profile.OverlayMerge).MergeRoots([]string{src}, out)
+	if err != nil {
+		t.Fatalf("MergeRoots: %v", err)
+	}
+	if _, ok := attr["CLAUDE.md"]; ok {
+		t.Errorf("single-source file should not appear in attribution, got %v", attr)
+	}
+}
+
+func TestMergeRoots_attribution_onlyOneRootHasFile_noEntry(t *testing.T) {
+	a := t.TempDir()
+	b := t.TempDir()
+	out := t.TempDir()
+	writeFile(t, a, "CLAUDE.md", "only in A")
+	// b has a different file entirely
+
+	_, attr, err := merge.New(profile.OverlayCascade).MergeRoots([]string{a, b}, out)
+	if err != nil {
+		t.Fatalf("MergeRoots: %v", err)
+	}
+	if _, ok := attr["CLAUDE.md"]; ok {
+		t.Errorf("file present in only one root should not appear in attribution, got %v", attr)
+	}
+}
+
+func TestMergeRoots_attribution_cascadeMultipleRoots_tracked(t *testing.T) {
+	a := t.TempDir()
+	b := t.TempDir()
+	out := t.TempDir()
+	writeFile(t, a, "CLAUDE.md", "base rules")
+	writeFile(t, b, "CLAUDE.md", "overlay rules")
+
+	_, attr, err := merge.New(profile.OverlayCascade).MergeRoots([]string{a, b}, out)
+	if err != nil {
+		t.Fatalf("MergeRoots: %v", err)
+	}
+	got, ok := attr["CLAUDE.md"]
+	if !ok {
+		t.Fatal("attribution missing CLAUDE.md entry when both roots have the file")
+	}
+	if len(got) != 2 || got[0] != 0 || got[1] != 1 {
+		t.Errorf("attribution[CLAUDE.md] = %v, want [0 1]", got)
+	}
+}
+
 func TestMergeRoots_assembler_backwardCompat_plainFilename(t *testing.T) {
 	// "CLAUDE.md" pattern = plain filename = backward compatible: reads only root file.
 	src := t.TempDir()
@@ -359,7 +431,7 @@ func TestMergeRoots_assembler_backwardCompat_plainFilename(t *testing.T) {
 	writeFile(t, src, "CLAUDE.md", "root rules")
 	writeFile(t, src, "Backend/BACKEND.md", "should not be assembled")
 
-	_, err := merge.New(profile.OverlayCascade).
+	_, _, err := merge.New(profile.OverlayCascade).
 		WithAssembler(assemblerFor("CLAUDE.md")).
 		MergeRoots([]string{src}, out)
 	if err != nil {
