@@ -291,20 +291,8 @@ func mergeAndApply(p *profile.Profile, roots []string, srcs []source.Source, cfg
 		printQualityReport(stagedDir, p, roots, srcs)
 	}
 
-	resolvedTargets := p.ResolvedTargets()
-	target := ""
-	if len(resolvedTargets) > 0 {
-		target = resolvedTargets[0]
-	}
-	if target == "" {
-		if (&harness.ClaudeCode{}).Detect() {
-			target = "claude-code"
-			if !quiet {
-				fmt.Printf("  no target set — auto-detected: claude-code\n")
-			}
-		}
-	}
-	if target == "" {
+	targets := resolveApplyTargets(p, quiet)
+	if len(targets) == 0 {
 		if !quiet {
 			fmt.Println("  no harness target — staged output is at:", stagedDir)
 		}
@@ -312,37 +300,60 @@ func mergeAndApply(p *profile.Profile, roots []string, srcs []source.Source, cfg
 	}
 
 	hReg := harness.NewRegistry(harness.Instances()...)
-	h, ok := hReg.Get(target)
-	if !ok {
-		return fmt.Errorf("unknown harness %q — run 'weft target list' to see supported harnesses", target)
-	}
+	attr := sourceAttribution(rootAttribution, srcs)
 
-	// On the initial (non-quiet) apply, write back any externally-modified target
-	// files to their source before overwriting them. This preserves edits made
-	// directly to the target (e.g. ~/.claude/CLAUDE.md) since the last apply.
-	if !quiet {
-		if wbErr := startupWriteBack(stagedDir, target, cfgDir, p, srcs); wbErr != nil {
-			fmt.Fprintf(os.Stderr, "[weft] startup write-back warning: %v\n", wbErr)
+	for _, target := range targets {
+		h, ok := hReg.Get(target)
+		if !ok {
+			return fmt.Errorf("unknown harness %q — run 'weft target list' to see supported harnesses", target)
+		}
+
+		// On the initial (non-quiet) apply, write back any externally-modified
+		// target files to their source before overwriting them.
+		if !quiet {
+			if wbErr := startupWriteBack(stagedDir, target, cfgDir, p, srcs); wbErr != nil {
+				fmt.Fprintf(os.Stderr, "[weft] startup write-back warning: %v\n", wbErr)
+			}
+		}
+
+		if !quiet {
+			fmt.Printf("Applying to %s...\n", target)
+		}
+		var applyOut io.Writer
+		if !quiet {
+			applyOut = os.Stdout
+		}
+		ctx := harness.ApplyCtx{
+			ProfileName:       p.Name,
+			CfgDir:            cfgDir,
+			SourceAttribution: attr,
+			Out:               applyOut,
+		}
+		if err := h.Apply(stagedDir, ctx); err != nil {
+			return fmt.Errorf("applying to %s: %w", target, err)
 		}
 	}
-
-	if !quiet {
-		fmt.Printf("Applying to %s...\n", target)
-	}
-	var applyOut io.Writer
-	if !quiet {
-		applyOut = os.Stdout
-	}
-	ctx := harness.ApplyCtx{
-		ProfileName:       p.Name,
-		CfgDir:            cfgDir,
-		SourceAttribution: sourceAttribution(rootAttribution, srcs),
-		Out:               applyOut,
-	}
-	if err := h.Apply(stagedDir, ctx); err != nil {
-		return fmt.Errorf("applying to %s: %w", target, err)
-	}
 	return nil
+}
+
+// resolveApplyTargets returns the list of harness targets to apply to.
+// If the profile has no configured targets, it auto-detects installed harnesses.
+func resolveApplyTargets(p *profile.Profile, quiet bool) []string {
+	configured := p.ResolvedTargets()
+	if len(configured) > 0 {
+		return configured
+	}
+	// Auto-detect: use any installed harness.
+	var detected []string
+	for _, h := range harness.Instances() {
+		if h.Detect() {
+			detected = append(detected, h.Name())
+		}
+	}
+	if len(detected) == 1 && !quiet {
+		fmt.Printf("  no target set — auto-detected: %s\n", detected[0])
+	}
+	return detected
 }
 
 // harnessTargetRoot returns the target directory last written by the given
