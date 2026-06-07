@@ -3,7 +3,11 @@ BIN_DIR := ./bin
 GO      := go
 AIR     := $(shell go env GOPATH)/bin/air
 
-.PHONY: build run dev test lint clean install
+# Coverage target: internal packages only.
+# cmd/ is excluded — Cobra RunE wiring is validated by integration tests, not unit tests.
+COVERAGE_PKGS := ./internal/...
+
+.PHONY: build run dev test test-integration coverage lint clean install
 
 build:
 	$(GO) build -o $(BIN_DIR)/$(BINARY) .
@@ -31,6 +35,19 @@ dev:
 
 test:
 	$(GO) test ./...
+
+# Requires Docker. Spins up Gitea for git remote tests and exercises the MCP
+# JSON-RPC protocol loop end-to-end.
+test-integration:
+	$(GO) test -tags integration ./...
+
+# Unit coverage measured over internal packages only (cmd/ excluded — integration only).
+# Run all package tests so cmd regressions are still caught, but only instrument internal/.
+coverage:
+	$(GO) test -coverprofile=coverage.out -covermode=atomic -coverpkg=$(COVERAGE_PKGS) ./...
+	$(GO) tool cover -func=coverage.out | grep -E "^total|\.go" | tail -20
+	@echo ""
+	$(GO) tool cover -func=coverage.out | tail -1
 
 lint:
 	golangci-lint run ./...
