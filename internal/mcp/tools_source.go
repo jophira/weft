@@ -164,6 +164,9 @@ func sourceSyncHandler(reg *source.FileRegistry) server.ToolHandlerFunc {
 // syncSource clones (if missing) or pulls a single source.
 // Returns true when new commits were fetched.
 func syncSource(s source.Source) (bool, error) {
+	if s.Remote == "" {
+		return false, fmt.Errorf("source %q has no remote configured — add one with 'weft source edit --remote <url>'", s.Name)
+	}
 	expanded := source.ExpandHome(s.Root)
 	auth, err := git.ResolveAuth(s.Remote)
 	if err != nil {
@@ -222,13 +225,21 @@ func sourcePushHandler(reg *source.FileRegistry) server.ToolHandlerFunc {
 		if err != nil {
 			return mcplib.NewToolResultError(fmt.Sprintf("resolving auth: %v", err)), nil
 		}
-		if err := repo.CommitAll(message); err != nil {
-			return mcplib.NewToolResultError(fmt.Sprintf("commit: %v", err)), nil
+		committed := false
+		clean, err := repo.IsClean()
+		if err != nil {
+			return mcplib.NewToolResultError(fmt.Sprintf("checking status: %v", err)), nil
+		}
+		if !clean {
+			if err := repo.CommitAll(message); err != nil {
+				return mcplib.NewToolResultError(fmt.Sprintf("commit: %v", err)), nil
+			}
+			committed = true
 		}
 		if err := repo.Push(auth); err != nil {
 			return mcplib.NewToolResultError(fmt.Sprintf("push: %v", err)), nil
 		}
-		out, _ := json.MarshalIndent(pushResult{Name: name, Committed: true, Pushed: true}, "", "  ")
+		out, _ := json.MarshalIndent(pushResult{Name: name, Committed: committed, Pushed: true}, "", "  ")
 		return mcplib.NewToolResultText(string(out)), nil
 	}
 }
