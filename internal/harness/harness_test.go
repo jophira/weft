@@ -111,7 +111,7 @@ func TestApplyWithManifest_FirstApply_NoConflict(t *testing.T) {
 	target := t.TempDir()
 	ctx := testCtx(t)
 
-	if err := applyWithManifest(staged, target, "claude-code", ctx, nil); err != nil {
+	if err := applyWithManifest(staged, target, "claude-code", ctx, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -133,13 +133,13 @@ func TestApplyWithManifest_OwnedFile_SilentOverwrite(t *testing.T) {
 	ctx := testCtx(t)
 
 	// First apply — weft takes ownership.
-	if err := applyWithManifest(staged, target, "claude-code", ctx, nil); err != nil {
+	if err := applyWithManifest(staged, target, "claude-code", ctx, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 
 	// Second apply with updated content — weft owns the file, no backup.
 	write(t, filepath.Join(staged, "CLAUDE.md"), "rules v2")
-	if err := applyWithManifest(staged, target, "claude-code", ctx, nil); err != nil {
+	if err := applyWithManifest(staged, target, "claude-code", ctx, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -160,7 +160,7 @@ func TestApplyWithManifest_ExternallyModified_BackupCreated(t *testing.T) {
 	ctx := testCtx(t)
 
 	// First apply — weft owns it.
-	if err := applyWithManifest(staged, target, "claude-code", ctx, nil); err != nil {
+	if err := applyWithManifest(staged, target, "claude-code", ctx, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -169,7 +169,7 @@ func TestApplyWithManifest_ExternallyModified_BackupCreated(t *testing.T) {
 
 	// Second apply — conflict detected, backup created.
 	write(t, filepath.Join(staged, "CLAUDE.md"), "rules v2")
-	if err := applyWithManifest(staged, target, "claude-code", ctx, nil); err != nil {
+	if err := applyWithManifest(staged, target, "claude-code", ctx, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -200,7 +200,7 @@ func TestApplyWithManifest_UnknownExistingFile_BackupCreated(t *testing.T) {
 	// Pre-existing file in target — not in manifest (weft has never run).
 	write(t, filepath.Join(target, "CLAUDE.md"), "hand-crafted rules")
 
-	if err := applyWithManifest(staged, target, "claude-code", ctx, nil); err != nil {
+	if err := applyWithManifest(staged, target, "claude-code", ctx, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -226,7 +226,7 @@ func TestApplyWithManifest_SubdirBackupPreservesPath(t *testing.T) {
 	// Pre-existing nested file — should be backed up with full relative path.
 	write(t, filepath.Join(target, "commands", "backend", "java.md"), "old java rules")
 
-	if err := applyWithManifest(staged, target, "claude-code", ctx, nil); err != nil {
+	if err := applyWithManifest(staged, target, "claude-code", ctx, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -250,13 +250,13 @@ func TestApplyWithManifest_UnchangedFile_Skipped(t *testing.T) {
 	ctx := testCtxWithOut(t, &buf)
 
 	// First apply — weft takes ownership.
-	if err := applyWithManifest(staged, target, "claude-code", ctx, nil); err != nil {
+	if err := applyWithManifest(staged, target, "claude-code", ctx, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	buf.Reset()
 
 	// Second apply with identical staged content — should be skipped, not rewritten.
-	if err := applyWithManifest(staged, target, "claude-code", ctx, nil); err != nil {
+	if err := applyWithManifest(staged, target, "claude-code", ctx, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -277,7 +277,7 @@ func TestApplyWithManifest_NewFile_LoggedAsWrote(t *testing.T) {
 	var buf bytes.Buffer
 	ctx := testCtxWithOut(t, &buf)
 
-	if err := applyWithManifest(staged, target, "claude-code", ctx, nil); err != nil {
+	if err := applyWithManifest(staged, target, "claude-code", ctx, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -295,14 +295,14 @@ func TestApplyWithManifest_UpdatedFile_LoggedAsWrote(t *testing.T) {
 	var buf bytes.Buffer
 	ctx := testCtxWithOut(t, &buf)
 
-	if err := applyWithManifest(staged, target, "claude-code", ctx, nil); err != nil {
+	if err := applyWithManifest(staged, target, "claude-code", ctx, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	buf.Reset()
 
 	// Update staged content — weft owns the file, so no backup, just a write.
 	write(t, filepath.Join(staged, "CLAUDE.md"), "rules v2")
-	if err := applyWithManifest(staged, target, "claude-code", ctx, nil); err != nil {
+	if err := applyWithManifest(staged, target, "claude-code", ctx, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -322,7 +322,7 @@ func TestApplyWithManifest_NilOut_NoOutput(t *testing.T) {
 	target := t.TempDir()
 	ctx := testCtx(t) // Out is nil
 
-	if err := applyWithManifest(staged, target, "claude-code", ctx, nil); err != nil {
+	if err := applyWithManifest(staged, target, "claude-code", ctx, nil, nil); err != nil {
 		t.Fatalf("nil Out should not cause error: %v", err)
 	}
 }
@@ -496,7 +496,7 @@ func TestApplyWithManifest_SourceAttribution_Persisted(t *testing.T) {
 		},
 	}
 
-	if err := applyWithManifest(staged, target, "claude-code", ctx, nil); err != nil {
+	if err := applyWithManifest(staged, target, "claude-code", ctx, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -520,7 +520,7 @@ func TestApplyWithManifest_NoSourceAttribution_NoSourceFiles(t *testing.T) {
 	target := t.TempDir()
 	ctx := testCtx(t)
 
-	if err := applyWithManifest(staged, target, "claude-code", ctx, nil); err != nil {
+	if err := applyWithManifest(staged, target, "claude-code", ctx, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -547,7 +547,7 @@ func TestApplyWithManifest_RemovedFile_PrunedFromManifest(t *testing.T) {
 	ctx := testCtx(t)
 
 	// First apply — both files tracked in manifest.
-	if err := applyWithManifest(staged, target, "claude-code", ctx, nil); err != nil {
+	if err := applyWithManifest(staged, target, "claude-code", ctx, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -565,7 +565,7 @@ func TestApplyWithManifest_RemovedFile_PrunedFromManifest(t *testing.T) {
 	}
 
 	// Second apply — extra.md is not staged; it must be pruned from manifest.
-	if err := applyWithManifest(staged, target, "claude-code", ctx, nil); err != nil {
+	if err := applyWithManifest(staged, target, "claude-code", ctx, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -595,7 +595,7 @@ func TestApplyWithManifest_SourceFiles_PrunedWhenFileRemoved(t *testing.T) {
 		},
 	}
 
-	if err := applyWithManifest(staged, target, "claude-code", ctx, nil); err != nil {
+	if err := applyWithManifest(staged, target, "claude-code", ctx, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -607,7 +607,7 @@ func TestApplyWithManifest_SourceFiles_PrunedWhenFileRemoved(t *testing.T) {
 		"CLAUDE.md": {"work", "personal"},
 	}
 
-	if err := applyWithManifest(staged, target, "claude-code", ctx, nil); err != nil {
+	if err := applyWithManifest(staged, target, "claude-code", ctx, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -620,6 +620,125 @@ func TestApplyWithManifest_SourceFiles_PrunedWhenFileRemoved(t *testing.T) {
 	}
 	if srcs, ok := m.SourceFiles["CLAUDE.md"]; !ok || len(srcs) != 2 {
 		t.Errorf("CLAUDE.md SourceFiles = %v, want [work personal]", srcs)
+	}
+}
+
+// ── Warp ──────────────────────────────────────────────────────────────────────
+
+// TestWarpApply_CopiesYAMLToWorkflows verifies that Apply writes .yaml files from
+// commands/ into <configRoot>/workflows/ and ignores non-YAML files.
+func TestWarpApply_CopiesYAMLToWorkflows(t *testing.T) {
+	staged := t.TempDir()
+	write(t, filepath.Join(staged, "commands", "build.yaml"), "name: build")
+	write(t, filepath.Join(staged, "commands", "test.yml"), "name: test")
+	write(t, filepath.Join(staged, "commands", "notes.txt"), "should be ignored")
+	write(t, filepath.Join(staged, "CLAUDE.md"), "should be ignored too")
+
+	configRoot := t.TempDir()
+	w := &Warp{configRoot: configRoot}
+
+	if err := w.Apply(staged, testCtx(t)); err != nil {
+		t.Fatal(err)
+	}
+
+	workflows := filepath.Join(configRoot, "workflows")
+	if got := readFile(t, filepath.Join(workflows, "build.yaml")); got != "name: build" {
+		t.Errorf("build.yaml = %q, want %q", got, "name: build")
+	}
+	if got := readFile(t, filepath.Join(workflows, "test.yml")); got != "name: test" {
+		t.Errorf("test.yml = %q, want %q", got, "name: test")
+	}
+	if _, err := os.Stat(filepath.Join(workflows, "notes.txt")); err == nil {
+		t.Error("notes.txt should not be copied to workflows/")
+	}
+	if _, err := os.Stat(filepath.Join(workflows, "CLAUDE.md")); err == nil {
+		t.Error("CLAUDE.md should not be copied to workflows/")
+	}
+}
+
+// TestWarpApply_SkipUnchanged verifies the fe.skip optimisation — writing identical
+// content twice should log "· skip" on the second apply, not "✓ wrote".
+func TestWarpApply_SkipUnchanged(t *testing.T) {
+	staged := t.TempDir()
+	write(t, filepath.Join(staged, "commands", "build.yaml"), "name: build")
+
+	configRoot := t.TempDir()
+	w := &Warp{configRoot: configRoot}
+
+	var buf bytes.Buffer
+	ctx := testCtxWithOut(t, &buf)
+
+	// First apply — writes the file.
+	if err := w.Apply(staged, ctx); err != nil {
+		t.Fatal(err)
+	}
+	buf.Reset()
+
+	// Second apply — identical staged content; should be skipped.
+	if err := w.Apply(staged, ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "· skip") {
+		t.Errorf("expected '· skip' on second apply of unchanged file, got: %q", out)
+	}
+	if strings.Contains(out, "✓ wrote") {
+		t.Errorf("unexpected '✓ wrote' for unchanged file: %q", out)
+	}
+}
+
+// TestWarpApply_ConflictWrittenToCtxOut verifies that conflict messages are sent to
+// ctx.Out (not fmt.Printf/stdout), which prevents corruption of the MCP JSON-RPC wire.
+func TestWarpApply_ConflictWrittenToCtxOut(t *testing.T) {
+	staged := t.TempDir()
+	write(t, filepath.Join(staged, "commands", "build.yaml"), "name: build v1")
+
+	configRoot := t.TempDir()
+	w := &Warp{configRoot: configRoot}
+
+	ctx := testCtx(t)
+
+	// First apply — weft takes ownership.
+	if err := w.Apply(staged, ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	// User modifies the file externally.
+	write(t, filepath.Join(configRoot, "workflows", "build.yaml"), "name: hand-edited")
+
+	// Second apply with new staged content — conflict should be reported to ctx.Out.
+	write(t, filepath.Join(staged, "commands", "build.yaml"), "name: build v2")
+
+	var buf bytes.Buffer
+	ctx.Out = &buf
+
+	if err := w.Apply(staged, ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "externally modified") {
+		t.Errorf("expected conflict message in ctx.Out, got: %q", out)
+	}
+}
+
+// TestWarpYAMLFilter verifies the filter rejects subdirectory entries and non-YAML files.
+func TestWarpYAMLFilter(t *testing.T) {
+	cases := []struct {
+		rel  string
+		want bool
+	}{
+		{"build.yaml", true},
+		{"test.yml", true},
+		{"notes.txt", false},
+		{"subdir/build.yaml", false}, // flat copy — subdirs excluded
+		{"README.md", false},
+	}
+	for _, tc := range cases {
+		if got := warpYAMLFilter(tc.rel); got != tc.want {
+			t.Errorf("warpYAMLFilter(%q) = %v, want %v", tc.rel, got, tc.want)
+		}
 	}
 }
 

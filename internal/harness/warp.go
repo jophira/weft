@@ -1,15 +1,10 @@
 package harness
 
 import (
-	"fmt"
-	"io/fs"
-	"maps"
 	"os"
 	"path/filepath"
-	"time"
 
 	"github.com/jophira/weft/internal/locate"
-	"github.com/jophira/weft/internal/manifest"
 )
 
 // warpLocations lists every known config root for Warp, most specific first.
@@ -32,6 +27,13 @@ var warpLocations = []locate.Candidate{
 	{
 		Path: func(home, _ string) string { return filepath.Join(home, ".warp") },
 	},
+}
+
+// warpYAMLFilter accepts only top-level .yaml/.yml files (no subdirectories).
+// Warp workflows are a flat list of YAML files; subdirectory entries are skipped.
+func warpYAMLFilter(rel string) bool {
+	ext := filepath.Ext(rel)
+	return (ext == ".yaml" || ext == ".yml") && filepath.Dir(rel) == "."
 }
 
 // Warp adapts Weft to Warp terminal's workflow layout.
@@ -59,6 +61,10 @@ func (w *Warp) ConfigPath() string {
 }
 
 // Apply copies workflow YAML files from stagedRoot/commands/ into <configRoot>/workflows/.
+// It delegates to applyWithManifest so that:
+//   - conflict messages go to ctx.Out (not stdout), preventing MCP wire corruption;
+//   - unchanged files are skipped via the fe.skip optimisation;
+//   - the walk is performed exactly once.
 func (w *Warp) Apply(stagedRoot string, ctx ApplyCtx) error {
 	if w.configRoot == "" {
 		if !w.Detect() {
@@ -71,77 +77,5 @@ func (w *Warp) Apply(stagedRoot string, ctx ApplyCtx) error {
 		return err
 	}
 	src := filepath.Join(stagedRoot, "commands")
-
-	m, err := manifest.Load(ctx.CfgDir, w.Name())
-	if err != nil {
-		return fmt.Errorf("loading manifest: %w", err)
-	}
-
-	var conflicts []conflictFile
-	newFiles := map[string]string{}
-
-	walkErr := filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return err
-		}
-		ext := filepath.Ext(d.Name())
-		if ext != ".yaml" && ext != ".yml" {
-			return nil
-		}
-		rel := d.Name() // flat copy — just the filename, no subdirs
-		stagedHash, err := manifest.HashFile(path)
-		if err != nil {
-			return err
-		}
-		newFiles[rel] = stagedHash
-
-		fullDst := filepath.Join(target, rel)
-		existing, readErr := os.ReadFile(fullDst)
-		if os.IsNotExist(readErr) {
-			return nil
-		}
-		if readErr != nil {
-			return fmt.Errorf("reading %s: %w", fullDst, readErr)
-		}
-		if knownHash, owned := m.Files[rel]; owned && manifest.HashBytes(existing) == knownHash {
-			return nil
-		}
-		conflicts = append(conflicts, conflictFile{rel: rel, abs: fullDst})
-		return nil
-	})
-	if walkErr != nil {
-		return walkErr
-	}
-
-	if len(conflicts) > 0 {
-		backupDir, err := backupConflicts(conflicts, w.Name(), ctx.CfgDir)
-		if err != nil {
-			return err
-		}
-		fmt.Printf("  ! %d file(s) externally modified — backed up to %s\n",
-			len(conflicts), locate.Tilde(backupDir))
-		for _, c := range conflicts {
-			fmt.Printf("      %s\n", c.rel)
-		}
-	}
-
-	// Write yaml files.
-	if err := filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return err
-		}
-		if ext := filepath.Ext(d.Name()); ext != ".yaml" && ext != ".yml" {
-			return nil
-		}
-		return copyFile(path, filepath.Join(target, d.Name()))
-	}); err != nil {
-		return err
-	}
-
-	m.Harness = w.Name()
-	m.Profile = ctx.ProfileName
-	m.TargetRoot = target
-	m.AppliedAt = time.Now()
-	maps.Copy(m.Files, newFiles)
-	return manifest.Save(ctx.CfgDir, m)
+	return applyWithManifest(src, target, w.Name(), ctx, nil, warpYAMLFilter)
 }
