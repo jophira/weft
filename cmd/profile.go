@@ -118,16 +118,42 @@ func resolveProfileRoots(name string) (*profile.Profile, []string, []source.Sour
 }
 
 // stageProfile merges the profile's sources into outputDir. Returns the sorted
-// list of written paths and an attribution map (rel -> contributing root
-// indices) for files assembled from more than one root.
-func stageProfile(p *profile.Profile, roots []string, srcs []source.Source, outputDir string) ([]string, map[string][]int, error) {
+// list of written paths, an attribution map (rel -> contributing root indices)
+// for files assembled from more than one root, and per-source instruction byte
+// counts captured from the assembler (so callers avoid a second collect walk).
+func stageProfile(p *profile.Profile, roots []string, srcs []source.Source, outputDir string) ([]string, map[string][]int, []sourceContrib, error) {
 	if err := os.RemoveAll(outputDir); err != nil {
-		return nil, nil, fmt.Errorf("clearing output dir: %w", err)
+		return nil, nil, nil, fmt.Errorf("clearing output dir: %w", err)
 	}
-	return merge.New(p.Overlay).
+
+	// Build the assembler once and capture per-root byte counts while we run it.
+	// This avoids a second collect.Collect walk inside computeProvenance later.
+	// (cf. Java: we memoize by wrapping the function, not by a separate cache map)
+	contribs := make([]sourceContrib, len(roots))
+	for i := range roots {
+		contribs[i].name = srcs[i].Name
+	}
+	rawAssembler := buildAssembler(roots, srcs)
+	capturingAssembler := func(root string) ([]byte, error) {
+		data, err := rawAssembler(root)
+		if err != nil {
+			return nil, err
+		}
+		// Find the index for this root to record byte count.
+		for i, r := range roots {
+			if r == root {
+				contribs[i].bytes = len(data)
+				break
+			}
+		}
+		return data, nil
+	}
+
+	written, attr, err := merge.New(p.Overlay).
 		WithFilter(managedFilter(srcs)).
-		WithAssembler(buildAssembler(roots, srcs)).
+		WithAssembler(capturingAssembler).
 		MergeRoots(roots, outputDir)
+	return written, attr, contribs, err
 }
 
 // sourceAttribution converts root-index attribution from stageProfile into
@@ -179,22 +205,6 @@ type sourceContrib struct {
 	bytes int
 }
 
-// computeProvenance calls collect.Collect for each source root and returns the
-// per-source byte counts for the instruction file.
-func computeProvenance(roots []string, srcs []source.Source) []sourceContrib {
-	contribs := make([]sourceContrib, len(roots))
-	for i, root := range roots {
-		s := srcs[i]
-		glob := s.Structure.InstructionGlob
-		if glob == "" {
-			glob = source.DefaultStructure().InstructionGlob
-		}
-		data, _ := collect.Collect(root, glob, s.Structure.ManagedDirs()...)
-		contribs[i] = sourceContrib{name: s.Name, bytes: len(data)}
-	}
-	return contribs
-}
-
 // fmtBytes formats a byte count as "X B" or "X.Y KB".
 func fmtBytes(n int) string {
 	if n < 1024 {
@@ -204,14 +214,13 @@ func fmtBytes(n int) string {
 }
 
 // printQualityReport reads the staged CLAUDE.md, prints a provenance line, and
-// emits any size or duplicate-block warnings.
-func printQualityReport(stagedDir string, p *profile.Profile, roots []string, srcs []source.Source) {
+// emits any size or duplicate-block warnings. contribs is the per-source byte
+// count already captured during staging — no second collect walk is needed.
+func printQualityReport(stagedDir string, p *profile.Profile, contribs []sourceContrib) {
 	content, err := os.ReadFile(filepath.Join(stagedDir, "CLAUDE.md"))
 	if err != nil {
 		return // no instruction file; nothing to report
 	}
-
-	contribs := computeProvenance(roots, srcs)
 
 	if p.Overlay == profile.OverlayMerge && len(contribs) > 1 {
 		parts := make([]string, len(contribs))
@@ -257,7 +266,7 @@ func mergeAndApply(p *profile.Profile, roots []string, srcs []source.Source, cfg
 		fmt.Printf("Merging %d source(s) [%s] with strategy %q...\n",
 			len(roots), strings.Join(p.Sources, ", "), p.Overlay)
 	}
-	staged, rootAttribution, err := stageProfile(p, roots, srcs, stagedDir)
+	staged, rootAttribution, contribs, err := stageProfile(p, roots, srcs, stagedDir)
 	if err != nil {
 		return fmt.Errorf("merging sources: %w", err)
 	}
@@ -266,7 +275,7 @@ func mergeAndApply(p *profile.Profile, roots []string, srcs []source.Source, cfg
 	}
 	if !quiet {
 		fmt.Printf("  %d file(s) merged into staging\n", len(staged))
-		printQualityReport(stagedDir, p, roots, srcs)
+		printQualityReport(stagedDir, p, contribs)
 	}
 
 	targets := resolveApplyTargets(p, quiet)
@@ -664,10 +673,10 @@ added, or removed file.`,
 		}
 		defer func() { _ = os.RemoveAll(dirB) }()
 
-		if _, _, err := stageProfile(pA, rootsA, srcsA, dirA); err != nil {
+		if _, _, _, err := stageProfile(pA, rootsA, srcsA, dirA); err != nil {
 			return fmt.Errorf("staging %q: %w", nameA, err)
 		}
-		if _, _, err := stageProfile(pB, rootsB, srcsB, dirB); err != nil {
+		if _, _, _, err := stageProfile(pB, rootsB, srcsB, dirB); err != nil {
 			return fmt.Errorf("staging %q: %w", nameB, err)
 		}
 
@@ -771,8 +780,12 @@ Formats:
 		}
 
 		sourceNames := p.Sources
+		// Wire the assembler so that sources using instruction_glob are represented
+		// correctly — without it, Inspect only sees raw disk files and misses any
+		// synthetic CLAUDE.md assembled from glob-matched fragments. (#101)
 		report, err := merge.New(p.Overlay).
 			WithFilter(managedFilter(srcs)).
+			WithAssembler(buildAssembler(roots, srcs)).
 			Inspect(roots)
 		if err != nil {
 			return fmt.Errorf("inspecting sources: %w", err)
@@ -796,11 +809,11 @@ Formats:
 			return fmt.Errorf("creating temp dir: %w", err)
 		}
 		defer func() { _ = os.RemoveAll(tmpDir) }()
-		if _, _, stageErr := stageProfile(p, roots, srcs, tmpDir); stageErr == nil {
+		if _, _, contribs, stageErr := stageProfile(p, roots, srcs, tmpDir); stageErr == nil {
 			_ = expandProjectsPlaceholder(tmpDir, srcs) // best-effort for inspect
 			fmt.Println()
 			fmt.Println("Quality report:")
-			printQualityReport(tmpDir, p, roots, srcs)
+			printQualityReport(tmpDir, p, contribs)
 		}
 
 		return nil
