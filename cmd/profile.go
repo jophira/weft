@@ -586,6 +586,9 @@ file inside any source root changes. Pass --no-watch to apply once and exit
 							return
 						}
 						for _, c := range changes {
+							if _, owned := m.Files[c.Rel]; !owned {
+								continue // not a weft-managed file — ignore silently
+							}
 							fmt.Printf("\n[weft] target changed: %s\n", c.Rel)
 							performed, wbErr := writeBackSingleSource(m, c, p, srcs)
 							if wbErr != nil {
