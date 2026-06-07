@@ -576,19 +576,23 @@ file inside any source root changes. Pass --no-watch to apply once and exit
 							slog.Error("loading manifest", slog.String("target", tgt), slog.Any("error", loadErr))
 							return
 						}
+						// Build srcMap once per batch — shared across all changes in this
+						// callback invocation so each write-back call does not rebuild it.
+						// cf. Java: compute a HashMap<String,Source> before the for-each loop.
+						wbSrcMap := buildSrcMap(srcs)
 						for _, c := range changes {
 							if _, owned := m.Files[c.Rel]; !owned {
 								continue // not a weft-managed file — ignore silently
 							}
 							fmt.Printf("\n[weft] target changed: %s\n", c.Rel)
-							performed, wbErr := writeBackSingleSource(m, c, p, srcs)
+							performed, wbErr := writeBackSingleSourceMap(m, c, p, wbSrcMap)
 							if wbErr != nil {
 								fmt.Fprintf(os.Stderr, "[weft] write-back error for %s: %v\n", c.Rel, wbErr)
 								slog.Error("write-back failed", slog.String("file", c.Rel), slog.Any("error", wbErr))
 								continue
 							}
 							if !performed && len(m.SourceFiles[c.Rel]) > 1 {
-								performed, wbErr = writeBackMergedSource(m, c, p, srcs)
+								performed, wbErr = writeBackMergedSourceMap(m, c, p, wbSrcMap)
 								if wbErr != nil {
 									fmt.Fprintf(os.Stderr, "[weft] write-back error for %s: %v\n", c.Rel, wbErr)
 									slog.Error("merged write-back failed", slog.String("file", c.Rel), slog.Any("error", wbErr))

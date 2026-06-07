@@ -32,14 +32,20 @@ func writeBackMergedSource(
 	p *profile.Profile,
 	srcs []source.Source,
 ) (bool, error) {
+	return writeBackMergedSourceMap(m, c, p, buildSrcMap(srcs))
+}
+
+// writeBackMergedSourceMap is the map-accepting variant of writeBackMergedSource.
+// Use this in batch loops where the srcMap has already been built once.
+func writeBackMergedSourceMap(
+	m *manifest.Manifest,
+	c watch.TargetChange,
+	p *profile.Profile,
+	srcMap map[string]source.Source,
+) (bool, error) {
 	sourceNames := m.SourceFiles[c.Rel]
 	if len(sourceNames) <= 1 {
 		return false, nil
-	}
-
-	srcMap := make(map[string]source.Source, len(srcs))
-	for _, s := range srcs {
-		srcMap[s.Name] = s
 	}
 
 	// For cascade overlay the merged target is the last source's content verbatim.
