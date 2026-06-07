@@ -33,32 +33,35 @@ func Clone(url, path, branch string, auth transport.AuthMethod, progress io.Writ
 }
 
 // IsRepo reports whether path contains a git repository.
+// This is a standalone probe used before Open() is called, so it always
+// calls PlainOpen directly rather than relying on a cached handle.
 func IsRepo(path string) bool {
 	_, err := gogit.PlainOpen(path)
 	return err == nil
 }
 
 // Repo is a handle to a local git repository.
+// The gogit.Repository handle is cached at open time; it is safe to reuse
+// across calls because go-git reads current on-disk state through the handle
+// rather than snapshotting it at open time.
 type Repo struct {
 	path string
+	repo *gogit.Repository // cached; never nil after Open returns successfully
 }
 
 // Open opens an existing repository at path.
 func Open(path string) (*Repo, error) {
-	if _, err := gogit.PlainOpen(path); err != nil {
+	r, err := gogit.PlainOpen(path)
+	if err != nil {
 		return nil, fmt.Errorf("opening repo at %s: %w", path, err)
 	}
-	return &Repo{path: path}, nil
+	return &Repo{path: path, repo: r}, nil
 }
 
 // Pull fetches from origin and fast-forwards to origin/<branch>.
 // Returns (true, nil) when new commits were pulled, (false, nil) when already up to date.
 func (r *Repo) Pull(branch string, auth transport.AuthMethod) (updated bool, err error) {
-	repo, err := gogit.PlainOpen(r.path)
-	if err != nil {
-		return false, fmt.Errorf("opening repo: %w", err)
-	}
-	wt, err := repo.Worktree()
+	wt, err := r.repo.Worktree()
 	if err != nil {
 		return false, fmt.Errorf("getting worktree: %w", err)
 	}
@@ -79,11 +82,7 @@ func (r *Repo) Pull(branch string, auth transport.AuthMethod) (updated bool, err
 
 // Status returns the human-readable working-tree status string.
 func (r *Repo) Status() (string, error) {
-	repo, err := gogit.PlainOpen(r.path)
-	if err != nil {
-		return "", fmt.Errorf("opening repo: %w", err)
-	}
-	wt, err := repo.Worktree()
+	wt, err := r.repo.Worktree()
 	if err != nil {
 		return "", fmt.Errorf("getting worktree: %w", err)
 	}
@@ -107,18 +106,14 @@ func (r *Repo) IsClean() (bool, error) {
 // Author name and email are read from the repo's local/global git config;
 // if absent, "weft" / "weft@local" are used as fallbacks.
 func (r *Repo) CommitAll(message string) error {
-	repo, err := gogit.PlainOpen(r.path)
-	if err != nil {
-		return fmt.Errorf("opening repo: %w", err)
-	}
-	wt, err := repo.Worktree()
+	wt, err := r.repo.Worktree()
 	if err != nil {
 		return fmt.Errorf("getting worktree: %w", err)
 	}
 	if err := wt.AddWithOptions(&gogit.AddOptions{All: true}); err != nil {
 		return fmt.Errorf("staging changes: %w", err)
 	}
-	name, email := authorFromConfig(repo)
+	name, email := authorFromConfig(r.repo)
 	_, err = wt.Commit(message, &gogit.CommitOptions{
 		Author: &object.Signature{Name: name, Email: email, When: time.Now()},
 	})
@@ -147,11 +142,7 @@ func authorFromConfig(repo *gogit.Repository) (name, email string) {
 
 // HeadBranch returns the name of the currently checked-out branch (e.g. "main").
 func (r *Repo) HeadBranch() (string, error) {
-	repo, err := gogit.PlainOpen(r.path)
-	if err != nil {
-		return "", fmt.Errorf("opening repo: %w", err)
-	}
-	head, err := repo.Head()
+	head, err := r.repo.Head()
 	if err != nil {
 		return "", fmt.Errorf("getting HEAD: %w", err)
 	}
@@ -161,11 +152,7 @@ func (r *Repo) HeadBranch() (string, error) {
 // OriginRemote returns the fetch URL of the "origin" remote, or "" if the
 // repo has no origin configured.
 func (r *Repo) OriginRemote() (string, error) {
-	repo, err := gogit.PlainOpen(r.path)
-	if err != nil {
-		return "", fmt.Errorf("opening repo: %w", err)
-	}
-	remote, err := repo.Remote("origin")
+	remote, err := r.repo.Remote("origin")
 	if err == gogit.ErrRemoteNotFound {
 		return "", nil
 	}
@@ -182,11 +169,7 @@ func (r *Repo) OriginRemote() (string, error) {
 // Push pushes all local commits on the current branch to origin.
 // Returns nil when there is nothing new to push (already up to date).
 func (r *Repo) Push(auth transport.AuthMethod) error {
-	repo, err := gogit.PlainOpen(r.path)
-	if err != nil {
-		return fmt.Errorf("opening repo: %w", err)
-	}
-	err = repo.Push(&gogit.PushOptions{
+	err := r.repo.Push(&gogit.PushOptions{
 		RemoteName: "origin",
 		Auth:       auth,
 		Progress:   os.Stdout,
