@@ -65,6 +65,18 @@ func Display(candidates []Candidate) string {
 	return strings.Join(parts, "  or  ")
 }
 
+// ExpandHome replaces a leading ~/ with the user's absolute home directory.
+// Paths that do not start with ~/ are returned unchanged.
+//
+// cf. Python: os.path.expanduser("~/foo")
+func ExpandHome(path string) string {
+	if strings.HasPrefix(path, "~/") {
+		home, _ := os.UserHomeDir()
+		return filepath.Join(home, path[2:])
+	}
+	return path
+}
+
 // Tilde replaces the user's home directory prefix with "~" for display.
 func Tilde(path string) string {
 	home, err := os.UserHomeDir()

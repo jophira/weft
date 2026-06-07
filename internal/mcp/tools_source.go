@@ -5,13 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
 
 	mcplib "github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/jophira/weft/internal/git"
+	"github.com/jophira/weft/internal/locate"
 	"github.com/jophira/weft/internal/source"
+	"github.com/jophira/weft/internal/sourcesync"
 )
 
 type sourceSummary struct {
@@ -44,7 +45,7 @@ func sourceListHandler(reg *source.FileRegistry) server.ToolHandlerFunc {
 				Remote: s.Remote,
 				Branch: s.Branch,
 			}
-			expanded := source.ExpandHome(s.Root)
+			expanded := locate.ExpandHome(s.Root)
 			if git.IsRepo(expanded) {
 				if repo, err := git.Open(expanded); err == nil {
 					if clean, err := repo.IsClean(); err == nil {
@@ -95,7 +96,7 @@ func sourceStatusHandler(reg *source.FileRegistry) server.ToolHandlerFunc {
 			},
 			InstructionGlob: s.Structure.InstructionGlob,
 		}
-		expanded := source.ExpandHome(s.Root)
+		expanded := locate.ExpandHome(s.Root)
 		if git.IsRepo(expanded) {
 			if repo, err := git.Open(expanded); err == nil {
 				if statusStr, err := repo.Status(); err == nil {
@@ -145,7 +146,7 @@ func sourceSyncHandler(reg *source.FileRegistry) server.ToolHandlerFunc {
 		results := make([]syncResult, 0, len(sources))
 		for _, s := range sources {
 			r := syncResult{Name: s.Name}
-			updated, err := syncSource(s)
+			updated, err := sourcesync.SyncSource(s, io.Discard)
 			if err != nil {
 				r.Error = err.Error()
 			} else {
@@ -161,33 +162,6 @@ func sourceSyncHandler(reg *source.FileRegistry) server.ToolHandlerFunc {
 	}
 }
 
-// syncSource clones (if missing) or pulls a single source.
-// Returns true when new commits were fetched.
-func syncSource(s source.Source) (bool, error) {
-	if s.Remote == "" {
-		return false, fmt.Errorf("source %q has no remote configured — add one with 'weft source edit --remote <url>'", s.Name)
-	}
-	expanded := source.ExpandHome(s.Root)
-	auth, err := git.ResolveAuth(s.Remote)
-	if err != nil {
-		return false, fmt.Errorf("resolving auth: %w", err)
-	}
-	if _, err := os.Stat(expanded); os.IsNotExist(err) {
-		if err := git.Clone(s.Remote, expanded, s.Branch, auth, io.Discard); err != nil {
-			return false, err
-		}
-		return true, nil
-	}
-	if !git.IsRepo(expanded) {
-		return false, fmt.Errorf("%s exists but is not a git repository", s.Root)
-	}
-	repo, err := git.Open(expanded)
-	if err != nil {
-		return false, err
-	}
-	return repo.Pull(s.Branch, auth)
-}
-
 type pushResult struct {
 	Name      string `json:"name"`
 	Committed bool   `json:"committed"`
@@ -196,9 +170,13 @@ type pushResult struct {
 
 func sourcePushTool() mcplib.Tool {
 	return mcplib.NewTool("weft_source_push",
-		mcplib.WithDescription("Stage all changes in a source, commit with the provided message, and push to the remote."),
+		mcplib.WithDescription("Stage all changes in a source, commit with the provided message, and push to the remote.\n\nWARNING: This tool commits and pushes to a remote git repository. It is a destructive, irreversible network operation. You MUST set confirm=true to proceed."),
 		mcplib.WithString("name", mcplib.Required(), mcplib.Description("Source name")),
 		mcplib.WithString("message", mcplib.Required(), mcplib.Description("Commit message describing what changed in the rules")),
+		mcplib.WithBoolean("confirm",
+			mcplib.Required(),
+			mcplib.Description("Must be true to proceed. Set explicitly to acknowledge this will commit and push to the remote git repository."),
+		),
 	)
 }
 
@@ -206,6 +184,10 @@ func sourcePushHandler(reg *source.FileRegistry) server.ToolHandlerFunc {
 	return func(_ context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
 		name := mcplib.ParseString(req, "name", "")
 		message := mcplib.ParseString(req, "message", "")
+		confirm := mcplib.ParseBoolean(req, "confirm", false)
+		if !confirm {
+			return mcplib.NewToolResultError("push aborted: set confirm=true to acknowledge this will commit and push to the remote"), nil
+		}
 		if name == "" {
 			return mcplib.NewToolResultError("name is required"), nil
 		}
@@ -216,7 +198,7 @@ func sourcePushHandler(reg *source.FileRegistry) server.ToolHandlerFunc {
 		if err != nil {
 			return mcplib.NewToolResultError(err.Error()), nil
 		}
-		expanded := source.ExpandHome(s.Root)
+		expanded := locate.ExpandHome(s.Root)
 		repo, err := git.Open(expanded)
 		if err != nil {
 			return mcplib.NewToolResultError(err.Error()), nil
