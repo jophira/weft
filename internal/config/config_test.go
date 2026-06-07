@@ -164,6 +164,37 @@ func TestSetActiveProfile_preservesOtherKeys(t *testing.T) {
 	})
 }
 
+// TestSetActiveProfile_corruptYAML verifies that setKey returns an error when
+// config.yaml exists but contains invalid YAML, and does NOT overwrite the file
+// (data-loss protection for issue #87).
+func TestSetActiveProfile_corruptYAML(t *testing.T) {
+	withHome(t, func(home string) {
+		cfgDir := filepath.Join(home, ".config", "weft")
+		if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		cfgPath := filepath.Join(cfgDir, "config.yaml")
+		corrupt := []byte(":\tinvalid: [yaml: content\n")
+		if err := os.WriteFile(cfgPath, corrupt, 0o644); err != nil {
+			t.Fatalf("writing corrupt config: %v", err)
+		}
+
+		err := config.SetActiveProfile("should-fail")
+		if err == nil {
+			t.Fatal("SetActiveProfile: expected error for corrupt YAML, got nil")
+		}
+
+		// The file must be unchanged — not overwritten with only the new key.
+		got, readErr := os.ReadFile(cfgPath)
+		if readErr != nil {
+			t.Fatalf("reading config after failed SetActiveProfile: %v", readErr)
+		}
+		if string(got) != string(corrupt) {
+			t.Errorf("config.yaml was overwritten despite corrupt-YAML error\ngot:  %q\nwant: %q", got, corrupt)
+		}
+	})
+}
+
 func containsSubstr(s, sub string) bool {
 	return len(s) >= len(sub) && (s == sub || sub == "" ||
 		func() bool {
