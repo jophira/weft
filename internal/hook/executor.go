@@ -1,6 +1,7 @@
 package hook
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -10,6 +11,11 @@ import (
 
 	"gopkg.in/yaml.v3"
 )
+
+// ErrConfirmRequired is returned when a hook has RequireConfirm set and the
+// caller has not obtained user confirmation. The caller is responsible for
+// prompting the user and re-invoking Run (or RunConfirmed) on approval.
+var ErrConfirmRequired = errors.New("hook requires confirmation before running")
 
 // Executor runs hook actions.
 type Executor struct {
@@ -21,7 +27,28 @@ func NewExecutor(sourcesDir string) *Executor {
 }
 
 // Run executes the action defined in h, regardless of trigger type.
+// If h.Action.RequireConfirm is true and the action is a shell command,
+// Run returns ErrConfirmRequired without executing anything. The caller must
+// obtain confirmation and call RunConfirmed instead.
 func (e *Executor) Run(h Hook) error {
+	switch h.Action.Type {
+	case ActionShell:
+		if h.Action.RequireConfirm {
+			return ErrConfirmRequired
+		}
+		return e.runShell(h)
+	case ActionAppendMemory:
+		return e.appendMemory(h)
+	case ActionAIImprove:
+		return fmt.Errorf("ai_improve is not yet implemented — use 'weft hook run' with a shell or append_memory action for now")
+	default:
+		return fmt.Errorf("unknown action type %q", h.Action.Type)
+	}
+}
+
+// RunConfirmed executes the action without the RequireConfirm gate.
+// Use this only after the caller has obtained explicit user confirmation.
+func (e *Executor) RunConfirmed(h Hook) error {
 	switch h.Action.Type {
 	case ActionShell:
 		return e.runShell(h)
