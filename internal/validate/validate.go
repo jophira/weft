@@ -3,6 +3,7 @@ package validate
 import (
 	"bytes"
 	"strings"
+	"unicode"
 )
 
 // DefaultWarnSizeKB is the default threshold (in KB) above which a merged
@@ -40,7 +41,7 @@ func duplicateBlocks(content []byte) []string {
 
 	for _, block := range splitBlocks(content) {
 		norm := normalizeBlock(block)
-		if norm == "" {
+		if norm == "" || !hasLetter(norm) {
 			continue
 		}
 		if seen[norm] && !reported[norm] {
@@ -81,6 +82,18 @@ func splitBlocks(content []byte) []string {
 // normalizeBlock lowercases and collapses all whitespace for comparison.
 func normalizeBlock(s string) string {
 	return strings.Join(strings.Fields(strings.ToLower(s)), " ")
+}
+
+// hasLetter reports whether s contains at least one Unicode letter.
+// Blocks with no letters (e.g. "---", "===", "* * *") are structural
+// separators, not content, and should not be flagged as duplicates.
+func hasLetter(s string) bool {
+	for _, r := range s {
+		if unicode.IsLetter(r) {
+			return true
+		}
+	}
+	return false
 }
 
 // blockPreview returns the first 72 characters of a normalised block.

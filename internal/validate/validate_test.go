@@ -72,3 +72,16 @@ func TestInstruction_duplicateReportedOnce(t *testing.T) {
 		t.Errorf("expected 1 report for triple duplicate, got %d", len(r.DuplicateBlocks))
 	}
 }
+
+func TestInstruction_separatorsNotFlagged(t *testing.T) {
+	// Structural separators with no letters must never trigger a duplicate warning,
+	// even when repeated across many source files.
+	separators := []string{"---", "===", "* * *", "...", "***", "- - -"}
+	for _, sep := range separators {
+		content := []byte(sep + "\n\nSome rule.\n\n" + sep + "\n\nAnother rule.\n\n" + sep + "\n")
+		r := validate.Instruction(content, validate.DefaultWarnSizeKB)
+		if len(r.DuplicateBlocks) != 0 {
+			t.Errorf("separator %q should not produce duplicate warnings, got: %v", sep, r.DuplicateBlocks)
+		}
+	}
+}
