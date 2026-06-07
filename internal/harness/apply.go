@@ -55,7 +55,10 @@ type fileEntry struct {
 //
 // All conflicts are backed up before any writes occur. The manifest is updated
 // with new hashes after a successful apply.
-func applyWithManifest(stagedRoot, targetRoot, harnessName string, ctx ApplyCtx, renames map[string]string) error {
+//
+// filter, when non-nil, is called with each file's rel path (relative to stagedRoot)
+// before processing; returning false skips the file entirely. Pass nil to accept all.
+func applyWithManifest(stagedRoot, targetRoot, harnessName string, ctx ApplyCtx, renames map[string]string, filter func(rel string) bool) error {
 	out := applyOut(ctx)
 
 	m, err := manifest.Load(ctx.CfgDir, harnessName)
@@ -74,6 +77,11 @@ func applyWithManifest(stagedRoot, targetRoot, harnessName string, ctx ApplyCtx,
 		rel, relErr := filepath.Rel(stagedRoot, path)
 		if relErr != nil {
 			return relErr
+		}
+		// filter lets harnesses restrict which files are processed (e.g. by extension).
+		// cf. Java: Predicate<String> — Go uses plain function values instead.
+		if filter != nil && !filter(rel) {
+			return nil
 		}
 		dst := rel
 		if renamed, ok := renames[rel]; ok {
@@ -238,7 +246,7 @@ func applyToHomeDir(stagedRoot, dotSubdir, harnessName string, ctx ApplyCtx, ren
 	if err := os.MkdirAll(target, 0o755); err != nil {
 		return fmt.Errorf("ensuring ~/%s exists: %w", dotSubdir, err)
 	}
-	return applyWithManifest(stagedRoot, target, harnessName, ctx, renames)
+	return applyWithManifest(stagedRoot, target, harnessName, ctx, renames, nil)
 }
 
 // backupConflicts copies each conflict file into cfgDir/backups/<harness>/<timestamp>/,
