@@ -166,7 +166,7 @@ func TestWriteBackSingleSource_NewFile_UsesWriteBackDefault(t *testing.T) {
 }
 
 // TestOwningSource_UnexpandedTildeRoot documents the contract: source roots must
-// be expanded (via source.ExpandHome) before being passed to owningSource.
+// be expanded (via locate.ExpandHome) before being passed to owningSource.
 // Unexpanded "~/..." roots are not shell-expanded by filepath.Join, so os.Stat
 // fails silently and write-back is skipped. resolveProfileRoots sets s.Root to
 // the expanded path before storing in srcs to uphold this contract.
@@ -187,7 +187,7 @@ func TestOwningSource_UnexpandedTildeRoot_Unresolvable(t *testing.T) {
 
 	_, _, ok := owningSource("CLAUDE.md", p, srcs)
 	if ok {
-		t.Error("unexpanded tilde root must not resolve — callers must expand via source.ExpandHome first")
+		t.Error("unexpanded tilde root must not resolve — callers must expand via locate.ExpandHome first")
 	}
 }
 
