@@ -26,7 +26,7 @@ func TestAcquireBlocksLiveHolder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first Acquire: %v", err)
 	}
-	defer lock.Release() //nolint:errcheck
+	defer lock.Release() //nolint:errcheck // release error irrelevant in test teardown
 
 	_, err = Acquire(path)
 	if !errors.Is(err, ErrLocked) {
