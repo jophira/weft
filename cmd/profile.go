@@ -21,6 +21,7 @@ import (
 	"github.com/jophira/weft/internal/harness"
 	"github.com/jophira/weft/internal/manifest"
 	"github.com/jophira/weft/internal/merge"
+	"github.com/jophira/weft/internal/pidlock"
 	"github.com/jophira/weft/internal/profile"
 	"github.com/jophira/weft/internal/source"
 	"github.com/jophira/weft/internal/validate"
@@ -550,6 +551,13 @@ file inside any source root changes. Pass --no-watch to apply once and exit
 
 		// 6. Enter watch mode unless opted out.
 		if !profileNoWatch {
+			lockPath := filepath.Join(cfgDir, "weft.lock")
+			lock, lockErr := pidlock.Acquire(lockPath)
+			if lockErr != nil {
+				return lockErr
+			}
+			defer lock.Release()
+
 			fmt.Println("\nWatching for changes... (Ctrl-C to stop)")
 			var guard watch.ApplyGuard
 
