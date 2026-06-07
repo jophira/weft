@@ -533,6 +533,96 @@ func TestApplyWithManifest_NoSourceAttribution_NoSourceFiles(t *testing.T) {
 	}
 }
 
+// ── Issue #86 — stale manifest entry pruning ──────────────────────────────────
+
+// TestApplyWithManifest_RemovedFile_PrunedFromManifest verifies that when a file
+// disappears from the staged tree, its entry is removed from the manifest so that
+// a future file written at that path is not treated as a conflict.
+func TestApplyWithManifest_RemovedFile_PrunedFromManifest(t *testing.T) {
+	staged := t.TempDir()
+	write(t, filepath.Join(staged, "CLAUDE.md"), "rules v1")
+	write(t, filepath.Join(staged, "extra.md"), "extra content")
+
+	target := t.TempDir()
+	ctx := testCtx(t)
+
+	// First apply — both files tracked in manifest.
+	if err := applyWithManifest(staged, target, "claude-code", ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	m, err := manifest.Load(ctx.CfgDir, "claude-code")
+	if err != nil {
+		t.Fatalf("loading manifest after first apply: %v", err)
+	}
+	if _, ok := m.Files["extra.md"]; !ok {
+		t.Fatal("expected extra.md in manifest after first apply")
+	}
+
+	// Remove extra.md from staged dir — simulates a source file being deleted.
+	if err := os.Remove(filepath.Join(staged, "extra.md")); err != nil {
+		t.Fatal(err)
+	}
+
+	// Second apply — extra.md is not staged; it must be pruned from manifest.
+	if err := applyWithManifest(staged, target, "claude-code", ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	m2, err := manifest.Load(ctx.CfgDir, "claude-code")
+	if err != nil {
+		t.Fatalf("loading manifest after second apply: %v", err)
+	}
+	if _, ok := m2.Files["extra.md"]; ok {
+		t.Error("extra.md must be pruned from manifest after it is removed from staged tree")
+	}
+}
+
+// TestApplyWithManifest_SourceFiles_PrunedWhenFileRemoved verifies that SourceFiles
+// entries for removed staged files are also pruned on the next apply.
+func TestApplyWithManifest_SourceFiles_PrunedWhenFileRemoved(t *testing.T) {
+	staged := t.TempDir()
+	write(t, filepath.Join(staged, "CLAUDE.md"), "merged rules")
+	write(t, filepath.Join(staged, "extra.md"), "extra")
+
+	target := t.TempDir()
+	ctx := ApplyCtx{
+		ProfileName: "hybrid",
+		CfgDir:      t.TempDir(),
+		SourceAttribution: map[string][]string{
+			"CLAUDE.md": {"work", "personal"},
+			"extra.md":  {"work"},
+		},
+	}
+
+	if err := applyWithManifest(staged, target, "claude-code", ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	// Remove extra.md from staged; also drop it from SourceAttribution.
+	if err := os.Remove(filepath.Join(staged, "extra.md")); err != nil {
+		t.Fatal(err)
+	}
+	ctx.SourceAttribution = map[string][]string{
+		"CLAUDE.md": {"work", "personal"},
+	}
+
+	if err := applyWithManifest(staged, target, "claude-code", ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	m, err := manifest.Load(ctx.CfgDir, "claude-code")
+	if err != nil {
+		t.Fatalf("loading manifest: %v", err)
+	}
+	if _, ok := m.SourceFiles["extra.md"]; ok {
+		t.Error("extra.md must be pruned from SourceFiles after it is removed from staged tree")
+	}
+	if srcs, ok := m.SourceFiles["CLAUDE.md"]; !ok || len(srcs) != 2 {
+		t.Errorf("CLAUDE.md SourceFiles = %v, want [work personal]", srcs)
+	}
+}
+
 // ── Registry ──────────────────────────────────────────────────────────────────
 
 type stubHarness struct{ name string }
