@@ -69,7 +69,9 @@ func setKey(key string, value any) error {
 
 	raw := map[string]any{}
 	if data, err := os.ReadFile(cfgPath); err == nil {
-		_ = yaml.Unmarshal(data, &raw)
+		if err := yaml.Unmarshal(data, &raw); err != nil {
+			return fmt.Errorf("config.yaml is corrupt: %w", err)
+		}
 	}
 	raw[key] = value
 
