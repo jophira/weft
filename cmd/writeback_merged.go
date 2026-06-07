@@ -344,11 +344,8 @@ func attributeLinesToSources(script []editOp, bounds [][2]int, numSources int, e
 		}
 
 		// Pair each inserted line with the source owning the corresponding deleted line.
-		n := len(deleted)
-		if len(inserted) < n {
-			n = len(inserted)
-		}
-		for k := 0; k < n; k++ {
+		paired := min(len(deleted), len(inserted))
+		for k := range paired {
 			src := sourceFor(deleted[k])
 			if src >= 0 {
 				result[src] = append(result[src], editedLines[inserted[k]])
@@ -356,7 +353,7 @@ func attributeLinesToSources(script []editOp, bounds [][2]int, numSources int, e
 		}
 		// Unmatched inserts (more inserts than deletes) go to the last deleted source,
 		// or the preceding source for pure insertions.
-		for k := n; k < len(inserted); k++ {
+		for k := paired; k < len(inserted); k++ {
 			var src int
 			switch {
 			case len(deleted) > 0:
