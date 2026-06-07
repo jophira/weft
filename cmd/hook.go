@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"text/tabwriter"
@@ -107,13 +108,17 @@ var hookRunCmd = &cobra.Command{
 			return err
 		}
 
-		if h.Action.RequireConfirm && !confirm(fmt.Sprintf("Run hook %q? [y/N] ", h.Name)) {
-			fmt.Println("Aborted.")
-			return nil
-		}
-
+		exec := newExecutor()
 		fmt.Printf("Running hook %q (%s/%s)...\n", h.Name, h.Trigger, h.Action.Type)
-		if err := newExecutor().Run(*h); err != nil {
+		err = exec.Run(*h)
+		if errors.Is(err, hook.ErrConfirmRequired) {
+			if !confirm(fmt.Sprintf("Run hook %q? [y/N] ", h.Name)) {
+				fmt.Println("Aborted.")
+				return nil
+			}
+			err = exec.RunConfirmed(*h)
+		}
+		if err != nil {
 			return fmt.Errorf("hook failed: %w", err)
 		}
 		fmt.Printf("✓ Done\n")
