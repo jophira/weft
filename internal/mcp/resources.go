@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	mcplib "github.com/mark3labs/mcp-go/mcp"
@@ -107,10 +108,17 @@ func mergeProfileInstructions(p *profile.Profile, reg *source.FileRegistry) (str
 }
 
 // readRootFiles reads the root-level weft-managed files from targetRoot
-// (skipping anything in a subdirectory).
+// (skipping anything in a subdirectory). Files are read in sorted key order
+// so the output is deterministic across successive calls.
 func readRootFiles(targetRoot string, files map[string]string) (string, error) {
-	var buf []byte
+	rels := make([]string, 0, len(files))
 	for rel := range files {
+		rels = append(rels, rel)
+	}
+	sort.Strings(rels)
+
+	var buf []byte
+	for _, rel := range rels {
 		if strings.ContainsRune(rel, '/') || strings.ContainsRune(rel, filepath.Separator) {
 			continue
 		}

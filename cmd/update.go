@@ -140,6 +140,8 @@ func releaseURL(version string) string {
 	)
 }
 
+const maxDownloadBytes = 100 << 20 // 100 MB
+
 func downloadFile(url, dest string) (retErr error) {
 	resp, err := http.Get(url) //nolint:gosec // URL is constructed from known constant owner/repo, not user input
 	if err != nil {
@@ -162,8 +164,10 @@ func downloadFile(url, dest string) (retErr error) {
 			retErr = cerr
 		}
 	}()
-	_, err = io.Copy(f, resp.Body)
-	return err
+	if _, err := io.Copy(f, io.LimitReader(resp.Body, maxDownloadBytes)); err != nil {
+		return err
+	}
+	return nil
 }
 
 func extractBinary(archivePath, dest string) error {
