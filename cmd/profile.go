@@ -45,15 +45,8 @@ func managedFilter(sources []source.Source) merge.Filter {
 	prefixes := []string{"CLAUDE.md"}
 	seen := map[string]bool{"CLAUDE.md": true}
 	for _, s := range sources {
-		for _, d := range []string{
-			s.Structure.Commands,
-			s.Structure.Agents,
-			s.Structure.Skills,
-			s.Structure.Memory,
-			s.Structure.Hooks,
-		} {
-			d = strings.TrimSuffix(strings.TrimSpace(d), "/")
-			if d != "" && !seen[d] {
+		for _, d := range s.Structure.ManagedDirs() {
+			if !seen[d] {
 				prefixes = append(prefixes, d)
 				seen[d] = true
 			}
@@ -85,20 +78,7 @@ func buildAssembler(roots []string, srcs []source.Source) merge.Assembler {
 		if glob == "" {
 			glob = source.DefaultStructure().InstructionGlob
 		}
-		var excludes []string
-		for _, d := range []string{
-			s.Structure.Commands,
-			s.Structure.Agents,
-			s.Structure.Skills,
-			s.Structure.Memory,
-			s.Structure.Hooks,
-			s.Structure.Projects,
-		} {
-			if d = strings.TrimRight(strings.TrimSpace(d), "/\\"); d != "" {
-				excludes = append(excludes, d)
-			}
-		}
-		byRoot[root] = entry{glob: glob, excludes: excludes}
+		byRoot[root] = entry{glob: glob, excludes: s.Structure.AllDirs()}
 	}
 	return func(root string) ([]byte, error) {
 		e := byRoot[root]
@@ -208,16 +188,7 @@ func computeProvenance(roots []string, srcs []source.Source) []sourceContrib {
 		if glob == "" {
 			glob = source.DefaultStructure().InstructionGlob
 		}
-		var excludes []string
-		for _, d := range []string{
-			s.Structure.Commands, s.Structure.Agents,
-			s.Structure.Skills, s.Structure.Memory, s.Structure.Hooks,
-		} {
-			if d = strings.TrimRight(strings.TrimSpace(d), "/\\"); d != "" {
-				excludes = append(excludes, d)
-			}
-		}
-		data, _ := collect.Collect(root, glob, excludes...)
+		data, _ := collect.Collect(root, glob, s.Structure.ManagedDirs()...)
 		contribs[i] = sourceContrib{name: s.Name, bytes: len(data)}
 	}
 	return contribs

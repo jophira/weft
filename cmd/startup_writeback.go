@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/jophira/weft/internal/locate"
@@ -109,11 +110,7 @@ func startupWriteBack(
 // source names joined with "+".
 func resolvedSourceName(rel string, p *profile.Profile, srcs []source.Source, m *manifest.Manifest) string {
 	if names := m.SourceFiles[rel]; len(names) > 1 {
-		result := names[0]
-		for _, n := range names[1:] {
-			result += "+" + n
-		}
-		return result
+		return strings.Join(names, "+")
 	}
 	name, _, ok := owningSource(rel, p, srcs)
 	if ok {

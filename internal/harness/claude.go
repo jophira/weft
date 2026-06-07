@@ -1,7 +1,6 @@
 package harness
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 )
@@ -24,13 +23,5 @@ func (c *ClaudeCode) Detect() bool {
 // subdirectories as needed. Existing files owned by weft are overwritten
 // silently; externally-modified files are backed up first.
 func (c *ClaudeCode) Apply(stagedRoot string, ctx ApplyCtx) error {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return fmt.Errorf("resolving home directory: %w", err)
-	}
-	target := filepath.Join(home, ".claude")
-	if err := os.MkdirAll(target, 0o755); err != nil {
-		return fmt.Errorf("ensuring ~/.claude exists: %w", err)
-	}
-	return applyWithManifest(stagedRoot, target, c.Name(), ctx, nil)
+	return applyToHomeDir(stagedRoot, ".claude", c.Name(), ctx, nil)
 }

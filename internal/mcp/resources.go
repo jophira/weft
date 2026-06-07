@@ -47,7 +47,7 @@ func sourceInstructionsResource(reg *source.FileRegistry) server.ResourceTemplat
 		if err != nil {
 			return nil, err
 		}
-		data, err := collect.Collect(source.ExpandHome(s.Root), s.Structure.InstructionGlob, managedDirs(*s)...)
+		data, err := collect.Collect(source.ExpandHome(s.Root), s.Structure.InstructionGlob, s.Structure.ManagedDirs()...)
 		if err != nil {
 			return nil, err
 		}
@@ -94,7 +94,7 @@ func mergeProfileInstructions(p *profile.Profile, reg *source.FileRegistry) (str
 		if err != nil {
 			return "", err
 		}
-		data, err := collect.Collect(source.ExpandHome(s.Root), s.Structure.InstructionGlob, managedDirs(*s)...)
+		data, err := collect.Collect(source.ExpandHome(s.Root), s.Structure.InstructionGlob, s.Structure.ManagedDirs()...)
 		if err != nil {
 			return "", fmt.Errorf("collecting from source %s: %w", srcName, err)
 		}
@@ -104,24 +104,6 @@ func mergeProfileInstructions(p *profile.Profile, reg *source.FileRegistry) (str
 		}
 	}
 	return string(merged), nil
-}
-
-// managedDirs returns the managed subdirectory exclusion list for a source.
-func managedDirs(s source.Source) []string {
-	var dirs []string
-	for _, d := range []string{
-		s.Structure.Commands,
-		s.Structure.Agents,
-		s.Structure.Skills,
-		s.Structure.Memory,
-		s.Structure.Hooks,
-	} {
-		d = strings.TrimSuffix(strings.TrimSpace(d), "/")
-		if d != "" {
-			dirs = append(dirs, d)
-		}
-	}
-	return dirs
 }
 
 // readRootFiles reads the root-level weft-managed files from targetRoot

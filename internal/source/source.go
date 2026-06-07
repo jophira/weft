@@ -1,5 +1,7 @@
 package source
 
+import "strings"
+
 // Structure describes the subdirectory layout within a source root.
 type Structure struct {
 	Commands string `yaml:"commands"         mapstructure:"commands"`
@@ -30,6 +32,32 @@ type Source struct {
 	AutoPull  bool      `yaml:"auto_pull"  mapstructure:"auto_pull"`
 	AutoPush  bool      `yaml:"auto_push"  mapstructure:"auto_push"`
 	Structure Structure `yaml:"structure"  mapstructure:"structure"`
+}
+
+// ManagedDirs returns the non-empty, trimmed names of the managed
+// subdirectories (Commands, Agents, Skills, Memory, Hooks). Projects is
+// excluded because it is a generated output directory, not a merge input.
+func (s Structure) ManagedDirs() []string {
+	return cleanDirs(s.Commands, s.Agents, s.Skills, s.Memory, s.Hooks)
+}
+
+// AllDirs returns ManagedDirs plus Projects (when set). Use this when
+// excluding directories from instruction assembly, where project files must
+// also be omitted.
+func (s Structure) AllDirs() []string {
+	return cleanDirs(s.Commands, s.Agents, s.Skills, s.Memory, s.Hooks, s.Projects)
+}
+
+// cleanDirs trims whitespace and trailing path separators from each name,
+// returning only non-empty results.
+func cleanDirs(dirs ...string) []string {
+	out := make([]string, 0, len(dirs))
+	for _, d := range dirs {
+		if d = strings.TrimRight(strings.TrimSpace(d), "/\\"); d != "" {
+			out = append(out, d)
+		}
+	}
+	return out
 }
 
 func DefaultStructure() Structure {

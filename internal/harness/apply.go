@@ -218,6 +218,21 @@ func trackAndWriteFile(absPath, rel, harnessName string, content []byte, ctx App
 	return manifest.Save(ctx.CfgDir, m)
 }
 
+// applyToHomeDir resolves the home directory, ensures dotSubdir exists under it,
+// then delegates to applyWithManifest. It is the common Apply body for harnesses
+// whose target is a single directory under $HOME (e.g. ~/.claude, ~/.aider).
+func applyToHomeDir(stagedRoot, dotSubdir, harnessName string, ctx ApplyCtx, renames map[string]string) error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("resolving home directory: %w", err)
+	}
+	target := filepath.Join(home, dotSubdir)
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		return fmt.Errorf("ensuring ~/%s exists: %w", dotSubdir, err)
+	}
+	return applyWithManifest(stagedRoot, target, harnessName, ctx, renames)
+}
+
 // backupConflicts copies each conflict file into cfgDir/backups/<harness>/<timestamp>/,
 // preserving relative path structure. Returns the backup directory path.
 func backupConflicts(conflicts []conflictFile, harnessName, cfgDir string) (string, error) {

@@ -1,7 +1,6 @@
 package harness
 
 import (
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -27,15 +26,7 @@ func (g *GeminiCLI) Detect() bool {
 
 // Apply copies files from stagedRoot into ~/.gemini/, renaming CLAUDE.md → GEMINI.md.
 func (g *GeminiCLI) Apply(stagedRoot string, ctx ApplyCtx) error {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return fmt.Errorf("resolving home directory: %w", err)
-	}
-	target := filepath.Join(home, ".gemini")
-	if err := os.MkdirAll(target, 0o755); err != nil {
-		return fmt.Errorf("ensuring ~/.gemini exists: %w", err)
-	}
-	return applyWithManifest(stagedRoot, target, g.Name(), ctx, map[string]string{
+	return applyToHomeDir(stagedRoot, ".gemini", g.Name(), ctx, map[string]string{
 		"CLAUDE.md": "GEMINI.md",
 	})
 }

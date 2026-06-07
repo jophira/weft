@@ -1,7 +1,6 @@
 package harness
 
 import (
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -27,15 +26,7 @@ func (c *Codex) Detect() bool {
 
 // Apply copies files from stagedRoot into ~/.codex/, renaming CLAUDE.md → AGENTS.md.
 func (c *Codex) Apply(stagedRoot string, ctx ApplyCtx) error {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return fmt.Errorf("resolving home directory: %w", err)
-	}
-	target := filepath.Join(home, ".codex")
-	if err := os.MkdirAll(target, 0o755); err != nil {
-		return fmt.Errorf("ensuring ~/.codex exists: %w", err)
-	}
-	return applyWithManifest(stagedRoot, target, c.Name(), ctx, map[string]string{
+	return applyToHomeDir(stagedRoot, ".codex", c.Name(), ctx, map[string]string{
 		"CLAUDE.md": "AGENTS.md",
 	})
 }
