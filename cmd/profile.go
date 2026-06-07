@@ -509,7 +509,7 @@ file inside any source root changes. Pass --no-watch to apply once and exit
 			if lockErr != nil {
 				return lockErr
 			}
-			defer lock.Release()
+			defer func() { _ = lock.Release() }()
 		}
 
 		// 3. Load the profile and resolve source roots.

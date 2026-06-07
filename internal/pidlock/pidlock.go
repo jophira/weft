@@ -5,104 +5,56 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
-	"strings"
 	"syscall"
 )
 
-// ErrLocked is returned by Acquire when another live process holds the lock.
-type ErrLocked struct {
-	Path      string
-	HolderPID int
-}
+// ErrLocked is returned by Acquire when another live process already holds the lock.
+// With flock(2) the kernel owns the lock — there is no way to retrieve the holder's
+// PID from user-space, so the sentinel is a plain error value checked with errors.Is.
+var ErrLocked = errors.New("weft watcher is already running — use --no-watch to apply once without watching")
 
-func (e *ErrLocked) Error() string {
-	return fmt.Sprintf("weft watcher is already running (PID %d) — use --no-watch to apply once without watching", e.HolderPID)
-}
-
-// Lock represents an acquired PID lock file.
+// Lock represents an acquired flock(2) exclusive lock on a file.
+// The lock is held for exactly as long as the underlying *os.File remains open;
+// the kernel releases it automatically when the process exits — including on
+// crashes and SIGKILL — so there is no stale-lock problem and no PID tracking needed.
+// (cf. Java: no stdlib equivalent; would need FileLock from java.nio.channels)
 type Lock struct {
-	path string
+	f *os.File
 }
 
-// Acquire atomically creates the lock file at path and writes the current PID.
-// It uses O_CREATE|O_EXCL so that exactly one caller succeeds when multiple
-// processes race — no TOCTOU window between reading and writing.
+// Acquire opens (or creates) the lock file at path and acquires an exclusive
+// non-blocking flock(2) on it.
 //
-// If the file already exists the existing PID is checked:
-//   - alive  → return ErrLocked
-//   - stale  → remove the file and retry from the top
-//
-// Returns ErrLocked if a live process already holds the lock.
+// Returns ErrLocked when another process holds the lock; any other error
+// indicates an unexpected OS failure.
 func Acquire(path string) (*Lock, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, fmt.Errorf("pidlock: creating dir: %w", err)
 	}
 
-	for {
-		// Attempt atomic creation — only one concurrent caller can win this race.
-		// (cf. Java: FileChannel with CREATE_NEW StandardOpenOption)
-		f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
-		if err == nil {
-			// We exclusively created the file; write our PID and we're done.
-			_, werr := fmt.Fprintf(f, "%d", os.Getpid())
-			cerr := f.Close()
-			if werr != nil {
-				_ = os.Remove(path)
-				return nil, fmt.Errorf("pidlock: writing lock file: %w", werr)
-			}
-			if cerr != nil {
-				_ = os.Remove(path)
-				return nil, fmt.Errorf("pidlock: closing lock file: %w", cerr)
-			}
-			return &Lock{path: path}, nil
-		}
-
-		// Any error other than "file already exists" is unexpected.
-		if !errors.Is(err, os.ErrExist) {
-			return nil, fmt.Errorf("pidlock: opening lock file: %w", err)
-		}
-
-		// File exists — read the holding PID and check liveness.
-		data, readErr := os.ReadFile(path)
-		if readErr != nil {
-			// File may have been removed between our O_EXCL attempt and ReadFile
-			// (another process cleaned up a stale lock). Retry.
-			if errors.Is(readErr, os.ErrNotExist) {
-				continue
-			}
-			return nil, fmt.Errorf("pidlock: reading lock file: %w", readErr)
-		}
-
-		pid, parseErr := strconv.Atoi(strings.TrimSpace(string(data)))
-		if parseErr == nil && pid > 0 && processAlive(pid) {
-			return nil, &ErrLocked{Path: path, HolderPID: pid}
-		}
-
-		// Stale lock — remove it and retry the atomic create.
-		if rmErr := os.Remove(path); rmErr != nil && !errors.Is(rmErr, os.ErrNotExist) {
-			return nil, fmt.Errorf("pidlock: removing stale lock: %w", rmErr)
-		}
-		// Loop back to the top; another goroutine may win the next O_EXCL, which
-		// is fine — we'll read their PID and return ErrLocked if they're alive.
-	}
-}
-
-// Release removes the lock file. Safe to call more than once.
-func (l *Lock) Release() {
-	_ = os.Remove(l.path)
-}
-
-// processAlive reports whether pid refers to a live process on this machine.
-// Uses kill(pid, 0) — the standard POSIX liveness probe (cf. Java: no stdlib equivalent,
-// would need /proc or ProcessHandle; Go's os.FindProcess always succeeds on Unix).
-func processAlive(pid int) bool {
-	proc, err := os.FindProcess(pid)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
-		return false
+		return nil, fmt.Errorf("pidlock: opening lock file: %w", err)
 	}
-	// Signal 0 does not send a signal; it only checks whether the process exists
-	// and the caller has permission to signal it.
-	err = proc.Signal(syscall.Signal(0))
-	return err == nil || errors.Is(err, syscall.EPERM)
+
+	// LOCK_EX = exclusive; LOCK_NB = non-blocking (returns EWOULDBLOCK immediately
+	// if the lock is already held by another process, rather than blocking).
+	// cf. Java: FileChannel.tryLock() is the closest equivalent.
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		_ = f.Close()
+		if errors.Is(err, syscall.EWOULDBLOCK) {
+			return nil, ErrLocked
+		}
+		return nil, fmt.Errorf("pidlock: flock: %w", err)
+	}
+
+	return &Lock{f: f}, nil
+}
+
+// Release closes the lock file, which implicitly releases the flock(2) lock.
+// The kernel also releases it automatically on process exit, so Release is only
+// needed for clean handoff within a running process.
+// Safe to call more than once (subsequent calls return an error but do not panic).
+func (l *Lock) Release() error {
+	return l.f.Close()
 }
