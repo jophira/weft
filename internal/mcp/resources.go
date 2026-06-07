@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -18,6 +19,11 @@ import (
 	"github.com/jophira/weft/internal/profile"
 	"github.com/jophira/weft/internal/source"
 )
+
+// safeName matches MCP URI name segments: alphanumeric, hyphens, and underscores only.
+// This mirrors the validName constraint in source/registry.go but allows uppercase
+// to be conservative — any traversal character (dot, slash, backslash) is rejected.
+var safeName = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
 func activeProfileResource(pm *profile.FileManager, reg *source.FileRegistry, activeFn func() string) server.ResourceHandlerFunc {
 	return func(_ context.Context, req mcplib.ReadResourceRequest) ([]mcplib.ResourceContents, error) {
@@ -44,6 +50,11 @@ func sourceInstructionsResource(reg *source.FileRegistry) server.ResourceTemplat
 		if name == "" {
 			return nil, fmt.Errorf("cannot parse source name from URI: %s", req.Params.URI)
 		}
+		// Guard against path traversal via crafted MCP URIs (e.g. "../secret").
+		// reg.Get() does not re-validate the name, so we must check here.
+		if !safeName.MatchString(name) {
+			return nil, fmt.Errorf("invalid source name %q in URI: %s", name, req.Params.URI)
+		}
 		s, err := reg.Get(name)
 		if err != nil {
 			return nil, err
@@ -62,6 +73,12 @@ func harnessCurrentResource(cfgDir string) server.ResourceTemplateHandlerFunc {
 		name := uriParam(req.Params.URI, "harness", "current")
 		if name == "" {
 			return nil, fmt.Errorf("cannot parse harness name from URI: %s", req.Params.URI)
+		}
+		// Guard against path traversal: manifest.Load builds a file path from name
+		// without re-validating it, so a crafted URI like "../../../etc/passwd" could
+		// escape the manifest directory.
+		if !safeName.MatchString(name) {
+			return nil, fmt.Errorf("invalid harness name %q in URI: %s", name, req.Params.URI)
 		}
 		dir := cfgDir
 		if dir == "" {
@@ -117,12 +134,24 @@ func readRootFiles(targetRoot string, files map[string]string) (string, error) {
 	}
 	sort.Strings(rels)
 
+	// cleanRoot is used for prefix checks below.
+	// filepath.Clean normalises trailing slashes so HasPrefix is reliable.
+	// (cf. Java: Path.normalize().startsWith())
+	cleanRoot := filepath.Clean(targetRoot) + string(filepath.Separator)
+
 	var buf []byte
 	for _, rel := range rels {
 		if strings.ContainsRune(rel, '/') || strings.ContainsRune(rel, filepath.Separator) {
 			continue
 		}
-		data, err := os.ReadFile(filepath.Join(targetRoot, rel))
+		absPath := filepath.Join(targetRoot, rel)
+		// Secondary guard: a bare ".." key passes the slash check above but
+		// filepath.Join resolves it, escaping targetRoot.  Verify the joined
+		// path is still inside the root before reading.
+		if !strings.HasPrefix(filepath.Clean(absPath)+string(filepath.Separator), cleanRoot) {
+			continue
+		}
+		data, err := os.ReadFile(absPath)
 		if os.IsNotExist(err) {
 			continue
 		}
