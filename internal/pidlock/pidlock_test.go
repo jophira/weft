@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"testing"
 )
 
@@ -78,6 +79,67 @@ func TestReleaseIsIdempotent(t *testing.T) {
 	}
 	lock.Release()
 	lock.Release() // must not panic
+}
+
+// TestAcquireConcurrent verifies that when N goroutines race to acquire the
+// same lock file exactly one succeeds and all others receive ErrLocked.
+// This is the key correctness property of the O_EXCL fix — the old read-check-
+// write sequence could allow multiple goroutines to each observe a stale (or
+// absent) file and all proceed to write their PID.
+func TestAcquireConcurrent(t *testing.T) {
+	const goroutines = 20
+	path := filepath.Join(t.TempDir(), "weft.lock")
+
+	type result struct {
+		lock *Lock
+		err  error
+	}
+
+	results := make([]result, goroutines)
+	var wg sync.WaitGroup
+	// ready synchronises all goroutines to start simultaneously, maximising
+	// the chance of exposing races (cf. Java: CountDownLatch).
+	ready := make(chan struct{})
+
+	for i := range goroutines {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			<-ready // block until all goroutines are spawned
+			l, err := Acquire(path)
+			results[idx] = result{lock: l, err: err}
+		}(i)
+	}
+
+	close(ready) // release all goroutines at once
+	wg.Wait()
+
+	var winners []*Lock
+	var losers []error
+	for _, r := range results {
+		if r.err == nil {
+			winners = append(winners, r.lock)
+		} else {
+			losers = append(losers, r.err)
+		}
+	}
+
+	if len(winners) != 1 {
+		t.Errorf("expected exactly 1 winner, got %d", len(winners))
+	}
+	if len(losers) != goroutines-1 {
+		t.Errorf("expected %d losers, got %d", goroutines-1, len(losers))
+	}
+	for _, err := range losers {
+		var locked *ErrLocked
+		if ok := asErrLocked(err, &locked); !ok {
+			t.Errorf("loser error should be ErrLocked, got %T: %v", err, err)
+		}
+	}
+
+	if len(winners) == 1 {
+		winners[0].Release()
+	}
 }
 
 // asErrLocked is a type-assertion helper (errors.As requires a pointer to the

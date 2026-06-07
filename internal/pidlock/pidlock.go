@@ -25,26 +25,67 @@ type Lock struct {
 	path string
 }
 
-// Acquire creates or takes over the lock file at path.
+// Acquire atomically creates the lock file at path and writes the current PID.
+// It uses O_CREATE|O_EXCL so that exactly one caller succeeds when multiple
+// processes race — no TOCTOU window between reading and writing.
+//
+// If the file already exists the existing PID is checked:
+//   - alive  → return ErrLocked
+//   - stale  → remove the file and retry from the top
+//
 // Returns ErrLocked if a live process already holds the lock.
 func Acquire(path string) (*Lock, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, fmt.Errorf("pidlock: creating dir: %w", err)
 	}
 
-	// If the file exists, check whether the recorded PID is still alive.
-	if data, err := os.ReadFile(path); err == nil {
+	for {
+		// Attempt atomic creation — only one concurrent caller can win this race.
+		// (cf. Java: FileChannel with CREATE_NEW StandardOpenOption)
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+		if err == nil {
+			// We exclusively created the file; write our PID and we're done.
+			_, werr := fmt.Fprintf(f, "%d", os.Getpid())
+			cerr := f.Close()
+			if werr != nil {
+				_ = os.Remove(path)
+				return nil, fmt.Errorf("pidlock: writing lock file: %w", werr)
+			}
+			if cerr != nil {
+				_ = os.Remove(path)
+				return nil, fmt.Errorf("pidlock: closing lock file: %w", cerr)
+			}
+			return &Lock{path: path}, nil
+		}
+
+		// Any error other than "file already exists" is unexpected.
+		if !errors.Is(err, os.ErrExist) {
+			return nil, fmt.Errorf("pidlock: opening lock file: %w", err)
+		}
+
+		// File exists — read the holding PID and check liveness.
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			// File may have been removed between our O_EXCL attempt and ReadFile
+			// (another process cleaned up a stale lock). Retry.
+			if errors.Is(readErr, os.ErrNotExist) {
+				continue
+			}
+			return nil, fmt.Errorf("pidlock: reading lock file: %w", readErr)
+		}
+
 		pid, parseErr := strconv.Atoi(strings.TrimSpace(string(data)))
 		if parseErr == nil && pid > 0 && processAlive(pid) {
 			return nil, &ErrLocked{Path: path, HolderPID: pid}
 		}
-		// Stale lock — the process is gone; overwrite below.
-	}
 
-	if err := os.WriteFile(path, []byte(strconv.Itoa(os.Getpid())), 0o644); err != nil {
-		return nil, fmt.Errorf("pidlock: writing lock file: %w", err)
+		// Stale lock — remove it and retry the atomic create.
+		if rmErr := os.Remove(path); rmErr != nil && !errors.Is(rmErr, os.ErrNotExist) {
+			return nil, fmt.Errorf("pidlock: removing stale lock: %w", rmErr)
+		}
+		// Loop back to the top; another goroutine may win the next O_EXCL, which
+		// is fine — we'll read their PID and return ErrLocked if they're alive.
 	}
-	return &Lock{path: path}, nil
 }
 
 // Release removes the lock file. Safe to call more than once.
