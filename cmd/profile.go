@@ -520,17 +520,27 @@ file inside any source root changes. Pass --no-watch to apply once and exit
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
 
-		// 1. Load the profile and resolve source roots.
+		// 1. Resolve config dir early so we can acquire the lock before any work.
+		cfgDir, err := config.DefaultDir()
+		if err != nil {
+			return err
+		}
+
+		// 2. In watch mode, acquire the singleton lock before doing any work.
+		if !profileNoWatch {
+			lock, lockErr := pidlock.Acquire(filepath.Join(cfgDir, "weft.lock"))
+			if lockErr != nil {
+				return lockErr
+			}
+			defer lock.Release()
+		}
+
+		// 3. Load the profile and resolve source roots.
 		p, roots, srcs, err := resolveProfileRoots(name)
 		if err != nil {
 			return err
 		}
 
-		// 2. Resolve config dir (used for staging).
-		cfgDir, err := config.DefaultDir()
-		if err != nil {
-			return err
-		}
 		stagedDir := filepath.Join(cfgDir, "staged", name)
 
 		// 4. Initial merge + apply.
@@ -551,12 +561,6 @@ file inside any source root changes. Pass --no-watch to apply once and exit
 
 		// 6. Enter watch mode unless opted out.
 		if !profileNoWatch {
-			lockPath := filepath.Join(cfgDir, "weft.lock")
-			lock, lockErr := pidlock.Acquire(lockPath)
-			if lockErr != nil {
-				return lockErr
-			}
-			defer lock.Release()
 
 			fmt.Println("\nWatching for changes... (Ctrl-C to stop)")
 			var guard watch.ApplyGuard
