@@ -4,10 +4,12 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"strings"
 
 	"github.com/jophira/weft/internal/autosync"
+	"github.com/jophira/weft/internal/logger"
 	"github.com/jophira/weft/internal/source"
 	"github.com/jophira/weft/internal/update"
 	"github.com/jophira/weft/internal/validate"
@@ -22,6 +24,9 @@ var rootCmd = &cobra.Command{
 	Short: "Composable AI rules manager",
 	Long:  "Weft by Jophira — manage, layer, and sync AI rule sources across teams and harnesses.",
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+		logger.Init(Version)
+		slog.Info("run", slog.String("cmd", cmd.CommandPath()))
+
 		if cmd.Name() == "update" {
 			return
 		}

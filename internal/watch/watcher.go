@@ -3,6 +3,7 @@ package watch
 import (
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -219,6 +220,7 @@ func addRecursive(w *fsnotify.Watcher, root string, limit int) (int, error) {
 		}
 		if addErr := w.Add(path); addErr != nil {
 			fmt.Fprintf(os.Stderr, "[weft] watch: skipping %s: %v\n", path, addErr)
+			slog.Warn("watch: skipping directory", slog.String("path", path), slog.Any("error", addErr))
 			return nil
 		}
 		count++

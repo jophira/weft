@@ -125,6 +125,7 @@ weft target backups claude-code                   # list all available backups
 | `hook add/list/run/remove` | Manage lifecycle hooks |
 | `doctor` | Health check — shows discovered harnesses and config issues |
 | `version` | Print version, commit, and build date |
+| `bug-report` | Print diagnostic bundle (version, environment, doctor, recent logs) for filing a GitHub issue |
 
 ## MCP server
 

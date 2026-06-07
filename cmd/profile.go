@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -290,6 +291,7 @@ func mergeAndApply(p *profile.Profile, roots []string, srcs []source.Source, cfg
 		if !quiet {
 			if wbErr := startupWriteBack(stagedDir, target, cfgDir, p, srcs); wbErr != nil {
 				fmt.Fprintf(os.Stderr, "[weft] startup write-back warning: %v\n", wbErr)
+				slog.Warn("startup write-back warning", slog.String("target", target), slog.Any("error", wbErr))
 			}
 		}
 
@@ -547,6 +549,7 @@ file inside any source root changes. Pass --no-watch to apply once and exit
 				defer guard.Unlock()
 				if applyErr := mergeAndApply(p, roots, srcs, cfgDir, true); applyErr != nil {
 					fmt.Fprintf(os.Stderr, "[weft] error: %v\n", applyErr)
+					slog.Error("re-apply failed", slog.Any("error", applyErr))
 					return
 				}
 				fmt.Printf("[weft] applied at %s\n", time.Now().Format("15:04:05"))
@@ -570,6 +573,7 @@ file inside any source root changes. Pass --no-watch to apply once and exit
 						m, loadErr := manifest.Load(cfgDir, tgt)
 						if loadErr != nil {
 							fmt.Fprintf(os.Stderr, "[weft] loading manifest: %v\n", loadErr)
+							slog.Error("loading manifest", slog.String("target", tgt), slog.Any("error", loadErr))
 							return
 						}
 						for _, c := range changes {
@@ -580,12 +584,14 @@ file inside any source root changes. Pass --no-watch to apply once and exit
 							performed, wbErr := writeBackSingleSource(m, c, p, srcs)
 							if wbErr != nil {
 								fmt.Fprintf(os.Stderr, "[weft] write-back error for %s: %v\n", c.Rel, wbErr)
+								slog.Error("write-back failed", slog.String("file", c.Rel), slog.Any("error", wbErr))
 								continue
 							}
 							if !performed && len(m.SourceFiles[c.Rel]) > 1 {
 								performed, wbErr = writeBackMergedSource(m, c, p, srcs)
 								if wbErr != nil {
 									fmt.Fprintf(os.Stderr, "[weft] write-back error for %s: %v\n", c.Rel, wbErr)
+									slog.Error("merged write-back failed", slog.String("file", c.Rel), slog.Any("error", wbErr))
 									continue
 								}
 							}
