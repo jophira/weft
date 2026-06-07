@@ -2,10 +2,10 @@ root = "."
 tmp_dir = "tmp"
 
 [build]
-bin = "./tmp/weft"
-cmd = "go build -o ./tmp/weft ."
+bin = "./bin/weft"
+cmd = "go build -o ./bin/weft ."
 delay = 500
-exclude_dir = ["bin", "dist", "tmp", "vendor", "testdata"]
+exclude_dir = ["dist", "tmp", "vendor", "testdata"]
 exclude_regex = ["_test\\.go$"]
 include_ext = ["go"]
 kill_delay = "200ms"
