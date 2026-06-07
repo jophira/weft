@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"maps"
 	"os"
 	"path/filepath"
 	"time"
@@ -40,8 +39,9 @@ type fileEntry struct {
 	srcPath    string // absolute path in staged dir
 	dst        string // rel path in target (post-rename)
 	stagedHash string
-	skip       bool // content identical — no write needed
-	conflict   bool // externally modified — back up before writing
+	data       []byte // staged file bytes; nil for skip=true entries (no write needed)
+	skip       bool   // content identical — no write needed
+	conflict   bool   // externally modified — back up before writing
 }
 
 // applyWithManifest is the manifest-aware apply for all harnesses that copy a
@@ -79,10 +79,12 @@ func applyWithManifest(stagedRoot, targetRoot, harnessName string, ctx ApplyCtx,
 		if renamed, ok := renames[rel]; ok {
 			dst = renamed
 		}
-		stagedHash, hashErr := manifest.HashFile(path)
-		if hashErr != nil {
-			return hashErr
+		// Read the staged file once; hash in-memory to avoid a second syscall later.
+		stagedData, rdErr := os.ReadFile(path) //nolint:gosec // path comes from WalkDir over a weft-controlled staged dir, not user input
+		if rdErr != nil {
+			return fmt.Errorf("reading staged %s: %w", dst, rdErr)
 		}
+		stagedHash := manifest.HashBytes(stagedData)
 		newHashes[dst] = stagedHash
 
 		fe := fileEntry{srcPath: path, dst: dst, stagedHash: stagedHash}
@@ -91,7 +93,8 @@ func applyWithManifest(stagedRoot, targetRoot, harnessName string, ctx ApplyCtx,
 		existing, readErr := os.ReadFile(fullDst)
 		switch {
 		case os.IsNotExist(readErr):
-			// new file — nothing on disk yet
+			// new file — nothing on disk yet; retain stagedData for write
+			fe.data = stagedData
 		case readErr != nil:
 			return fmt.Errorf("reading %s: %w", fullDst, readErr)
 		default:
@@ -99,12 +102,14 @@ func applyWithManifest(stagedRoot, targetRoot, harnessName string, ctx ApplyCtx,
 			if knownHash, owned := m.Files[dst]; owned && existingHash == knownHash {
 				// weft owns this file and nothing changed on disk externally
 				if stagedHash == knownHash {
-					fe.skip = true // staged content identical to what we last wrote
+					fe.skip = true // staged content identical to what we last wrote; no data needed
+				} else {
+					fe.data = stagedData // weft-owned update — write new content
 				}
-				// else: weft-owned update — write new content
 			} else {
 				// not owned or externally modified
 				fe.conflict = true
+				fe.data = stagedData
 				conflicts = append(conflicts, conflictFile{rel: dst, abs: fullDst})
 			}
 		}
@@ -138,11 +143,7 @@ func applyWithManifest(stagedRoot, targetRoot, harnessName string, ctx ApplyCtx,
 		if mkErr := os.MkdirAll(filepath.Dir(fullDst), 0o755); mkErr != nil {
 			return fmt.Errorf("creating parent dir for %s: %w", fe.dst, mkErr)
 		}
-		data, rdErr := os.ReadFile(fe.srcPath)
-		if rdErr != nil {
-			return fmt.Errorf("reading staged %s: %w", fe.dst, rdErr)
-		}
-		if wErr := os.WriteFile(fullDst, data, 0o644); wErr != nil { //nolint:gosec // path derived from harness config
+		if wErr := os.WriteFile(fullDst, fe.data, 0o644); wErr != nil { //nolint:gosec // path derived from harness config
 			return fmt.Errorf("writing %s: %w", fe.dst, wErr)
 		}
 		fmt.Fprintf(out, "  ✓ wrote  %s\n", fe.dst)
@@ -152,14 +153,21 @@ func applyWithManifest(stagedRoot, targetRoot, harnessName string, ctx ApplyCtx,
 	m.Profile = ctx.ProfileName
 	m.TargetRoot = targetRoot
 	m.AppliedAt = time.Now()
-	maps.Copy(m.Files, newHashes)
+	// Replace (not merge) so that deleted source files are pruned from the manifest.
+	// maps.Copy would leave stale entries that cause false conflicts on subsequent applies.
+	m.Files = newHashes
+	// Rebuild SourceFiles from scratch for the same reason — only keep entries that
+	// correspond to files present in this apply's staged tree.
+	newSourceFiles := make(map[string][]string)
 	for rel, sources := range ctx.SourceAttribution {
 		if _, ok := newHashes[rel]; ok {
-			if m.SourceFiles == nil {
-				m.SourceFiles = make(map[string][]string)
-			}
-			m.SourceFiles[rel] = sources
+			newSourceFiles[rel] = sources
 		}
+	}
+	if len(newSourceFiles) > 0 {
+		m.SourceFiles = newSourceFiles
+	} else {
+		m.SourceFiles = nil
 	}
 	return manifest.Save(ctx.CfgDir, m)
 }
