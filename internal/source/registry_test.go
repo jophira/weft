@@ -3,6 +3,7 @@ package source_test
 import (
 	"testing"
 
+	"github.com/jophira/weft/internal/locate"
 	"github.com/jophira/weft/internal/source"
 )
 
@@ -142,19 +143,21 @@ func TestList_returnsAll(t *testing.T) {
 }
 
 // ── Path helpers ──────────────────────────────────────────────────────────────
+// These tests now exercise locate.ExpandHome / locate.Tilde directly, as the
+// duplicate implementations were removed from the source package (issue #97).
 
 func TestContractHome_roundtrip(t *testing.T) {
 	original := "~/.claude"
-	expanded := source.ExpandHome(original)
-	contracted := source.ContractHome(expanded)
+	expanded := locate.ExpandHome(original)
+	contracted := locate.Tilde(expanded)
 	if contracted != original {
-		t.Errorf("ContractHome(ExpandHome(%q)) = %q, want original", original, contracted)
+		t.Errorf("Tilde(ExpandHome(%q)) = %q, want original", original, contracted)
 	}
 }
 
 func TestExpandHome_noTilde(t *testing.T) {
 	path := "/absolute/path"
-	if got := source.ExpandHome(path); got != path {
+	if got := locate.ExpandHome(path); got != path {
 		t.Errorf("ExpandHome(%q) = %q, want unchanged", path, got)
 	}
 }

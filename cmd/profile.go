@@ -20,6 +20,7 @@ import (
 	"github.com/jophira/weft/internal/config"
 	"github.com/jophira/weft/internal/diff"
 	"github.com/jophira/weft/internal/harness"
+	"github.com/jophira/weft/internal/locate"
 	"github.com/jophira/weft/internal/manifest"
 	"github.com/jophira/weft/internal/merge"
 	"github.com/jophira/weft/internal/pidlock"
@@ -103,7 +104,7 @@ func resolveProfileRoots(name string) (*profile.Profile, []string, []source.Sour
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("source %q referenced by profile not found: %w", srcName, err)
 		}
-		expanded := source.ExpandHome(s.Root)
+		expanded := locate.ExpandHome(s.Root)
 		if _, err := os.Stat(expanded); err != nil {
 			return nil, nil, nil, fmt.Errorf(
 				"source %q root %s does not exist — clone or create it first",

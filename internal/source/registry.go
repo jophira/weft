@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/jophira/weft/internal/locate"
 )
 
 // compile-time check: FileRegistry must satisfy Registry.
@@ -22,7 +24,7 @@ type FileRegistry struct {
 }
 
 func NewFileRegistry(dir string) *FileRegistry {
-	return &FileRegistry{dir: ExpandHome(dir)}
+	return &FileRegistry{dir: locate.ExpandHome(dir)}
 }
 
 // Add writes a new source YAML file. Errors if the name already exists.
@@ -42,7 +44,7 @@ func (r *FileRegistry) Add(s Source) error {
 	}
 
 	// Normalise root to ~/… for portability across machines.
-	s.Root = ContractHome(s.Root)
+	s.Root = locate.Tilde(s.Root)
 	if s.Branch == "" {
 		s.Branch = "main"
 	}
@@ -110,30 +112,4 @@ func (r *FileRegistry) List() ([]Source, error) {
 
 func (r *FileRegistry) filePath(name string) string {
 	return filepath.Join(r.dir, name+".yaml")
-}
-
-// ExpandHome replaces a leading ~/ with the user's home directory.
-func ExpandHome(path string) string {
-	if strings.HasPrefix(path, "~/") {
-		home, _ := os.UserHomeDir()
-		return filepath.Join(home, path[2:])
-	}
-	return path
-}
-
-// ContractHome replaces a leading home-directory prefix with ~/ for portability.
-func ContractHome(path string) string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return path
-	}
-	// Ensure we match whole path components, not just prefixes.
-	prefix := home + string(filepath.Separator)
-	if strings.HasPrefix(path, prefix) {
-		return "~/" + path[len(prefix):]
-	}
-	if path == home {
-		return "~"
-	}
-	return path
 }

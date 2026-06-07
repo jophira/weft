@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/jophira/weft/internal/locate"
 )
 
 // ErrConfirmRequired is returned when a hook has RequireConfirm set and the
@@ -23,7 +25,7 @@ type Executor struct {
 }
 
 func NewExecutor(sourcesDir string) *Executor {
-	return &Executor{sourcesDir: expandHome(sourcesDir)}
+	return &Executor{sourcesDir: locate.ExpandHome(sourcesDir)}
 }
 
 // Run executes the action defined in h, regardless of trigger type.
@@ -110,7 +112,7 @@ func (e *Executor) appendMemory(h Hook) error {
 		return fmt.Errorf("closing %s: %w", target, err)
 	}
 
-	fmt.Printf("✓ Appended to %s\n", contractHome(target))
+	fmt.Printf("✓ Appended to %s\n", locate.Tilde(target))
 	return nil
 }
 
@@ -137,14 +139,18 @@ func (e *Executor) sourceRoot(name string) (string, error) {
 	return expandHome(s.Root), nil
 }
 
+// expandHome replaces a leading ~/ with the user's absolute home directory.
+// Thin wrapper around locate.ExpandHome kept for package-internal use and tests.
+//
+// cf. Python: os.path.expanduser("~/foo")
+func expandHome(path string) string {
+	return locate.ExpandHome(path)
+}
+
+// contractHome replaces the user's home directory prefix with "~/" for display.
+// Inverse of expandHome; used when storing paths back to config.
+//
+// cf. Python: path.replace(os.path.expanduser("~"), "~", 1)
 func contractHome(path string) string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return path
-	}
-	prefix := home + string(filepath.Separator)
-	if strings.HasPrefix(path, prefix) {
-		return "~/" + path[len(prefix):]
-	}
-	return path
+	return locate.Tilde(path)
 }

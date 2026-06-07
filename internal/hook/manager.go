@@ -9,6 +9,8 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/jophira/weft/internal/locate"
 )
 
 var validName = regexp.MustCompile(`^[a-z][a-z0-9_-]*$`)
@@ -19,7 +21,7 @@ type FileManager struct {
 }
 
 func NewFileManager(dir string) *FileManager {
-	return &FileManager{dir: expandHome(dir)}
+	return &FileManager{dir: locate.ExpandHome(dir)}
 }
 
 // Add writes a new hook YAML file. Errors if the name already exists.
@@ -147,12 +149,4 @@ func isValidAction(a ActionType) bool {
 		return true
 	}
 	return false
-}
-
-func expandHome(path string) string {
-	if strings.HasPrefix(path, "~/") {
-		home, _ := os.UserHomeDir()
-		return filepath.Join(home, path[2:])
-	}
-	return path
 }
