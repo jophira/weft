@@ -13,7 +13,9 @@ import (
 
 	"github.com/jophira/weft/internal/config"
 	"github.com/jophira/weft/internal/git"
+	"github.com/jophira/weft/internal/locate"
 	"github.com/jophira/weft/internal/source"
+	"github.com/jophira/weft/internal/sourcesync"
 )
 
 // newRegistry builds a FileRegistry using the configured sources directory,
@@ -67,7 +69,7 @@ Managed subdirectory files (commands/, skills/, etc.) are always excluded.`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name, rawPath := args[0], args[1]
-		expanded := source.ExpandHome(rawPath)
+		expanded := locate.ExpandHome(rawPath)
 
 		remote := addRemote
 
@@ -213,49 +215,13 @@ With a name:    syncs that source regardless of auto_pull.`,
 	},
 }
 
-// runSync clones or pulls a single source.
+// runSync clones or pulls a single source, writing progress to out.
 // Returns (true, nil) when the local tree changed, (false, nil) when already up to date.
-// All progress messages are written to out.
+// Pass io.Discard as out to suppress all progress messages (e.g. background auto-sync).
+//
+// cf. Java: static utility method — no receiver, pure function on the Source value.
 func runSync(s source.Source, out io.Writer) (bool, error) {
-	expanded := source.ExpandHome(s.Root)
-
-	auth, err := git.ResolveAuth(s.Remote)
-	if err != nil {
-		return false, fmt.Errorf("resolving auth: %w", err)
-	}
-
-	// Clone if the directory does not exist yet.
-	if _, err := os.Stat(expanded); os.IsNotExist(err) {
-		fmt.Fprintf(out, "Cloning %s from %s...\n", s.Name, s.Remote)
-		if err := git.Clone(s.Remote, expanded, s.Branch, auth, out); err != nil {
-			return false, fmt.Errorf("clone failed: %w", err)
-		}
-		fmt.Fprintf(out, "✓ %s cloned → %s\n", s.Name, s.Root)
-		return true, nil
-	}
-
-	// Path exists but isn't a repo — stop before doing anything destructive.
-	if !git.IsRepo(expanded) {
-		return false, fmt.Errorf("%s exists but is not a git repository\n"+
-			"  remove it or point the source to a different path", s.Root)
-	}
-
-	// Pull.
-	fmt.Fprintf(out, "Syncing %s (%s)...\n", s.Name, s.Root)
-	repo, err := git.Open(expanded)
-	if err != nil {
-		return false, err
-	}
-	updated, err := repo.Pull(s.Branch, auth)
-	if err != nil {
-		return false, fmt.Errorf("pull failed: %w", err)
-	}
-	if updated {
-		fmt.Fprintf(out, "✓ %s updated\n", s.Name)
-	} else {
-		fmt.Fprintf(out, "  %s already up to date\n", s.Name)
-	}
-	return updated, nil
+	return sourcesync.SyncSource(s, out)
 }
 
 var (
@@ -277,7 +243,7 @@ hint. --force skips the confirmation prompt but does not auto-commit.`,
 		if err != nil {
 			return err
 		}
-		expanded := source.ExpandHome(s.Root)
+		expanded := locate.ExpandHome(s.Root)
 
 		if !git.IsRepo(expanded) {
 			return fmt.Errorf("%s is not a git repository — run 'weft source sync %s' first",
@@ -359,7 +325,7 @@ var sourceStatusCmd = &cobra.Command{
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
 		fmt.Fprintln(w, "NAME\tROOT\tBRANCH\tSTATE")
 		for _, s := range sources {
-			branch, state := sourceState(source.ExpandHome(s.Root))
+			branch, state := sourceState(locate.ExpandHome(s.Root))
 			fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", s.Name, s.Root, branch, state)
 		}
 		return w.Flush()
