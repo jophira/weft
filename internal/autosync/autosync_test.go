@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -248,9 +249,12 @@ func TestRun_doesNotUpdateStateOnSyncError(t *testing.T) {
 
 func TestRun_continuesAfterSyncError(t *testing.T) {
 	path := stateFile(t)
+	var mu sync.Mutex
 	calls := 0
 	syncFn := func(s source.Source) (bool, error) {
+		mu.Lock()
 		calls++
+		mu.Unlock()
 		if s.Name == "bad" {
 			return false, errors.New("boom")
 		}
@@ -388,9 +392,12 @@ func syncFnNoop(_ source.Source) (bool, error) { return false, nil }
 
 func TestRun_mixedAutoPull(t *testing.T) {
 	path := stateFile(t)
+	var mu sync.Mutex
 	var synced []string
 	syncFn := func(s source.Source) (bool, error) {
+		mu.Lock()
 		synced = append(synced, s.Name)
+		mu.Unlock()
 		return false, nil
 	}
 

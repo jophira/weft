@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/jophira/weft/internal/source"
@@ -80,9 +82,7 @@ func ShouldSync(s State, name string, now time.Time, interval time.Duration) boo
 // The original State is not modified.
 func MarkSynced(s State, name string, now time.Time) State {
 	out := State{Sources: make(map[string]time.Time, len(s.Sources)+1)}
-	for k, v := range s.Sources {
-		out.Sources[k] = v
-	}
+	maps.Copy(out.Sources, s.Sources) // cf. Java: Map.putAll()
 	out.Sources[name] = now
 	return out
 }
@@ -93,34 +93,68 @@ func Run(sources []source.Source, stateFile string, interval time.Duration, sync
 	return run(sources, stateFile, interval, time.Now(), syncFn, out)
 }
 
+// syncResult holds the outcome of a single syncFn call.
+type syncResult struct {
+	name    string
+	updated bool
+	err     error
+}
+
 // run is the testable core — now is injected so tests can control time.
 // Sync failures are printed to out and do not abort remaining sources.
 // Returns the first sync error encountered (if any), after processing all sources.
+//
+// Sources that are due for a pull are kicked off concurrently — one goroutine
+// each — so total wall time equals the slowest pull rather than their sum.
+// cf. Java: CompletableFuture.allOf() — WaitGroup is the idiomatic Go equivalent.
 func run(sources []source.Source, stateFile string, interval time.Duration, now time.Time, syncFn SyncFunc, out io.Writer) error {
 	state, err := ReadState(stateFile)
 	if err != nil {
 		return fmt.Errorf("reading sync state: %w", err)
 	}
 
-	var firstErr error
+	// Collect sources that actually need syncing before spawning goroutines.
+	var due []source.Source
 	for _, s := range sources {
-		if !s.AutoPull || s.Remote == "" {
-			continue
+		if s.AutoPull && s.Remote != "" && ShouldSync(state, s.Name, now, interval) {
+			due = append(due, s)
 		}
-		if !ShouldSync(state, s.Name, now, interval) {
-			continue
-		}
-		updated, err := syncFn(s)
-		if err != nil {
-			fmt.Fprintf(out, "  auto-sync %q: %v\n", s.Name, err)
+	}
+
+	// results is sized to avoid blocking; goroutines never wait on a send.
+	// cf. Java: a fixed-size LinkedBlockingQueue receiving from a thread pool.
+	results := make(chan syncResult, len(due))
+
+	var wg sync.WaitGroup
+	for _, s := range due {
+		// wg.Go replaces wg.Add(1)+go+defer wg.Done() — available since Go 1.22
+		// loop variable s is per-iteration since Go 1.22, so no capture needed
+		wg.Go(func() {
+			updated, err := syncFn(s)
+			results <- syncResult{name: s.Name, updated: updated, err: err}
+		})
+	}
+
+	// Close results once all goroutines have reported back.
+	// goroutines are lightweight (~4 KB stack), so spawning one per source is normal Go practice.
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	// Collect results sequentially — only this goroutine writes to state/out.
+	var firstErr error
+	for r := range results {
+		if r.err != nil {
+			fmt.Fprintf(out, "  auto-sync %q: %v\n", r.name, r.err)
 			if firstErr == nil {
-				firstErr = err
+				firstErr = r.err
 			}
 			continue
 		}
-		state = MarkSynced(state, s.Name, now)
-		if updated {
-			fmt.Fprintf(out, "  ✓ %s updated\n", s.Name)
+		state = MarkSynced(state, r.name, now)
+		if r.updated {
+			fmt.Fprintf(out, "  ✓ %s updated\n", r.name)
 		}
 	}
 

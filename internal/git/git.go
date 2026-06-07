@@ -6,11 +6,16 @@ import (
 	"os"
 	"time"
 
+	"github.com/cenkalti/backoff/v4"
 	gogit "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/go-git/go-git/v5/plumbing/transport"
 )
+
+// maxRetries is the number of attempts made for transient network operations.
+// cf. Java: @Retryable(maxAttempts = 3) in Spring Retry
+const maxRetries = 3
 
 // Clone clones url into path, checking out branch.
 // auth may be nil for HTTPS repos that rely on system credential helpers.
@@ -60,24 +65,39 @@ func Open(path string) (*Repo, error) {
 
 // Pull fetches from origin and fast-forwards to origin/<branch>.
 // Returns (true, nil) when new commits were pulled, (false, nil) when already up to date.
+// Transient network errors are retried up to maxRetries times with exponential back-off.
+// cf. Java: Spring Retry / Resilience4j Retry — backoff.Retry is the Go equivalent.
 func (r *Repo) Pull(branch string, auth transport.AuthMethod) (updated bool, err error) {
 	wt, err := r.repo.Worktree()
 	if err != nil {
 		return false, fmt.Errorf("getting worktree: %w", err)
 	}
-	pullErr := wt.Pull(&gogit.PullOptions{
-		RemoteName:    "origin",
-		ReferenceName: plumbing.NewBranchReferenceName(branch),
-		Auth:          auth,
-	})
-	switch pullErr {
-	case nil:
-		return true, nil
-	case gogit.NoErrAlreadyUpToDate:
-		return false, nil
-	default:
-		return false, pullErr
+
+	// op is the operation passed to the retry loop.
+	// errors are values — returning nil stops the loop, any non-nil error triggers a retry.
+	op := func() error {
+		pullErr := wt.Pull(&gogit.PullOptions{
+			RemoteName:    "origin",
+			ReferenceName: plumbing.NewBranchReferenceName(branch),
+			Auth:          auth,
+		})
+		switch pullErr {
+		case nil:
+			updated = true
+			return nil
+		case gogit.NoErrAlreadyUpToDate:
+			updated = false
+			return nil // not an error; do not retry
+		default:
+			return pullErr // transient: let backoff decide whether to retry
+		}
 	}
+
+	bo := backoff.WithMaxRetries(backoff.NewExponentialBackOff(), maxRetries)
+	if retryErr := backoff.Retry(op, bo); retryErr != nil {
+		return false, retryErr
+	}
+	return updated, nil
 }
 
 // Status returns the human-readable working-tree status string.
@@ -168,14 +188,20 @@ func (r *Repo) OriginRemote() (string, error) {
 
 // Push pushes all local commits on the current branch to origin.
 // Returns nil when there is nothing new to push (already up to date).
+// Transient network errors are retried up to maxRetries times with exponential back-off.
 func (r *Repo) Push(auth transport.AuthMethod) error {
-	err := r.repo.Push(&gogit.PushOptions{
-		RemoteName: "origin",
-		Auth:       auth,
-		Progress:   os.Stdout,
-	})
-	if err == gogit.NoErrAlreadyUpToDate {
-		return nil
+	op := func() error {
+		pushErr := r.repo.Push(&gogit.PushOptions{
+			RemoteName: "origin",
+			Auth:       auth,
+			Progress:   os.Stdout,
+		})
+		if pushErr == gogit.NoErrAlreadyUpToDate {
+			return nil // not an error; do not retry
+		}
+		return pushErr // transient: let backoff decide whether to retry
 	}
-	return err
+
+	bo := backoff.WithMaxRetries(backoff.NewExponentialBackOff(), maxRetries)
+	return backoff.Retry(op, bo)
 }

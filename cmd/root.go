@@ -19,6 +19,18 @@ import (
 
 var cfgFile string
 
+// updateResultCh carries the async update-check outcome from PersistentPreRun to
+// PersistentPostRun. Buffered with capacity 1 so the goroutine never blocks even
+// if PostRun is skipped (e.g. the command exited early).
+// cf. Java: a Future<Result> — the channel IS the future here.
+var updateResultCh chan updateCheckResult
+
+// updateCheckResult bundles the two values returned by update.Check.
+type updateCheckResult struct {
+	result update.Result
+	err    error
+}
+
 var rootCmd = &cobra.Command{
 	Use:   "weft",
 	Short: "Composable AI rules manager",
@@ -31,33 +43,54 @@ var rootCmd = &cobra.Command{
 			return
 		}
 
-		// Update prompt — interactive TTY only.
+		// Kick off the update check in a goroutine so it runs concurrently with
+		// the main command — no TTY stall. The result is collected in PersistentPostRun.
+		// cf. Java: a fire-and-forget CompletableFuture.supplyAsync()
 		if isInteractiveTTY() {
-			if result, err := update.Check(Version); err == nil && result.Newer {
-				fmt.Fprintf(os.Stderr, "\nA new release of weft is available: v%s → v%s\n", result.Current, result.Latest)
-				fmt.Fprint(os.Stderr, "Update now? [Y/n/ignore] ")
-				line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
-				switch strings.TrimSpace(strings.ToLower(line)) {
-				case "", "y", "yes":
-					fmt.Fprintf(os.Stderr, "Updating weft v%s → v%s\n", result.Current, result.Latest)
-					if err := doUpdate(result.Latest); err != nil {
-						fmt.Fprintf(os.Stderr, "Update failed: %v\n", err)
-					} else {
-						os.Exit(0)
-					}
-				case "ignore", "i":
-					if err := update.IgnoreVersion(result.Latest); err != nil {
-						fmt.Fprintf(os.Stderr, "Could not save preference: %v\n", err)
-					}
-					fmt.Fprintf(os.Stderr, "Ignoring v%s — you'll be notified when a newer version ships.\n", result.Latest)
-				}
-				// "n" or anything else: fall through
-			}
+			updateResultCh = make(chan updateCheckResult, 1) // buffered: goroutine never blocks
+			go func() {
+				r, err := update.Check(Version)
+				updateResultCh <- updateCheckResult{result: r, err: err}
+			}()
 		}
 
 		// Auto-sync — skip read-only/informational commands.
 		if !isReadOnlyCmd(cmd) {
 			runAutoSync()
+		}
+	},
+	PersistentPostRun: func(cmd *cobra.Command, args []string) {
+		if cmd.Name() == "update" || updateResultCh == nil {
+			return
+		}
+
+		// Non-blocking receive: if the check finished in time, show the prompt;
+		// otherwise skip silently — the user sees no delay either way.
+		// cf. Java: future.isDone() ? future.get() : skip
+		select {
+		case r := <-updateResultCh:
+			if r.err == nil && r.result.Newer {
+				fmt.Fprintf(os.Stderr, "\nA new release of weft is available: v%s → v%s\n", r.result.Current, r.result.Latest)
+				fmt.Fprint(os.Stderr, "Update now? [Y/n/ignore] ")
+				line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+				switch strings.TrimSpace(strings.ToLower(line)) {
+				case "", "y", "yes":
+					fmt.Fprintf(os.Stderr, "Updating weft v%s → v%s\n", r.result.Current, r.result.Latest)
+					if err := doUpdate(r.result.Latest); err != nil {
+						fmt.Fprintf(os.Stderr, "Update failed: %v\n", err)
+					} else {
+						os.Exit(0)
+					}
+				case "ignore", "i":
+					if err := update.IgnoreVersion(r.result.Latest); err != nil {
+						fmt.Fprintf(os.Stderr, "Could not save preference: %v\n", err)
+					}
+					fmt.Fprintf(os.Stderr, "Ignoring v%s — you'll be notified when a newer version ships.\n", r.result.Latest)
+				}
+				// "n" or anything else: fall through
+			}
+		default:
+			// Update check still running — skip this invocation, no user-visible delay.
 		}
 	},
 }
