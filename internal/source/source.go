@@ -7,6 +7,11 @@ type Structure struct {
 	Skills   string `yaml:"skills"           mapstructure:"skills"`
 	Memory   string `yaml:"memory"           mapstructure:"memory"`
 	Hooks    string `yaml:"hooks"            mapstructure:"hooks"`
+	// Projects is the optional subdirectory containing per-project rule files.
+	// When set, weft expands the <!-- weft:projects --> placeholder in the
+	// assembled CLAUDE.md with a generated snippet listing the source's project
+	// file paths. The directory is never merged into the harness target.
+	Projects string `yaml:"projects"         mapstructure:"projects"`
 	// InstructionGlob controls which files are assembled into the effective
 	// CLAUDE.md for this source. A plain filename (default "CLAUDE.md") reads
 	// only that root-level file. A glob like "**/*.md" walks the full tree and

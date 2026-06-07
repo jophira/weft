@@ -92,6 +92,7 @@ func buildAssembler(roots []string, srcs []source.Source) merge.Assembler {
 			s.Structure.Skills,
 			s.Structure.Memory,
 			s.Structure.Hooks,
+			s.Structure.Projects,
 		} {
 			if d = strings.TrimRight(strings.TrimSpace(d), "/\\"); d != "" {
 				excludes = append(excludes, d)
@@ -287,6 +288,9 @@ func mergeAndApply(p *profile.Profile, roots []string, srcs []source.Source, cfg
 	staged, rootAttribution, err := stageProfile(p, roots, srcs, stagedDir)
 	if err != nil {
 		return fmt.Errorf("merging sources: %w", err)
+	}
+	if err := expandProjectsPlaceholder(stagedDir, srcs); err != nil {
+		return fmt.Errorf("expanding projects placeholder: %w", err)
 	}
 	if !quiet {
 		fmt.Printf("  %d file(s) merged into staging\n", len(staged))
@@ -816,6 +820,7 @@ Formats:
 		}
 		defer func() { _ = os.RemoveAll(tmpDir) }()
 		if _, _, stageErr := stageProfile(p, roots, srcs, tmpDir); stageErr == nil {
+			_ = expandProjectsPlaceholder(tmpDir, srcs) // best-effort for inspect
 			fmt.Println()
 			fmt.Println("Quality report:")
 			printQualityReport(tmpDir, p, roots, srcs)
