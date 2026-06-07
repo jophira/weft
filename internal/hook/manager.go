@@ -122,6 +122,13 @@ func validateHook(h Hook) error {
 		if h.Action.SummaryTo == "" {
 			return fmt.Errorf("append_memory action requires --summary-to")
 		}
+		if filepath.IsAbs(h.Action.SummaryTo) {
+			return fmt.Errorf("summary_to must be a relative path")
+		}
+		// Reject .. components as an early defence-in-depth check.
+		if strings.HasPrefix(filepath.Clean(h.Action.SummaryTo), "..") {
+			return fmt.Errorf("summary_to must not escape the source root")
+		}
 	}
 	return nil
 }

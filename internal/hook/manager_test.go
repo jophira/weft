@@ -125,6 +125,41 @@ func TestAdd_appendMemoryRequiresSourceAndSummaryTo(t *testing.T) {
 	}
 }
 
+func TestAdd_appendMemorySummaryToPathTraversal(t *testing.T) {
+	m := newManager(t)
+	base := hook.Hook{
+		Name:    "mem",
+		Trigger: hook.TriggerManual,
+		Prompt:  "content",
+		Action: hook.Action{
+			Type:         hook.ActionAppendMemory,
+			TargetSource: "personal",
+			SummaryTo:    "memory/LOG.md",
+		},
+	}
+
+	// Traversal via .. should be rejected.
+	h := base
+	h.Action.SummaryTo = "../../.ssh/authorized_keys"
+	if err := m.Add(h); err == nil {
+		t.Error("expected error for traversal summary_to, got nil")
+	}
+
+	// Absolute path should be rejected.
+	h = base
+	h.Action.SummaryTo = "/etc/passwd"
+	if err := m.Add(h); err == nil {
+		t.Error("expected error for absolute summary_to, got nil")
+	}
+
+	// Valid relative path should be accepted.
+	h = base
+	h.Action.SummaryTo = "valid/subdir/file.md"
+	if err := m.Add(h); err != nil {
+		t.Errorf("unexpected error for valid summary_to: %v", err)
+	}
+}
+
 // ── Get ───────────────────────────────────────────────────────────────────────
 
 func TestGet_notFound(t *testing.T) {

@@ -60,6 +60,11 @@ func (e *Executor) appendMemory(h Hook) error {
 	}
 
 	target := filepath.Join(root, h.Action.SummaryTo)
+	// Ensure target stays within root to prevent path traversal.
+	rootWithSep := root + string(filepath.Separator)
+	if !strings.HasPrefix(filepath.Clean(target)+string(filepath.Separator), rootWithSep) {
+		return fmt.Errorf("summary_to %q escapes source root", h.Action.SummaryTo)
+	}
 	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 		return fmt.Errorf("creating directory for %s: %w", h.Action.SummaryTo, err)
 	}
