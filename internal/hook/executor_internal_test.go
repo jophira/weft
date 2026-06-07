@@ -125,6 +125,56 @@ func TestAppendMemory_writesEntry(t *testing.T) {
 	}
 }
 
+func TestAppendMemory_pathTraversalRejected(t *testing.T) {
+	dir := t.TempDir()
+	srcRoot := t.TempDir()
+
+	yaml := "name: mysrc\nroot: " + srcRoot + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "mysrc.yaml"), []byte(yaml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	e := &Executor{sourcesDir: dir}
+	h := Hook{
+		Name:    "test",
+		Trigger: TriggerManual,
+		Prompt:  "payload",
+		Action: Action{
+			Type:         ActionAppendMemory,
+			TargetSource: "mysrc",
+			SummaryTo:    "../../.ssh/authorized_keys",
+		},
+	}
+	if err := e.appendMemory(h); err == nil {
+		t.Error("appendMemory with traversal path: expected error, got nil")
+	}
+}
+
+func TestAppendMemory_validSubdirSucceeds(t *testing.T) {
+	dir := t.TempDir()
+	srcRoot := t.TempDir()
+
+	yaml := "name: mysrc\nroot: " + srcRoot + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "mysrc.yaml"), []byte(yaml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	e := &Executor{sourcesDir: dir}
+	h := Hook{
+		Name:    "test",
+		Trigger: TriggerManual,
+		Prompt:  "safe entry",
+		Action: Action{
+			Type:         ActionAppendMemory,
+			TargetSource: "mysrc",
+			SummaryTo:    "valid/subdir/file.md",
+		},
+	}
+	if err := e.appendMemory(h); err != nil {
+		t.Errorf("appendMemory with valid path: unexpected error: %v", err)
+	}
+}
+
 func TestAppendMemory_emptyPromptReturnsError(t *testing.T) {
 	dir := t.TempDir()
 	e := &Executor{sourcesDir: dir}
