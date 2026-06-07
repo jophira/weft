@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"sync"
@@ -81,9 +82,7 @@ func ShouldSync(s State, name string, now time.Time, interval time.Duration) boo
 // The original State is not modified.
 func MarkSynced(s State, name string, now time.Time) State {
 	out := State{Sources: make(map[string]time.Time, len(s.Sources)+1)}
-	for k, v := range s.Sources {
-		out.Sources[k] = v
-	}
+	maps.Copy(out.Sources, s.Sources) // cf. Java: Map.putAll()
 	out.Sources[name] = now
 	return out
 }
@@ -128,13 +127,12 @@ func run(sources []source.Source, stateFile string, interval time.Duration, now 
 
 	var wg sync.WaitGroup
 	for _, s := range due {
-		s := s // capture loop variable — required pre-Go 1.22; harmless after
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		// wg.Go replaces wg.Add(1)+go+defer wg.Done() — available since Go 1.22
+		// loop variable s is per-iteration since Go 1.22, so no capture needed
+		wg.Go(func() {
 			updated, err := syncFn(s)
 			results <- syncResult{name: s.Name, updated: updated, err: err}
-		}()
+		})
 	}
 
 	// Close results once all goroutines have reported back.
