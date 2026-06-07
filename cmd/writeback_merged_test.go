@@ -165,7 +165,7 @@ func TestWriteBackMergedSource_EditInFirstSource(t *testing.T) {
 	writeFile(t, filepath.Join(targetRoot, "CLAUDE.md"), "work rule 1\nWORK RULE 2 EDITED\npersonal rule 1\npersonal rule 2\n")
 
 	srcs := []source.Source{newSource("work", srcARoot), newSource("personal", srcBRoot)}
-	p := newProfile(srcs)
+	p := &profile.Profile{Name: "test", Sources: []string{"work", "personal"}, Overlay: profile.OverlayMerge}
 	m := &manifest.Manifest{
 		Files: map[string]string{"CLAUDE.md": "sha256:abc"},
 		SourceFiles: map[string][]string{
@@ -203,7 +203,7 @@ func TestWriteBackMergedSource_EditInSecondSource(t *testing.T) {
 	writeFile(t, filepath.Join(targetRoot, "CLAUDE.md"), "work rule 1\nPERSONAL RULE 1 EDITED\npersonal rule 2\n")
 
 	srcs := []source.Source{newSource("work", srcARoot), newSource("personal", srcBRoot)}
-	p := newProfile(srcs)
+	p := &profile.Profile{Name: "test", Sources: []string{"work", "personal"}, Overlay: profile.OverlayMerge}
 	m := &manifest.Manifest{
 		Files:       map[string]string{"CLAUDE.md": "sha256:abc"},
 		SourceFiles: map[string][]string{"CLAUDE.md": {"work", "personal"}},
@@ -237,7 +237,7 @@ func TestWriteBackMergedSource_AppendToFirstSource(t *testing.T) {
 	writeFile(t, filepath.Join(targetRoot, "CLAUDE.md"), "work rule 1\nwork rule 2\npersonal rule 1\n")
 
 	srcs := []source.Source{newSource("work", srcARoot), newSource("personal", srcBRoot)}
-	p := newProfile(srcs)
+	p := &profile.Profile{Name: "test", Sources: []string{"work", "personal"}, Overlay: profile.OverlayMerge}
 	m := &manifest.Manifest{
 		Files:       map[string]string{"CLAUDE.md": "sha256:abc"},
 		SourceFiles: map[string][]string{"CLAUDE.md": {"work", "personal"}},
@@ -272,7 +272,7 @@ func TestWriteBackMergedSource_DeleteLineFromFirstSource(t *testing.T) {
 	writeFile(t, filepath.Join(targetRoot, "CLAUDE.md"), "work rule 1\npersonal rule 1\n")
 
 	srcs := []source.Source{newSource("work", srcARoot), newSource("personal", srcBRoot)}
-	p := newProfile(srcs)
+	p := &profile.Profile{Name: "test", Sources: []string{"work", "personal"}, Overlay: profile.OverlayMerge}
 	m := &manifest.Manifest{
 		Files:       map[string]string{"CLAUDE.md": "sha256:abc"},
 		SourceFiles: map[string][]string{"CLAUDE.md": {"work", "personal"}},
@@ -302,11 +302,11 @@ func TestWriteBackMergedSource_NoChange(t *testing.T) {
 
 	writeFile(t, filepath.Join(srcARoot, "CLAUDE.md"), "work rule\n")
 	writeFile(t, filepath.Join(srcBRoot, "CLAUDE.md"), "personal rule\n")
-	// Target matches the expected baseline — no change.
+	// Target matches the expected merge baseline — no change.
 	writeFile(t, filepath.Join(targetRoot, "CLAUDE.md"), "work rule\npersonal rule\n")
 
 	srcs := []source.Source{newSource("work", srcARoot), newSource("personal", srcBRoot)}
-	p := newProfile(srcs)
+	p := &profile.Profile{Name: "test", Sources: []string{"work", "personal"}, Overlay: profile.OverlayMerge}
 	m := &manifest.Manifest{
 		Files:       map[string]string{"CLAUDE.md": "sha256:abc"},
 		SourceFiles: map[string][]string{"CLAUDE.md": {"work", "personal"}},
@@ -404,7 +404,7 @@ func TestWriteBackMergedSource_AppendAtEnd(t *testing.T) {
 	writeFile(t, filepath.Join(targetRoot, "CLAUDE.md"), "work rule\npersonal rule\nnew rule\n")
 
 	srcs := []source.Source{newSource("work", srcARoot), newSource("personal", srcBRoot)}
-	p := newProfile(srcs)
+	p := &profile.Profile{Name: "test", Sources: []string{"work", "personal"}, Overlay: profile.OverlayMerge}
 	m := &manifest.Manifest{
 		Files:       map[string]string{"CLAUDE.md": "sha256:abc"},
 		SourceFiles: map[string][]string{"CLAUDE.md": {"work", "personal"}},
@@ -425,5 +425,128 @@ func TestWriteBackMergedSource_AppendAtEnd(t *testing.T) {
 	}
 	if got := readFile(t, filepath.Join(srcARoot, "CLAUDE.md")); got != "work rule\n" {
 		t.Errorf("source A unchanged = %q, want %q", got, "work rule\n")
+	}
+}
+
+// ── cascade overlay write-back ────────────────────────────────────────────────
+
+// TestWriteBackMergedSource_Cascade_WritesToLastSource verifies that for a
+// cascade-overlay profile the entire edited target is written back to the last
+// (winning) source, and earlier sources are untouched.
+func TestWriteBackMergedSource_Cascade_WritesToLastSource(t *testing.T) {
+	targetRoot := t.TempDir()
+	srcARoot := t.TempDir()
+	srcBRoot := t.TempDir()
+
+	// Both sources have the file; cascade winner is source B (last).
+	writeFile(t, filepath.Join(srcARoot, "CLAUDE.md"), "base content\n")
+	writeFile(t, filepath.Join(srcBRoot, "CLAUDE.md"), "overlay content\n")
+	// User edited the target (which shows the cascade winner's content).
+	writeFile(t, filepath.Join(targetRoot, "CLAUDE.md"), "overlay content edited\n")
+
+	srcs := []source.Source{newSource("work", srcARoot), newSource("personal", srcBRoot)}
+	p := &profile.Profile{Name: "test", Sources: []string{"work", "personal"}, Overlay: profile.OverlayCascade}
+	m := &manifest.Manifest{
+		Files:       map[string]string{"CLAUDE.md": "sha256:abc"},
+		SourceFiles: map[string][]string{"CLAUDE.md": {"work", "personal"}},
+	}
+	c := watch.TargetChange{Root: targetRoot, Rel: "CLAUDE.md"}
+
+	performed, err := writeBackMergedSource(m, c, p, srcs)
+	if err != nil {
+		t.Fatalf("writeBackMergedSource: %v", err)
+	}
+	if !performed {
+		t.Fatal("expected performed=true")
+	}
+
+	// Last source (personal) receives the full edited content.
+	if got := readFile(t, filepath.Join(srcBRoot, "CLAUDE.md")); got != "overlay content edited\n" {
+		t.Errorf("source B CLAUDE.md = %q, want %q", got, "overlay content edited\n")
+	}
+	// First source (work) must not be modified.
+	if got := readFile(t, filepath.Join(srcARoot, "CLAUDE.md")); got != "base content\n" {
+		t.Errorf("source A CLAUDE.md = %q, want %q (must be unchanged)", got, "base content\n")
+	}
+}
+
+// TestWriteBackMergedSource_Cascade_NoChangeWhenContentMatches verifies that
+// performed=false is returned when the edited target already matches the cascade
+// winner's current content.
+func TestWriteBackMergedSource_Cascade_NoChangeWhenContentMatches(t *testing.T) {
+	targetRoot := t.TempDir()
+	srcARoot := t.TempDir()
+	srcBRoot := t.TempDir()
+
+	const content = "overlay content\n"
+	writeFile(t, filepath.Join(srcARoot, "CLAUDE.md"), "base content\n")
+	writeFile(t, filepath.Join(srcBRoot, "CLAUDE.md"), content)
+	// Target already matches the cascade winner — nothing to write back.
+	writeFile(t, filepath.Join(targetRoot, "CLAUDE.md"), content)
+
+	srcs := []source.Source{newSource("work", srcARoot), newSource("personal", srcBRoot)}
+	p := &profile.Profile{Name: "test", Sources: []string{"work", "personal"}, Overlay: profile.OverlayCascade}
+	m := &manifest.Manifest{
+		Files:       map[string]string{"CLAUDE.md": "sha256:abc"},
+		SourceFiles: map[string][]string{"CLAUDE.md": {"work", "personal"}},
+	}
+	c := watch.TargetChange{Root: targetRoot, Rel: "CLAUDE.md"}
+
+	performed, err := writeBackMergedSource(m, c, p, srcs)
+	if err != nil {
+		t.Fatalf("writeBackMergedSource: %v", err)
+	}
+	if performed {
+		t.Error("expected performed=false when target already matches cascade winner")
+	}
+}
+
+// TestWriteBackMergedSource_Cascade_ThreeSources_LastWins verifies that with
+// three cascade sources the last source (not the middle one) receives the write.
+func TestWriteBackMergedSource_Cascade_ThreeSources_LastWins(t *testing.T) {
+	targetRoot := t.TempDir()
+	srcARoot := t.TempDir()
+	srcBRoot := t.TempDir()
+	srcCRoot := t.TempDir()
+
+	writeFile(t, filepath.Join(srcARoot, "CLAUDE.md"), "base\n")
+	writeFile(t, filepath.Join(srcBRoot, "CLAUDE.md"), "middle\n")
+	writeFile(t, filepath.Join(srcCRoot, "CLAUDE.md"), "top\n")
+	// User edited the target (which reflects the cascade winner: source C).
+	writeFile(t, filepath.Join(targetRoot, "CLAUDE.md"), "top edited\n")
+
+	srcs := []source.Source{
+		newSource("work", srcARoot),
+		newSource("team", srcBRoot),
+		newSource("personal", srcCRoot),
+	}
+	p := &profile.Profile{
+		Name:    "test",
+		Sources: []string{"work", "team", "personal"},
+		Overlay: profile.OverlayCascade,
+	}
+	m := &manifest.Manifest{
+		Files:       map[string]string{"CLAUDE.md": "sha256:abc"},
+		SourceFiles: map[string][]string{"CLAUDE.md": {"work", "team", "personal"}},
+	}
+	c := watch.TargetChange{Root: targetRoot, Rel: "CLAUDE.md"}
+
+	performed, err := writeBackMergedSource(m, c, p, srcs)
+	if err != nil {
+		t.Fatalf("writeBackMergedSource: %v", err)
+	}
+	if !performed {
+		t.Fatal("expected performed=true")
+	}
+
+	// Only the last source (personal / C) receives the edited content.
+	if got := readFile(t, filepath.Join(srcCRoot, "CLAUDE.md")); got != "top edited\n" {
+		t.Errorf("source C CLAUDE.md = %q, want %q", got, "top edited\n")
+	}
+	if got := readFile(t, filepath.Join(srcARoot, "CLAUDE.md")); got != "base\n" {
+		t.Errorf("source A CLAUDE.md = %q, want unchanged %q", got, "base\n")
+	}
+	if got := readFile(t, filepath.Join(srcBRoot, "CLAUDE.md")); got != "middle\n" {
+		t.Errorf("source B CLAUDE.md = %q, want unchanged %q", got, "middle\n")
 	}
 }

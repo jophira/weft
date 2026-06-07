@@ -15,9 +15,14 @@ import (
 )
 
 // writeBackMergedSource handles write-back for target files assembled from multiple
-// sources (AppendStrategy / OverlayMerge). It re-assembles the baseline from the
-// current source files, diffs it against the edited target, and routes changed line
-// regions back to their owning source files.
+// sources. The routing strategy depends on the profile's overlay mode:
+//
+//   - OverlayCascade: the target is the last (winning) source's content, so the
+//     edited file is written directly to the last source in sourceNames. No LCS
+//     attribution is performed.
+//   - All other overlays (OverlayMerge, etc.): re-assembles the baseline via
+//     AppendStrategy, diffs it against the edited target, and routes changed line
+//     regions back to their owning source files using LCS attribution.
 //
 // Returns (true, nil) when at least one source was updated.
 // Returns (false, nil) when called for a single-source file or when there is nothing to do.
@@ -35,6 +40,12 @@ func writeBackMergedSource(
 	srcMap := make(map[string]source.Source, len(srcs))
 	for _, s := range srcs {
 		srcMap[s.Name] = s
+	}
+
+	// For cascade overlay the merged target is the last source's content verbatim.
+	// Write the edited target directly to the cascade winner (last source).
+	if p.Overlay == profile.OverlayCascade {
+		return writeBackCascadeWinner(c, sourceNames, srcMap)
 	}
 
 	// Read each contributing source's current file content (in manifest order).
@@ -99,6 +110,52 @@ func writeBackMergedSource(
 		performed = true
 	}
 	return performed, nil
+}
+
+// writeBackCascadeWinner writes the edited target content to the last (winning)
+// source in sourceNames — the cascade winner. It reads the edited target and
+// compares it to the winner's current content to avoid spurious writes.
+func writeBackCascadeWinner(
+	c watch.TargetChange,
+	sourceNames []string,
+	srcMap map[string]source.Source,
+) (bool, error) {
+	// Find the last source that is present in srcMap (the cascade winner).
+	winnerName := ""
+	for i := len(sourceNames) - 1; i >= 0; i-- {
+		if _, ok := srcMap[sourceNames[i]]; ok {
+			winnerName = sourceNames[i]
+			break
+		}
+	}
+	if winnerName == "" {
+		return false, nil
+	}
+
+	edited, err := os.ReadFile(filepath.Join(c.Root, c.Rel))
+	if err != nil {
+		return false, fmt.Errorf("reading target %s: %w", c.Rel, err)
+	}
+
+	winner := srcMap[winnerName]
+	dst := filepath.Join(winner.Root, c.Rel)
+
+	// Avoid a write if the winner already has the same content.
+	existing, err := os.ReadFile(dst)
+	if err != nil && !os.IsNotExist(err) {
+		return false, fmt.Errorf("reading winner source %s/%s: %w", winnerName, c.Rel, err)
+	}
+	if bytes.Equal(existing, edited) {
+		return false, nil
+	}
+
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return false, fmt.Errorf("creating dir for %s: %w", dst, err)
+	}
+	if err := os.WriteFile(dst, edited, 0o644); err != nil { //nolint:gosec // dst derived from source root config, not user input
+		return false, fmt.Errorf("writing %s to source %s: %w", c.Rel, winnerName, err)
+	}
+	return true, nil
 }
 
 // rebuildMerged re-assembles the merged file content from ordered source bodies
