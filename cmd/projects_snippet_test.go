@@ -133,6 +133,43 @@ func TestExpandProjectsPlaceholder_TwoSources(t *testing.T) {
 	}
 }
 
+// TestExpandProjectsPlaceholder_WriteBackPropagated covers the case where write-back
+// has already propagated a previous (possibly stale/empty) begin/end block back into
+// the source CLAUDE.md, replacing the raw placeholder. The expander must still refresh
+// the block so the snippet is always current.
+func TestExpandProjectsPlaceholder_WriteBackPropagated(t *testing.T) {
+	srcRoot := t.TempDir()
+	projDir := filepath.Join(srcRoot, "projects")
+	if err := os.MkdirAll(projDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(projDir, "common.md"), "# Common")
+
+	stagedDir := t.TempDir()
+	// Source already has the stale begin/end block (written back by write-back),
+	// not the raw placeholder.
+	staleBlock := projectsBegin + "\n" + projectsEnd
+	writeFile(t, filepath.Join(stagedDir, "CLAUDE.md"), "Intro\n"+staleBlock+"\nOutro\n")
+
+	srcs := []source.Source{
+		{Name: "src", Root: srcRoot, Structure: source.Structure{Projects: "projects/"}},
+	}
+	if err := expandProjectsPlaceholder(stagedDir, srcs); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	got := readFile(t, filepath.Join(stagedDir, "CLAUDE.md"))
+	if !strings.Contains(got, "common.md") {
+		t.Errorf("expected fresh snippet with common.md; got:\n%s", got)
+	}
+	if !strings.Contains(got, "{project-name}.md") {
+		t.Errorf("expected {project-name}.md in refreshed snippet; got:\n%s", got)
+	}
+	if !strings.Contains(got, "Intro") || !strings.Contains(got, "Outro") {
+		t.Error("surrounding content was lost")
+	}
+}
+
 func TestGenerateProjectsSnippet_EmptyWhenNoProjects(t *testing.T) {
 	srcs := []source.Source{
 		{Name: "a", Root: t.TempDir()},

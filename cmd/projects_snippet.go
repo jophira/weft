@@ -16,10 +16,18 @@ const (
 	projectsEnd         = "<!-- weft:projects:end -->"
 )
 
-// expandProjectsPlaceholder reads the assembled CLAUDE.md from stagedDir,
-// finds any <!-- weft:projects --> placeholder, and replaces it with a
-// generated snippet listing the project-rule file paths from every source
-// that has Structure.Projects set. A no-op when the placeholder is absent.
+// expandProjectsPlaceholder reads the assembled CLAUDE.md from stagedDir and
+// replaces any project-rules marker with a freshly generated snippet listing
+// project-rule file paths from every source that has Structure.Projects set.
+//
+// Two forms are recognised:
+//   - Raw placeholder  <!-- weft:projects -->          (canonical source form)
+//   - Existing block   <!-- weft:projects:begin -->    (written by a previous apply,
+//     ...               possibly propagated back to the source by write-back)
+//     <!-- weft:projects:end -->
+//
+// Both are replaced with a freshly generated begin/end block so that the
+// snippet is always current regardless of what write-back has done to the source.
 func expandProjectsPlaceholder(stagedDir string, srcs []source.Source) error {
 	claudePath := filepath.Join(stagedDir, "CLAUDE.md")
 	data, err := os.ReadFile(claudePath)
@@ -31,14 +39,41 @@ func expandProjectsPlaceholder(stagedDir string, srcs []source.Source) error {
 	}
 
 	content := string(data)
-	if !strings.Contains(content, projectsPlaceholder) {
+	hasPlaceholder := strings.Contains(content, projectsPlaceholder)
+	hasBlock := strings.Contains(content, projectsBegin)
+	if !hasPlaceholder && !hasBlock {
 		return nil
 	}
 
 	snippet := generateProjectsSnippet(srcs)
-	expanded := strings.ReplaceAll(content, projectsPlaceholder, snippet)
 
-	return os.WriteFile(claudePath, []byte(expanded), 0o644) //nolint:gosec // claudePath is derived from weft's own staged dir, not user input
+	// Replace the raw placeholder first (canonical case).
+	if hasPlaceholder {
+		content = strings.ReplaceAll(content, projectsPlaceholder, snippet)
+	}
+
+	// Replace any existing begin/end block (write-back propagated case).
+	if hasBlock {
+		content = replaceProjectsBlock(content, snippet)
+	}
+
+	return os.WriteFile(claudePath, []byte(content), 0o644) //nolint:gosec // claudePath is derived from weft's own staged dir, not user input
+}
+
+// replaceProjectsBlock replaces the first <!-- weft:projects:begin -->...
+// <!-- weft:projects:end --> block in content with replacement.
+// Returns content unchanged if the block is malformed or end marker is missing.
+func replaceProjectsBlock(content, replacement string) string {
+	start := strings.Index(content, projectsBegin)
+	if start < 0 {
+		return content
+	}
+	end := strings.Index(content[start:], projectsEnd)
+	if end < 0 {
+		return content
+	}
+	end += start + len(projectsEnd)
+	return content[:start] + replacement + content[end:]
 }
 
 // generateProjectsSnippet builds the <!-- weft:projects:begin/end --> block
