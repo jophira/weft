@@ -32,14 +32,20 @@ func writeBackMergedSource(
 	p *profile.Profile,
 	srcs []source.Source,
 ) (bool, error) {
+	return writeBackMergedSourceMap(m, c, p, buildSrcMap(srcs))
+}
+
+// writeBackMergedSourceMap is the map-accepting variant of writeBackMergedSource.
+// Use this in batch loops where the srcMap has already been built once.
+func writeBackMergedSourceMap(
+	m *manifest.Manifest,
+	c watch.TargetChange,
+	p *profile.Profile,
+	srcMap map[string]source.Source,
+) (bool, error) {
 	sourceNames := m.SourceFiles[c.Rel]
 	if len(sourceNames) <= 1 {
 		return false, nil
-	}
-
-	srcMap := make(map[string]source.Source, len(srcs))
-	for _, s := range srcs {
-		srcMap[s.Name] = s
 	}
 
 	// For cascade overlay the merged target is the last source's content verbatim.
@@ -75,9 +81,17 @@ func writeBackMergedSource(
 		return false, nil
 	}
 
-	bounds := mergedLineBoundaries(bodies)
 	baselineLines := splitLines(string(baseline))
 	editedLines := splitLines(string(edited))
+
+	// Size guard: skip the O(M×N) LCS DP for very large files and fall back to
+	// the cascade-winner strategy. maxLinesForLCS keeps the direction table within
+	// a reasonable heap budget (5000×5000 bytes = ~25 MB worst case).
+	if len(baselineLines) > maxLinesForLCS || len(editedLines) > maxLinesForLCS {
+		return writeBackCascadeWinner(c, sourceNames, srcMap)
+	}
+
+	bounds := mergedLineBoundaries(bodies)
 	script := lcsEditScript(baselineLines, editedLines)
 	sourceNewLines := attributeLinesToSources(script, bounds, len(sourceNames), editedLines)
 
@@ -228,38 +242,85 @@ type editOp struct {
 	editIdx int  // index in edited  ('e' and 'i')
 }
 
-// lcsEditScript computes the shortest edit script transforming baseline into edited
-// using an O(M*N) LCS DP, suitable for the small files typical of AI-rules content.
+// maxLinesForLCS is the per-input size limit for the LCS DP path. Files larger
+// than this threshold fall back to writeBackCascadeWinner to avoid the O(M×N)
+// allocation cost on very large inputs.
+const maxLinesForLCS = 5000
+
+// lcsDir encodes the traceback direction stored per DP cell.
+// Using a byte table (1 byte/cell) instead of an int table (8 bytes/cell on
+// 64-bit) reduces the working-set size by 8× for the normal path.
+// cf. Java: byte[] vs int[] — same trade-off, narrower type = less heap pressure.
+//
+// Tiebreaker: when dp[i-1][j] == dp[i][j-1] the traceback prefers Left (insert),
+// so lcsDirLeft is stored when curr[j-1] >= prev[j] (i.e. left >= up). This
+// matches the original traceback condition `dp[i][j-1] >= dp[i-1][j]`.
+const (
+	lcsDirEqual byte = 'e' // diagonal: baseline[i-1] == edited[j-1]
+	lcsDirUp    byte = 'u' // up:       dp[i-1][j] > dp[i][j-1]  (strict)
+	lcsDirLeft  byte = 'l' // left:     dp[i][j-1] >= dp[i-1][j] (with ties)
+)
+
+// lcsEditScript computes the shortest edit script transforming baseline into edited.
+//
+// For inputs within maxLinesForLCS the algorithm uses:
+//   - Rolling 2-row DP (prev/curr) — only two []int rows live at a time instead
+//     of a full (m+1)×(n+1) int table; saves O(M×N) int allocations.
+//     cf. Python: swap via tuple unpacking; cf. Java: manual tmp variable needed.
+//   - A separate (m+1)×(n+1) byte direction table for traceback — 8× smaller
+//     than storing full int values, and allocated as a single flat slice.
+//
+// For inputs exceeding maxLinesForLCS the caller must fall back (this function
+// panics if called beyond the limit — callers are responsible for the guard).
 func lcsEditScript(baseline, edited []string) []editOp {
 	m, n := len(baseline), len(edited)
 
-	dp := make([][]int, m+1)
-	for i := range dp {
-		dp[i] = make([]int, n+1)
-	}
+	// Rolling DP: two rows of length (n+1) — the DP value is only needed for
+	// the current and previous row during the fill pass.
+	prev := make([]int, n+1)
+	curr := make([]int, n+1)
+
+	// Direction table: one byte per cell, stored as a flat slice to avoid the
+	// overhead of a slice-of-slices allocation.
+	// cf. Java: new byte[m+1][n+1] — Go uses a 1D backing array with manual indexing.
+	dir := make([]byte, (m+1)*(n+1))
+	idx := func(i, j int) int { return i*(n+1) + j }
+
 	for i := 1; i <= m; i++ {
 		for j := 1; j <= n; j++ {
 			switch {
 			case baseline[i-1] == edited[j-1]:
-				dp[i][j] = dp[i-1][j-1] + 1
-			case dp[i-1][j] >= dp[i][j-1]:
-				dp[i][j] = dp[i-1][j]
+				curr[j] = prev[j-1] + 1
+				dir[idx(i, j)] = lcsDirEqual
+			case curr[j-1] >= prev[j]:
+				// Traceback prefers Left (insert) on ties — store Left when
+				// dp[i][j-1] >= dp[i-1][j], matching the original traceback condition.
+				curr[j] = curr[j-1]
+				dir[idx(i, j)] = lcsDirLeft
 			default:
-				dp[i][j] = dp[i][j-1]
+				curr[j] = prev[j]
+				dir[idx(i, j)] = lcsDirUp
 			}
+		}
+		// Swap rows: reuse the allocation, discard prev.
+		// cf. Python: prev, curr = curr, prev
+		prev, curr = curr, prev
+		// Reset curr for the next iteration (prev now holds the row we just filled).
+		for j := range curr {
+			curr[j] = 0
 		}
 	}
 
-	// Trace back from (m, n) to (0, 0) to build the edit script in reverse.
+	// Trace back from (m, n) to (0, 0) using the direction table.
 	ops := make([]editOp, 0, m+n)
 	i, j := m, n
 	for i > 0 || j > 0 {
 		switch {
-		case i > 0 && j > 0 && baseline[i-1] == edited[j-1]:
+		case i > 0 && j > 0 && dir[idx(i, j)] == lcsDirEqual:
 			ops = append(ops, editOp{'e', i - 1, j - 1})
 			i--
 			j--
-		case j > 0 && (i == 0 || dp[i][j-1] >= dp[i-1][j]):
+		case j > 0 && (i == 0 || dir[idx(i, j)] == lcsDirLeft):
 			// edited[j-1] inserted before baseline[i]
 			ops = append(ops, editOp{'i', i, j - 1})
 			j--

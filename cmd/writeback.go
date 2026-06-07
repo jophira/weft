@@ -11,6 +11,19 @@ import (
 	"github.com/jophira/weft/internal/watch"
 )
 
+// buildSrcMap constructs a name→Source lookup from a slice of sources.
+// Callers that process multiple files should build this once and reuse it
+// across all write-back calls to avoid redundant allocations.
+// cf. Java: Map.of(entries...) or a stream Collectors.toMap — Go has no
+// built-in for this, so we construct the map manually.
+func buildSrcMap(srcs []source.Source) map[string]source.Source {
+	m := make(map[string]source.Source, len(srcs))
+	for _, s := range srcs {
+		m[s.Name] = s
+	}
+	return m
+}
+
 // writeBackSingleSource copies the content of a changed target file back to
 // the owning source root. It is a no-op (returns false) for files with
 // multi-source attribution in the manifest — those are handled by the merged
@@ -20,6 +33,17 @@ func writeBackSingleSource(
 	c watch.TargetChange,
 	p *profile.Profile,
 	srcs []source.Source,
+) (bool, error) {
+	return writeBackSingleSourceMap(m, c, p, buildSrcMap(srcs))
+}
+
+// writeBackSingleSourceMap is the map-accepting variant of writeBackSingleSource.
+// Use this in batch loops where the srcMap has already been built once.
+func writeBackSingleSourceMap(
+	m *manifest.Manifest,
+	c watch.TargetChange,
+	p *profile.Profile,
+	srcMap map[string]source.Source,
 ) (bool, error) {
 	// Multi-source files: skip; the merged write-back path will handle them.
 	if len(m.SourceFiles[c.Rel]) > 1 {
@@ -31,7 +55,7 @@ func writeBackSingleSource(
 		return false, fmt.Errorf("reading target file %s: %w", c.Rel, err)
 	}
 
-	srcName, srcPath, found := owningSource(c.Rel, p, srcs)
+	srcName, srcPath, found := owningSourceFromMap(c.Rel, p, srcMap)
 	if !found {
 		return false, nil
 	}
@@ -49,11 +73,12 @@ func writeBackSingleSource(
 // Priority: (1) source root that already has the file, (2) write_back.overrides[rel],
 // (3) write_back.default. Returns ok=false when no source can be determined.
 func owningSource(rel string, p *profile.Profile, srcs []source.Source) (name, absPath string, ok bool) {
-	srcMap := make(map[string]source.Source, len(srcs))
-	for _, s := range srcs {
-		srcMap[s.Name] = s
-	}
+	return owningSourceFromMap(rel, p, buildSrcMap(srcs))
+}
 
+// owningSourceFromMap is the map-accepting variant of owningSource.
+// Use this when the srcMap has already been built for a batch of calls.
+func owningSourceFromMap(rel string, p *profile.Profile, srcMap map[string]source.Source) (name, absPath string, ok bool) {
 	// Prefer the source root that already contains the file.
 	for _, srcName := range p.Sources {
 		s, exists := srcMap[srcName]

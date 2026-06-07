@@ -47,6 +47,10 @@ func startupWriteBack(
 		return fmt.Errorf("loading manifest for startup write-back: %w", err)
 	}
 
+	// Build srcMap once before the walk — reused for every file in the tree.
+	// cf. Java: compute a HashMap<String,Source> before the Files.walk() stream.
+	wbSrcMap := buildSrcMap(srcs)
+
 	return filepath.WalkDir(stagedDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return err
@@ -76,12 +80,12 @@ func startupWriteBack(
 		// File is externally modified — attempt write-back.
 		c := watch.TargetChange{Root: targetRoot, Rel: rel}
 
-		performed, wbErr := writeBackSingleSource(m, c, p, srcs)
+		performed, wbErr := writeBackSingleSourceMap(m, c, p, wbSrcMap)
 		if wbErr != nil {
 			return fmt.Errorf("write-back for %s: %w", rel, wbErr)
 		}
 		if !performed && len(m.SourceFiles[rel]) > 1 {
-			performed, wbErr = writeBackMergedSource(m, c, p, srcs)
+			performed, wbErr = writeBackMergedSourceMap(m, c, p, wbSrcMap)
 			if wbErr != nil {
 				return fmt.Errorf("merged write-back for %s: %w", rel, wbErr)
 			}
