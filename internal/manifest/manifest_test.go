@@ -168,6 +168,41 @@ func TestLoad_OldManifestWithoutSourceFiles_LoadsClean(t *testing.T) {
 	}
 }
 
+// ── Load error paths ──────────────────────────────────────────────────────────
+
+func TestLoad_corruptJSON_returnsError(t *testing.T) {
+	cfgDir := t.TempDir()
+	p := filepath.Join(cfgDir, "manifests", "bad.json")
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, []byte("not valid json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(cfgDir, "bad"); err == nil {
+		t.Error("Load corrupt JSON: expected error, got nil")
+	}
+}
+
+func TestLoad_nilFilesMapInitialised(t *testing.T) {
+	cfgDir := t.TempDir()
+	raw := `{"harness":"claude-code","profile":"work","files":null}`
+	p := filepath.Join(cfgDir, "manifests", "claude-code.json")
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, []byte(raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m, err := Load(cfgDir, "claude-code")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if m.Files == nil {
+		t.Error("Load: Files should be initialised to non-nil map when JSON contains null")
+	}
+}
+
 func TestLoad_IsolatedByHarnessName(t *testing.T) {
 	cfgDir := t.TempDir()
 

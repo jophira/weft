@@ -330,6 +330,62 @@ func TestRun_multipleSourcesPartialStale(t *testing.T) {
 	}
 }
 
+// ── DefaultStateFilePath ──────────────────────────────────────────────────────
+
+func TestDefaultStateFilePath_nonEmpty(t *testing.T) {
+	path, err := DefaultStateFilePath()
+	if err != nil {
+		t.Fatalf("DefaultStateFilePath: %v", err)
+	}
+	if path == "" {
+		t.Error("DefaultStateFilePath() returned empty string")
+	}
+}
+
+func TestDefaultStateFilePath_containsWeft(t *testing.T) {
+	path, err := DefaultStateFilePath()
+	if err != nil {
+		t.Fatalf("DefaultStateFilePath: %v", err)
+	}
+	if !containsSubstr(path, "weft") {
+		t.Errorf("DefaultStateFilePath() = %q; expected 'weft' in path", path)
+	}
+}
+
+func containsSubstr(s, sub string) bool {
+	return sub == "" || (len(s) >= len(sub) && func() bool {
+		for i := 0; i <= len(s)-len(sub); i++ {
+			if s[i:i+len(sub)] == sub {
+				return true
+			}
+		}
+		return false
+	}())
+}
+
+// ── WriteState error path ─────────────────────────────────────────────────────
+
+func TestWriteState_writesToParentDirs(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "nested", "dir", "state.json")
+	s := State{Sources: map[string]time.Time{"x": epoch}}
+	if err := WriteState(path, s); err != nil {
+		t.Fatalf("WriteState into nested dirs: %v", err)
+	}
+}
+
+// ── Run exported wrapper ──────────────────────────────────────────────────────
+
+func TestRun_exported_noSources(t *testing.T) {
+	path := stateFile(t)
+	// Run with no sources should complete without error.
+	err := Run(nil, path, 0, syncFnNoop, nil)
+	if err != nil {
+		t.Fatalf("Run with nil sources: %v", err)
+	}
+}
+
+func syncFnNoop(_ source.Source) (bool, error) { return false, nil }
+
 func TestRun_mixedAutoPull(t *testing.T) {
 	path := stateFile(t)
 	var synced []string

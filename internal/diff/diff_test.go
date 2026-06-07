@@ -184,3 +184,40 @@ func TestLineDiff_nonEmptyToEmpty(t *testing.T) {
 		t.Errorf("expected 'hello' in output, got:\n%s", got)
 	}
 }
+
+// ── ContentLines ──────────────────────────────────────────────────────────────
+
+func TestContentLines_withFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.md")
+	if err := os.WriteFile(path, []byte("line1\nline2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := diff.ContentLines(path, "+ ", "")
+	if !strings.Contains(got, "+ line1") {
+		t.Errorf("ContentLines: expected '+ line1', got %q", got)
+	}
+	if !strings.Contains(got, "+ line2") {
+		t.Errorf("ContentLines: expected '+ line2', got %q", got)
+	}
+}
+
+func TestContentLines_withColor(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.md")
+	if err := os.WriteFile(path, []byte("rules\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// With a non-empty color code the output should include ANSI escapes.
+	got := diff.ContentLines(path, "+ ", diff.ColorCodeGreen)
+	if !strings.Contains(got, "rules") {
+		t.Errorf("ContentLines with color: expected 'rules' in output, got %q", got)
+	}
+}
+
+func TestContentLines_missingFile(t *testing.T) {
+	got := diff.ContentLines("/definitely/does/not/exist.md", "+ ", "")
+	if got != "" {
+		t.Errorf("ContentLines on missing file = %q, want empty", got)
+	}
+}

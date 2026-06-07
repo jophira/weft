@@ -315,3 +315,93 @@ func TestPush_alreadyUpToDate(t *testing.T) {
 		t.Fatalf("second Push (already up to date): %v", err)
 	}
 }
+
+// ── CommitAll ─────────────────────────────────────────────────────────────────
+
+func TestCommitAll_commitsChanges(t *testing.T) {
+	remote := makeRemote(t)
+	local := t.TempDir()
+	if err := git.Clone(remote, local, "main", nil, io.Discard); err != nil {
+		t.Fatalf("Clone: %v", err)
+	}
+
+	// Modify a file so there's something to commit.
+	addFile(t, local, "notes.md", "new content\n")
+
+	r, err := git.Open(local)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if err := r.CommitAll("test commit"); err != nil {
+		t.Fatalf("CommitAll: %v", err)
+	}
+
+	// Verify the commit landed by checking HeadBranch still resolves.
+	if _, err := r.HeadBranch(); err != nil {
+		t.Fatalf("HeadBranch after CommitAll: %v", err)
+	}
+}
+
+// ── OriginRemote ──────────────────────────────────────────────────────────────
+
+func TestOriginRemote_returnsURL(t *testing.T) {
+	remote := makeRemote(t)
+	local := t.TempDir()
+	if err := git.Clone(remote, local, "main", nil, io.Discard); err != nil {
+		t.Fatalf("Clone: %v", err)
+	}
+	r, err := git.Open(local)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	url, err := r.OriginRemote()
+	if err != nil {
+		t.Fatalf("OriginRemote: %v", err)
+	}
+	if url == "" {
+		t.Error("OriginRemote() returned empty URL for repo cloned from local path")
+	}
+}
+
+func TestOriginRemote_noOrigin(t *testing.T) {
+	// A freshly initialised repo has no origin remote.
+	dir := t.TempDir()
+	repo, err := gogit.PlainInitWithOptions(dir, &gogit.PlainInitOptions{
+		InitOptions: gogit.InitOptions{DefaultBranch: plumbing.NewBranchReferenceName("main")},
+	})
+	if err != nil {
+		t.Fatalf("PlainInit: %v", err)
+	}
+	_ = repo
+
+	r, err := git.Open(dir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	url, err := r.OriginRemote()
+	if err != nil {
+		t.Fatalf("OriginRemote (no origin): %v", err)
+	}
+	if url != "" {
+		t.Errorf("OriginRemote() = %q, want empty for repo without origin", url)
+	}
+}
+
+// ── Status / Clone error branches ────────────────────────────────────────────
+
+func TestStatus_dirtyRepo(t *testing.T) {
+	remote := makeRemote(t)
+	local := t.TempDir()
+	if err := git.Clone(remote, local, "main", nil, io.Discard); err != nil {
+		t.Fatalf("Clone: %v", err)
+	}
+	addFile(t, local, "untracked.md", "new")
+	r, _ := git.Open(local)
+	files, err := r.Status()
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if files == "" {
+		t.Error("Status: expected at least one untracked file, got none")
+	}
+}

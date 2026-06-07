@@ -85,3 +85,30 @@ func TestInstruction_separatorsNotFlagged(t *testing.T) {
 		}
 	}
 }
+
+// ── Duplicate block preview truncation ───────────────────────────────────────
+
+func TestInstruction_longDuplicateBlockTruncated(t *testing.T) {
+	// A block longer than 72 chars should appear truncated in DuplicateBlocks.
+	longLine := strings.Repeat("x", 80) // > 72 chars, all one paragraph
+	content := []byte(longLine + "\n\n" + longLine + "\n")
+	r := validate.Instruction(content, validate.DefaultWarnSizeKB)
+	if len(r.DuplicateBlocks) != 1 {
+		t.Fatalf("expected 1 duplicate block, got %d", len(r.DuplicateBlocks))
+	}
+	if !strings.HasSuffix(r.DuplicateBlocks[0], "...") {
+		t.Errorf("long duplicate block not truncated: %q", r.DuplicateBlocks[0])
+	}
+}
+
+func TestInstruction_shortDuplicateBlockNotTruncated(t *testing.T) {
+	short := "keep it short"
+	content := []byte(short + "\n\n" + short + "\n")
+	r := validate.Instruction(content, validate.DefaultWarnSizeKB)
+	if len(r.DuplicateBlocks) != 1 {
+		t.Fatalf("expected 1 duplicate block, got %d", len(r.DuplicateBlocks))
+	}
+	if strings.HasSuffix(r.DuplicateBlocks[0], "...") {
+		t.Errorf("short duplicate block incorrectly truncated: %q", r.DuplicateBlocks[0])
+	}
+}

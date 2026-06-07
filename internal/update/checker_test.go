@@ -365,6 +365,86 @@ func TestIgnoreVersion_stripsVPrefix(t *testing.T) {
 	}
 }
 
+// ── CacheFilePath ─────────────────────────────────────────────────────────────
+
+func TestCacheFilePath_nonEmpty(t *testing.T) {
+	path, err := update.CacheFilePath()
+	if err != nil {
+		t.Fatalf("CacheFilePath: %v", err)
+	}
+	if path == "" {
+		t.Error("CacheFilePath() returned empty string")
+	}
+}
+
+// ── Check (production wrapper, delegates to CheckWith) ────────────────────────
+
+func TestCheck_devBuild_skipped(t *testing.T) {
+	// Check calls CheckWith with empty opts — CI guard must still fire.
+	// We set CI=true so no network call is made and the test stays hermetic.
+	t.Setenv("CI", "true")
+	r, err := update.Check("0.1.0")
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if r.Newer {
+		t.Error("CI=true: Check() must not return Newer=true")
+	}
+}
+
+// ── IgnoreVersion ─────────────────────────────────────────────────────────────
+
+func TestIgnoreVersion_writesField(t *testing.T) {
+	// IgnoreVersion uses CacheFilePath (HOME-based). We redirect HOME so
+	// no real user data is touched.
+	orig, hadOrig := os.LookupEnv("HOME")
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	defer func() {
+		if hadOrig {
+			os.Setenv("HOME", orig) //nolint:errcheck,gosec // restoring env in test teardown is best-effort
+		} else {
+			os.Unsetenv("HOME") //nolint:errcheck,gosec // restoring env in test teardown is best-effort
+		}
+	}()
+
+	if err := update.IgnoreVersion("1.2.3"); err != nil {
+		t.Fatalf("IgnoreVersion: %v", err)
+	}
+
+	path, _ := update.CacheFilePath()
+	c, err := update.ReadCache(path)
+	if err != nil {
+		t.Fatalf("ReadCache after IgnoreVersion: %v", err)
+	}
+	if c.IgnoredVersion != "1.2.3" {
+		t.Errorf("IgnoredVersion = %q, want 1.2.3", c.IgnoredVersion)
+	}
+}
+
+func TestIgnoreVersion_stripsV(t *testing.T) {
+	orig, hadOrig := os.LookupEnv("HOME")
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	defer func() {
+		if hadOrig {
+			os.Setenv("HOME", orig) //nolint:errcheck,gosec // restoring env in test teardown is best-effort
+		} else {
+			os.Unsetenv("HOME") //nolint:errcheck,gosec // restoring env in test teardown is best-effort
+		}
+	}()
+
+	if err := update.IgnoreVersion("v2.0.0"); err != nil {
+		t.Fatalf("IgnoreVersion: %v", err)
+	}
+
+	path, _ := update.CacheFilePath()
+	c, _ := update.ReadCache(path)
+	if c.IgnoredVersion != "2.0.0" {
+		t.Errorf("IgnoredVersion = %q, want 2.0.0 (v stripped)", c.IgnoredVersion)
+	}
+}
+
 // ── ReadCache / WriteCache ────────────────────────────────────────────────────
 
 func TestReadCache_missingFile(t *testing.T) {

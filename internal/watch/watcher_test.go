@@ -121,6 +121,45 @@ func TestDebouncedTarget_DeduplicatesRapidChanges(t *testing.T) {
 	}
 }
 
+// ── Debounced ─────────────────────────────────────────────────────────────────
+
+func TestDebounced_callbackFires(t *testing.T) {
+	dir := t.TempDir()
+	ch := make(chan struct{}, 1)
+
+	stop, err := watch.Debounced([]string{dir}, shortDebounce, func() { ch <- struct{}{} })
+	if err != nil {
+		t.Fatalf("Debounced: %v", err)
+	}
+	defer stop()
+
+	if err := os.WriteFile(filepath.Join(dir, "CLAUDE.md"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-ch:
+	case <-time.After(waitBudget):
+		t.Fatal("Debounced: timed out waiting for callback")
+	}
+}
+
+func TestDebounced_noWatchableDirs_returnsError(t *testing.T) {
+	_, err := watch.Debounced([]string{"/definitely/does/not/exist/xyz"}, shortDebounce, func() {})
+	if err == nil {
+		t.Error("Debounced with nonexistent root: expected error, got nil")
+	}
+}
+
+func TestDebounced_stopIsSafe(t *testing.T) {
+	dir := t.TempDir()
+	stop, err := watch.Debounced([]string{dir}, shortDebounce, func() {})
+	if err != nil {
+		t.Fatalf("Debounced: %v", err)
+	}
+	stop()
+	stop() // idempotent — must not panic
+}
+
 func TestDebouncedTarget_SubdirFileDetected(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, "commands"), 0o755); err != nil {

@@ -89,3 +89,26 @@ func asErrLocked(err error, target **ErrLocked) bool {
 	}
 	return ok
 }
+
+// ── ErrLocked.Error ───────────────────────────────────────────────────────────
+
+func TestErrLocked_ErrorMessage(t *testing.T) {
+	e := &ErrLocked{Path: "/tmp/weft.lock", HolderPID: 12345}
+	msg := e.Error()
+	if msg == "" {
+		t.Fatal("ErrLocked.Error() returned empty string")
+	}
+	// Message must include the PID so users know which process to check.
+	if !containsStr(msg, "12345") {
+		t.Errorf("ErrLocked.Error() = %q, expected PID 12345 in message", msg)
+	}
+}
+
+func containsStr(s, sub string) bool {
+	for i := 0; i <= len(s)-len(sub); i++ {
+		if s[i:i+len(sub)] == sub {
+			return true
+		}
+	}
+	return false
+}

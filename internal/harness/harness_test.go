@@ -532,3 +532,68 @@ func TestApplyWithManifest_NoSourceAttribution_NoSourceFiles(t *testing.T) {
 		t.Errorf("expected no SourceFiles for single-source apply, got %v", m.SourceFiles)
 	}
 }
+
+// ── Registry ──────────────────────────────────────────────────────────────────
+
+type stubHarness struct{ name string }
+
+func (s *stubHarness) Name() string                     { return s.name }
+func (s *stubHarness) Detect() bool                     { return false }
+func (s *stubHarness) Apply(_ string, _ ApplyCtx) error { return nil }
+
+func TestNewRegistry_notNil(t *testing.T) {
+	r := NewRegistry()
+	if r == nil {
+		t.Fatal("NewRegistry() returned nil")
+	}
+}
+
+func TestRegistry_Get_found(t *testing.T) {
+	r := NewRegistry(&stubHarness{"claude-code"}, &stubHarness{"codex"})
+	h, ok := r.Get("codex")
+	if !ok {
+		t.Fatal("Get(codex): expected ok=true")
+	}
+	if h.Name() != "codex" {
+		t.Errorf("Get(codex).Name() = %q, want codex", h.Name())
+	}
+}
+
+func TestRegistry_Get_notFound(t *testing.T) {
+	r := NewRegistry(&stubHarness{"claude-code"})
+	if _, ok := r.Get("nonexistent"); ok {
+		t.Error("Get(nonexistent): expected ok=false")
+	}
+}
+
+func TestRegistry_Detect_empty(t *testing.T) {
+	// All stubs return Detect()=false, so Detect() returns empty slice.
+	r := NewRegistry(&stubHarness{"a"}, &stubHarness{"b"})
+	detected := r.Detect()
+	if len(detected) != 0 {
+		t.Errorf("Detect() = %v, want empty (all stubs return false)", detected)
+	}
+}
+
+// ── All / Instances ───────────────────────────────────────────────────────────
+
+func TestAll_returnsBuiltins(t *testing.T) {
+	all := All()
+	if len(all) == 0 {
+		t.Fatal("All() returned empty list; expected built-in harnesses")
+	}
+}
+
+func TestInstances_lengthMatchesAll(t *testing.T) {
+	if len(Instances()) != len(All()) {
+		t.Errorf("Instances() len=%d != All() len=%d", len(Instances()), len(All()))
+	}
+}
+
+func TestInstances_allHaveNames(t *testing.T) {
+	for _, h := range Instances() {
+		if h.Name() == "" {
+			t.Error("Instances() returned harness with empty name")
+		}
+	}
+}
