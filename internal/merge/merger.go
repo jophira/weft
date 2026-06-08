@@ -28,8 +28,9 @@ const instructionFile = "CLAUDE.md"
 type Merger struct {
 	overlay   profile.Overlay
 	strategy  Strategy
-	filter    Filter    // nil = include all files
-	assembler Assembler // nil = read CLAUDE.md directly from disk
+	filter    Filter       // nil = include all files
+	assembler Assembler    // nil = read CLAUDE.md directly from disk
+	onSkip    func(string) // called with rel path when filter rejects a file; nil = no-op
 }
 
 // New creates a Merger for the given overlay mode.
@@ -40,7 +41,7 @@ func New(o profile.Overlay) *Merger {
 // WithFilter returns a copy of the Merger that only processes files for which
 // f returns true. Use this to restrict the merge to managed paths.
 func (m *Merger) WithFilter(f Filter) *Merger {
-	return &Merger{overlay: m.overlay, strategy: m.strategy, filter: f, assembler: m.assembler}
+	return &Merger{overlay: m.overlay, strategy: m.strategy, filter: f, assembler: m.assembler, onSkip: m.onSkip}
 }
 
 // WithAssembler returns a copy of the Merger that uses fn to produce CLAUDE.md
@@ -48,7 +49,14 @@ func (m *Merger) WithFilter(f Filter) *Merger {
 // source roots contain hierarchical instruction files that must be assembled
 // before merging (see package collect).
 func (m *Merger) WithAssembler(fn Assembler) *Merger {
-	return &Merger{overlay: m.overlay, strategy: m.strategy, filter: m.filter, assembler: fn}
+	return &Merger{overlay: m.overlay, strategy: m.strategy, filter: m.filter, assembler: fn, onSkip: m.onSkip}
+}
+
+// WithSkipLogger returns a copy of the Merger that calls fn with the relative
+// path of each file rejected by the filter. Use this to surface skipped files
+// to the user as warnings or debug log entries.
+func (m *Merger) WithSkipLogger(fn func(string)) *Merger {
+	return &Merger{overlay: m.overlay, strategy: m.strategy, filter: m.filter, assembler: m.assembler, onSkip: fn}
 }
 
 // MergeRoots walks every root, collects unique relative file paths, folds each
@@ -81,6 +89,9 @@ func (m *Merger) MergeRoots(roots []string, outputDir string) ([]string, map[str
 	attribution := map[string][]int{} // rel -> contributing root indices (populated when >1 root contributes)
 	for rel := range seen {
 		if m.filter != nil && !m.filter(rel) {
+			if m.onSkip != nil {
+				m.onSkip(rel)
+			}
 			continue
 		}
 		merged, contributors, err := m.foldFile(rel, roots)

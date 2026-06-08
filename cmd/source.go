@@ -36,6 +36,7 @@ var (
 	addAutoPull        bool
 	addInstructionGlob string
 	addRemote          string
+	addProjectDirNames string
 )
 
 // ── Commands ──────────────────────────────────────────────────────────────────
@@ -65,7 +66,26 @@ the command errors rather than silently tracking a mismatched URL.
 context when this source is merged. The default "CLAUDE.md" reads only the
 root-level file. Use "**/*.md" to assemble a full domain hierarchy
 (Backend/BACKEND.md, Frontend/FRONTEND.md, etc.) in parent-before-child order.
-Managed subdirectory files (commands/, skills/, etc.) are always excluded.`,
+Managed subdirectory files (commands/, skills/, etc.) are always excluded.
+
+--project-dir-names controls which directories are treated as project-rule
+roots. Weft walks the entire source tree and treats any directory whose base
+name matches one of these names as a project root. All .md files found inside
+(including nested subdirectories, up to 10 levels deep) are listed in the
+assembled CLAUDE.md under a "<!-- weft:projects -->" placeholder.
+
+  Default names: projects, project-rules
+
+  Flat layout — one file per project:
+    php/project-rules/ubs-keyinvest.md
+    java/project-rules/instrument-service.md
+
+  Nested layout — one subdirectory per project:
+    php/project-rules/ubs-keyinvest/ubs-keyinvest.md
+    java/project-rules/instrument-service/instrument-service.md
+
+Both layouts are supported. To add the project snippet to your CLAUDE.md,
+place the marker <!-- weft:projects --> where the list should appear.`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name, rawPath := args[0], args[1]
@@ -98,6 +118,9 @@ Managed subdirectory files (commands/, skills/, etc.) are always excluded.`,
 
 		structure := source.DefaultStructure()
 		structure.InstructionGlob = addInstructionGlob
+		if addProjectDirNames != "" {
+			structure.ProjectDirNames = parseSources(addProjectDirNames)
+		}
 
 		s := source.Source{
 			Name:      name,
@@ -125,11 +148,12 @@ Managed subdirectory files (commands/, skills/, etc.) are always excluded.`,
 		}
 
 		fmt.Printf("✓ Source %q registered\n", saved.Name)
-		fmt.Printf("  root:             %s\n", saved.Root)
-		fmt.Printf("  remote:           %s\n", remoteDisplay)
-		fmt.Printf("  branch:           %s\n", saved.Branch)
-		fmt.Printf("  auto-pull:        %v\n", boolWord(saved.AutoPull))
-		fmt.Printf("  instruction-glob: %s\n", saved.Structure.InstructionGlob)
+		fmt.Printf("  root:               %s\n", saved.Root)
+		fmt.Printf("  remote:             %s\n", remoteDisplay)
+		fmt.Printf("  branch:             %s\n", saved.Branch)
+		fmt.Printf("  auto-pull:          %v\n", boolWord(saved.AutoPull))
+		fmt.Printf("  instruction-glob:   %s\n", saved.Structure.InstructionGlob)
+		fmt.Printf("  project-dir-names:  %s\n", strings.Join(saved.Structure.EffectiveProjectDirNames(), ", "))
 
 		// Warn if the root path does not exist yet.
 		if _, err := os.Stat(expanded); os.IsNotExist(err) {
@@ -388,6 +412,7 @@ func init() {
 	sourceAddCmd.Flags().StringVar(&addBranch, "branch", "main", "branch to track")
 	sourceAddCmd.Flags().BoolVar(&addAutoPull, "auto-pull", true, "pull on 'weft source sync'")
 	sourceAddCmd.Flags().StringVar(&addInstructionGlob, "instruction-glob", source.DefaultStructure().InstructionGlob, `glob pattern for instruction files: "CLAUDE.md" (root only) or "**/*.md" (full hierarchy)`)
+	sourceAddCmd.Flags().StringVar(&addProjectDirNames, "project-dir-names", "", `comma-separated directory names to search anywhere in the source tree for project rule files (default: "projects,project-rules")`)
 	sourcePushCmd.Flags().BoolVarP(&pushForce, "force", "f", false, "skip confirmation prompt")
 	sourcePushCmd.Flags().StringVarP(&pushMessage, "message", "m", "", "stage all changes, commit with this message, then push")
 }

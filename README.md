@@ -6,6 +6,8 @@ Maintain separate rule repositories (personal, team, company) and compose them i
 
 Sources can use a flat `CLAUDE.md` or a full domain hierarchy (`Backend/BACKEND.md`, `Backend/Java/JAVA.md`, …). Set `instruction_glob: "**/*.md"` in the source config and Weft assembles every matching file — parent directories before children — before merging and applying.
 
+Per-project rules are also supported: any directory in your source tree named `projects` or `project-rules` is automatically discovered. Weft lists every `.md` file found inside (recursively) as explicit paths in the assembled CLAUDE.md, grouped by project root so the AI can load the right rules for the active project.
+
 ## Install
 
 **macOS / Linux — Homebrew**
@@ -63,6 +65,9 @@ weft source add work ~/.rules/work --remote git@github.com:you/work-rules.git
 weft source add work-private ~/.rules/work-private \
   --instruction-glob "**/*.md"
 
+# Register a source with custom project-rule directory names
+weft source add work ~/.rules/work --project-dir-names "projects,project-rules,specs"
+
 # Pull latest from all remotes
 weft source sync
 
@@ -81,6 +86,68 @@ weft target apply claude-code
 # Verify everything is configured correctly
 weft doctor
 ```
+
+## Per-project rules
+
+Weft can inject per-project rule references into your assembled `CLAUDE.md` so the AI loads the right rules for whichever project you are working in.
+
+### How it works
+
+1. Place a marker in your source `CLAUDE.md` where the list should appear:
+   ```
+   <!-- weft:projects -->
+   ```
+
+2. Organise per-project rule files under a directory named `projects` or `project-rules` anywhere in your source tree. Both flat and nested layouts are supported:
+
+   **Flat** — one file per project:
+   ```
+   php/project-rules/ubs-keyinvest.md
+   java/project-rules/instrument-service.md
+   ```
+
+   **Nested** — one subdirectory per project (any depth):
+   ```
+   php/project-rules/ubs-keyinvest/ubs-keyinvest.md
+   java/project-rules/instrument-service/instrument-service.md
+   ```
+
+3. On every `weft profile use`, the placeholder is replaced with a freshly generated block listing every `.md` file found, grouped by project root:
+
+   ```
+   <!-- weft:projects:begin — regenerated on every `weft profile use`; do not edit -->
+   When working in a project, find the matching entry below and read its rule file(s):
+
+   `~/rules/php/project-rules/`:
+      - `~/rules/php/project-rules/ubs-keyinvest/ubs-keyinvest.md`
+
+   `~/rules/java/project-rules/`:
+      - `~/rules/java/project-rules/instrument-service/instrument-service.md`
+   <!-- weft:projects:end -->
+   ```
+
+   The path naturally carries the language/category context (e.g. `php/`, `java/`). The AI matches entries by project name or technology and loads the appropriate file.
+
+### Configuration
+
+Weft searches for directory names `projects` and `project-rules` by default. To customise:
+
+```bash
+# Use additional names
+weft source add work ~/.rules/work --project-dir-names "projects,project-rules,specs"
+```
+
+Or set `project_dir_names` directly in the source YAML:
+
+```yaml
+structure:
+  project_dir_names:
+    - projects
+    - project-rules
+    - specs
+```
+
+The legacy single-path `projects:` field is still honoured for backward compatibility.
 
 ## Safe apply — manifest, write-back and backups
 

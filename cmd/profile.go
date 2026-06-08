@@ -153,6 +153,11 @@ func stageProfile(p *profile.Profile, roots []string, srcs []source.Source, outp
 	written, attr, err := merge.New(p.Overlay).
 		WithFilter(managedFilter(srcs)).
 		WithAssembler(capturingAssembler).
+		WithSkipLogger(func(rel string) {
+			slog.Debug("source file not synced — not in a managed directory",
+				"file", rel,
+				"hint", "configure project_dir_names in source structure, or move to a managed dir (commands/, skills/, etc.)")
+		}).
 		MergeRoots(roots, outputDir)
 	return written, attr, contribs, err
 }

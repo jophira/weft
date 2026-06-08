@@ -14,6 +14,16 @@ type Structure struct {
 	// assembled CLAUDE.md with a generated snippet listing the source's project
 	// file paths. The directory is never merged into the harness target.
 	Projects string `yaml:"projects"         mapstructure:"projects"`
+	// ProjectDirNames is the list of directory base-names that weft treats as
+	// project-rules roots when auto-discovering project files. Any directory
+	// found anywhere in the source tree whose base name matches one of these
+	// names is treated as a project root: its contents are enumerated
+	// recursively and referenced in the assembled CLAUDE.md snippet.
+	//
+	// Defaults to ["projects", "project-rules"] when nil or empty.
+	// Configure via --project-dir-names on `weft source add`, or by setting
+	// project_dir_names in the source YAML.
+	ProjectDirNames []string `yaml:"project_dir_names" mapstructure:"project_dir_names"`
 	// InstructionGlob controls which files are assembled into the effective
 	// CLAUDE.md for this source. A plain filename (default "CLAUDE.md") reads
 	// only that root-level file. A glob like "**/*.md" walks the full tree and
@@ -21,6 +31,27 @@ type Structure struct {
 	// subdirectory files (commands, skills, etc.) are always excluded from
 	// assembly regardless of this pattern.
 	InstructionGlob string `yaml:"instruction_glob" mapstructure:"instruction_glob"`
+}
+
+// isZero reports whether s is a zero-value Structure (no fields set).
+// Used in place of == comparison since Structure contains a slice.
+func (s Structure) isZero() bool {
+	return s.Commands == "" && s.Agents == "" && s.Skills == "" &&
+		s.Memory == "" && s.Hooks == "" && s.Projects == "" &&
+		s.InstructionGlob == "" && len(s.ProjectDirNames) == 0
+}
+
+// defaultProjectDirNames are the directory names weft searches for when no
+// explicit project_dir_names are configured.
+var defaultProjectDirNames = []string{"projects", "project-rules"}
+
+// EffectiveProjectDirNames returns the configured project dir names, or the
+// built-in defaults (["projects", "project-rules"]) when none are set.
+func (s Structure) EffectiveProjectDirNames() []string {
+	if len(s.ProjectDirNames) > 0 {
+		return s.ProjectDirNames
+	}
+	return defaultProjectDirNames
 }
 
 // Source is a directory of AI rules backed by a git remote.

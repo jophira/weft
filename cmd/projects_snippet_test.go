@@ -29,12 +29,12 @@ func TestExpandProjectsPlaceholder_NoClaudeMd(t *testing.T) {
 	}
 }
 
-func TestExpandProjectsPlaceholder_NoSourcesWithProjects(t *testing.T) {
+func TestExpandProjectsPlaceholder_NoProjectFilesFound(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "CLAUDE.md"), "Before\n"+projectsPlaceholder+"\nAfter\n")
 
 	srcs := []source.Source{
-		{Name: "a", Root: t.TempDir()}, // no Structure.Projects
+		{Name: "a", Root: t.TempDir()}, // empty source root — no project dirs
 	}
 	if err := expandProjectsPlaceholder(dir, srcs); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -48,9 +48,9 @@ func TestExpandProjectsPlaceholder_NoSourcesWithProjects(t *testing.T) {
 	}
 }
 
-func TestExpandProjectsPlaceholder_OneSource(t *testing.T) {
+func TestExpandProjectsPlaceholder_ExplicitProjectsPath(t *testing.T) {
 	srcRoot := t.TempDir()
-	projDir := filepath.Join(srcRoot, "projects")
+	projDir := filepath.Join(srcRoot, "my-rules")
 	if err := os.MkdirAll(projDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -60,8 +60,9 @@ func TestExpandProjectsPlaceholder_OneSource(t *testing.T) {
 	stagedDir := t.TempDir()
 	writeFile(t, filepath.Join(stagedDir, "CLAUDE.md"), "Preamble\n"+projectsPlaceholder+"\nTrailer\n")
 
+	// "my-rules" is not a default project dir name, so explicit Projects field is needed.
 	srcs := []source.Source{
-		{Name: "src", Root: srcRoot, Structure: source.Structure{Projects: "projects/"}},
+		{Name: "src", Root: srcRoot, Structure: source.Structure{Projects: "my-rules/"}},
 	}
 	if err := expandProjectsPlaceholder(stagedDir, srcs); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -79,10 +80,10 @@ func TestExpandProjectsPlaceholder_OneSource(t *testing.T) {
 		t.Error("missing end marker")
 	}
 	if !strings.Contains(got, "common.md") {
-		t.Error("expected common.md entry in snippet")
+		t.Errorf("expected common.md path in snippet; got:\n%s", got)
 	}
-	if !strings.Contains(got, "{project-name}.md") {
-		t.Error("expected {project-name}.md pattern in snippet")
+	if !strings.Contains(got, "myapp.md") {
+		t.Errorf("expected myapp.md path in snippet; got:\n%s", got)
 	}
 	if !strings.Contains(got, "Preamble") || !strings.Contains(got, "Trailer") {
 		t.Error("surrounding content was lost")
@@ -109,8 +110,8 @@ func TestExpandProjectsPlaceholder_TwoSources(t *testing.T) {
 	writeFile(t, filepath.Join(stagedDir, "CLAUDE.md"), projectsPlaceholder+"\n")
 
 	srcs := []source.Source{
-		{Name: "a", Root: rootA, Structure: source.Structure{Projects: "projects/"}},
-		{Name: "b", Root: rootB, Structure: source.Structure{Projects: "projects/"}},
+		{Name: "a", Root: rootA},
+		{Name: "b", Root: rootB},
 	}
 	if err := expandProjectsPlaceholder(stagedDir, srcs); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -126,10 +127,6 @@ func TestExpandProjectsPlaceholder_TwoSources(t *testing.T) {
 	}
 	if !strings.Contains(got, filepath.Join(projB, "common-backend.md")) {
 		t.Errorf("missing rootB common-backend.md in snippet; got:\n%s", got)
-	}
-	count := strings.Count(got, "{project-name}.md")
-	if count != 2 {
-		t.Errorf("expected 2 {project-name}.md entries, got %d", count)
 	}
 }
 
@@ -152,7 +149,7 @@ func TestExpandProjectsPlaceholder_WriteBackPropagated(t *testing.T) {
 	writeFile(t, filepath.Join(stagedDir, "CLAUDE.md"), "Intro\n"+staleBlock+"\nOutro\n")
 
 	srcs := []source.Source{
-		{Name: "src", Root: srcRoot, Structure: source.Structure{Projects: "projects/"}},
+		{Name: "src", Root: srcRoot},
 	}
 	if err := expandProjectsPlaceholder(stagedDir, srcs); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -162,17 +159,13 @@ func TestExpandProjectsPlaceholder_WriteBackPropagated(t *testing.T) {
 	if !strings.Contains(got, "common.md") {
 		t.Errorf("expected fresh snippet with common.md; got:\n%s", got)
 	}
-	if !strings.Contains(got, "{project-name}.md") {
-		t.Errorf("expected {project-name}.md in refreshed snippet; got:\n%s", got)
-	}
 	if !strings.Contains(got, "Intro") || !strings.Contains(got, "Outro") {
 		t.Error("surrounding content was lost")
 	}
 }
 
 // TestExpandProjectsPlaceholder_BothFormsPresent covers the unusual case where a
-// file contains both the raw placeholder and an existing begin/end block (e.g. the
-// placeholder appears above an older stale block). Both should be replaced.
+// file contains both the raw placeholder and an existing begin/end block.
 func TestExpandProjectsPlaceholder_BothFormsPresent(t *testing.T) {
 	srcRoot := t.TempDir()
 	projDir := filepath.Join(srcRoot, "projects")
@@ -187,7 +180,7 @@ func TestExpandProjectsPlaceholder_BothFormsPresent(t *testing.T) {
 	writeFile(t, filepath.Join(stagedDir, "CLAUDE.md"), content)
 
 	srcs := []source.Source{
-		{Name: "src", Root: srcRoot, Structure: source.Structure{Projects: "projects/"}},
+		{Name: "src", Root: srcRoot},
 	}
 	if err := expandProjectsPlaceholder(stagedDir, srcs); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -197,10 +190,6 @@ func TestExpandProjectsPlaceholder_BothFormsPresent(t *testing.T) {
 	if strings.Contains(got, projectsPlaceholder) {
 		t.Error("raw placeholder was not replaced")
 	}
-	// The stale begin marker should be gone (replaced by the snippet from the raw placeholder).
-	// After replacing the raw placeholder, the content contains the new snippet + old stale block;
-	// then replaceProjectsBlock replaces the stale block with another copy of the snippet.
-	// Either way, "common.md" must appear and no raw placeholder must remain.
 	if !strings.Contains(got, "common.md") {
 		t.Errorf("expected common.md in output; got:\n%s", got)
 	}
@@ -218,9 +207,6 @@ func TestReplaceProjectsBlock_MissingEndMarker(t *testing.T) {
 }
 
 func TestReplaceProjectsBlock_MissingBeginMarker(t *testing.T) {
-	// Called with content that has no begin marker — must return content unchanged.
-	// (Defensive guard; the caller checks hasBlock before calling, so unreachable
-	// in practice, but the function must be safe to call either way.)
 	content := "no markers here"
 	got := replaceProjectsBlock(content, "replacement")
 	if got != content {
@@ -228,44 +214,51 @@ func TestReplaceProjectsBlock_MissingBeginMarker(t *testing.T) {
 	}
 }
 
-func TestGenerateProjectsSnippet_FiltersNonMdAndDirs(t *testing.T) {
+func TestGenerateProjectsSnippet_FiltersNonMdAndHidden(t *testing.T) {
 	root := t.TempDir()
 	projDir := filepath.Join(root, "projects")
 	if err := os.MkdirAll(projDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	// common.md → should appear
 	writeFile(t, filepath.Join(projDir, "common.md"), "# Common")
-	// common.txt → not .md, must be filtered
-	writeFile(t, filepath.Join(projDir, "common.txt"), "ignored")
-	// subdir → must be filtered
-	if err := os.Mkdir(filepath.Join(projDir, "common-subdir"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	// non-common .md → not a common* file, must not appear in always list
-	writeFile(t, filepath.Join(projDir, "weft.md"), "# Weft")
+	writeFile(t, filepath.Join(projDir, "notes.txt"), "ignored")
+	writeFile(t, filepath.Join(projDir, ".hidden.md"), "ignored")
 
-	srcs := []source.Source{
-		{Name: "s", Root: root, Structure: source.Structure{Projects: "projects/"}},
-	}
+	srcs := []source.Source{{Name: "s", Root: root}}
 	snippet := generateProjectsSnippet(srcs)
 
 	if !strings.Contains(snippet, "common.md") {
 		t.Errorf("expected common.md in snippet; got:\n%s", snippet)
 	}
-	if strings.Contains(snippet, "common.txt") {
-		t.Errorf("common.txt should be filtered out; got:\n%s", snippet)
+	if strings.Contains(snippet, "notes.txt") {
+		t.Errorf("non-.md file should be filtered; got:\n%s", snippet)
 	}
-	if strings.Contains(snippet, "common-subdir") {
-		t.Errorf("subdirectory should be filtered out; got:\n%s", snippet)
+	if strings.Contains(snippet, ".hidden.md") {
+		t.Errorf("hidden file should be filtered; got:\n%s", snippet)
 	}
-	// weft.md is not common* so it should not appear as an always-load entry,
-	// only {project-name}.md pattern should represent project-specific files.
-	if strings.Contains(snippet, "weft.md") {
-		t.Errorf("non-common .md should not appear as always entry; got:\n%s", snippet)
+}
+
+func TestGenerateProjectsSnippet_AllMdFilesListed(t *testing.T) {
+	root := t.TempDir()
+	projDir := filepath.Join(root, "projects")
+	if err := os.MkdirAll(projDir, 0o755); err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(snippet, "{project-name}.md") {
-		t.Errorf("expected {project-name}.md pattern; got:\n%s", snippet)
+	writeFile(t, filepath.Join(projDir, "common.md"), "# Common")
+	writeFile(t, filepath.Join(projDir, "weft.md"), "# Weft")
+
+	srcs := []source.Source{{Name: "s", Root: root}}
+	snippet := generateProjectsSnippet(srcs)
+
+	if !strings.Contains(snippet, "common.md") {
+		t.Errorf("expected common.md in snippet; got:\n%s", snippet)
+	}
+	// all .md files are now listed explicitly — no more {project-name}.md pattern
+	if !strings.Contains(snippet, "weft.md") {
+		t.Errorf("expected weft.md in snippet; got:\n%s", snippet)
+	}
+	if strings.Contains(snippet, "{project-name}") {
+		t.Errorf("snippet should not contain legacy {project-name} pattern; got:\n%s", snippet)
 	}
 }
 
@@ -277,13 +270,45 @@ func TestGenerateProjectsSnippet_EmptyWhenNoProjects(t *testing.T) {
 	if !strings.Contains(snippet, projectsBegin) || !strings.Contains(snippet, projectsEnd) {
 		t.Errorf("expected begin/end markers even for empty snippet: %q", snippet)
 	}
-	inner := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(snippet, projectsBegin), projectsEnd))
-	if inner != "" {
-		t.Errorf("expected empty body, got: %q", inner)
+	// Strip begin/end markers and verify there is no project file content.
+	inner := strings.TrimPrefix(snippet, projectsBegin)
+	inner = strings.TrimSuffix(inner, projectsEnd)
+	if strings.Contains(inner, "`") {
+		t.Errorf("expected no file paths in empty snippet, got: %q", inner)
 	}
 }
 
-func TestGenerateProjectsSnippet_CommonFilesAlphabetical(t *testing.T) {
+func TestGenerateProjectsSnippet_GroupedByProjectRoot(t *testing.T) {
+	root := t.TempDir()
+	phpSlug := filepath.Join(root, "php", "project-rules", "keyinvest")
+	javaSlug := filepath.Join(root, "java", "project-rules", "svc")
+	if err := os.MkdirAll(phpSlug, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(javaSlug, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(phpSlug, "keyinvest.md"), "# PHP")
+	writeFile(t, filepath.Join(javaSlug, "svc.md"), "# Java")
+
+	srcs := []source.Source{{Name: "s", Root: root}}
+	snippet := generateProjectsSnippet(srcs)
+
+	// Project roots are sorted alphabetically; java/ sorts before php/.
+	javaRootIdx := strings.Index(snippet, "java/project-rules")
+	phpRootIdx := strings.Index(snippet, "php/project-rules")
+	if phpRootIdx < 0 || javaRootIdx < 0 {
+		t.Fatalf("expected both group headers; got:\n%s", snippet)
+	}
+	if javaRootIdx >= phpRootIdx {
+		t.Errorf("expected java group before php group (alphabetical); java=%d php=%d", javaRootIdx, phpRootIdx)
+	}
+	if !strings.Contains(snippet, "keyinvest.md") || !strings.Contains(snippet, "svc.md") {
+		t.Errorf("expected both project files in snippet; got:\n%s", snippet)
+	}
+}
+
+func TestGenerateProjectsSnippet_AlphabeticalOrder(t *testing.T) {
 	root := t.TempDir()
 	projDir := filepath.Join(root, "projects")
 	if err := os.MkdirAll(projDir, 0o755); err != nil {
@@ -293,15 +318,13 @@ func TestGenerateProjectsSnippet_CommonFilesAlphabetical(t *testing.T) {
 		writeFile(t, filepath.Join(projDir, name), "x")
 	}
 
-	srcs := []source.Source{
-		{Name: "s", Root: root, Structure: source.Structure{Projects: "projects/"}},
-	}
+	srcs := []source.Source{{Name: "s", Root: root}}
 	snippet := generateProjectsSnippet(srcs)
 
-	idxBase := strings.Index(snippet, "common.md")
 	idxA := strings.Index(snippet, "common-a.md")
 	idxZ := strings.Index(snippet, "common-z.md")
-	if idxBase < 0 || idxA < 0 || idxZ < 0 {
+	idxBase := strings.Index(snippet, "common.md")
+	if idxA < 0 || idxZ < 0 || idxBase < 0 {
 		t.Fatalf("missing expected files in snippet:\n%s", snippet)
 	}
 	// os.ReadDir is alphabetical by byte value: '-' (45) < '.' (46),
@@ -309,5 +332,154 @@ func TestGenerateProjectsSnippet_CommonFilesAlphabetical(t *testing.T) {
 	if idxA >= idxZ || idxZ >= idxBase {
 		t.Errorf("files not in alphabetical order (common-a.md=%d common-z.md=%d common.md=%d)",
 			idxA, idxZ, idxBase)
+	}
+}
+
+func TestGenerateProjectsSnippet_AutoDiscoversNestedProjectRoot(t *testing.T) {
+	// Structure: work-tech-private/php/project-rules/ubs-keyinvest/ubs-keyinvest.md
+	root := t.TempDir()
+	slugDir := filepath.Join(root, "work-tech-private", "php", "project-rules", "ubs-keyinvest")
+	if err := os.MkdirAll(slugDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(slugDir, "ubs-keyinvest.md"), "# UBS KeyInvest rules")
+
+	srcs := []source.Source{{Name: "s", Root: root}}
+	snippet := generateProjectsSnippet(srcs)
+
+	if !strings.Contains(snippet, "ubs-keyinvest.md") {
+		t.Errorf("expected ubs-keyinvest.md discovered via default name 'project-rules'; got:\n%s", snippet)
+	}
+}
+
+func TestGenerateProjectsSnippet_MultipleProjectRoots(t *testing.T) {
+	// Two language dirs, each with their own project-rules.
+	root := t.TempDir()
+	phpSlug := filepath.Join(root, "php", "project-rules", "keyinvest")
+	javaSlug := filepath.Join(root, "java", "project-rules", "instrument-service")
+	if err := os.MkdirAll(phpSlug, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(javaSlug, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(phpSlug, "keyinvest.md"), "# PHP rules")
+	writeFile(t, filepath.Join(javaSlug, "instrument-service.md"), "# Java rules")
+
+	srcs := []source.Source{{Name: "s", Root: root}}
+	snippet := generateProjectsSnippet(srcs)
+
+	if !strings.Contains(snippet, "keyinvest.md") {
+		t.Errorf("expected keyinvest.md in snippet; got:\n%s", snippet)
+	}
+	if !strings.Contains(snippet, "instrument-service.md") {
+		t.Errorf("expected instrument-service.md in snippet; got:\n%s", snippet)
+	}
+}
+
+func TestGenerateProjectsSnippet_CustomProjectDirNames(t *testing.T) {
+	root := t.TempDir()
+	// Source uses "specs" as the project dir name — not a default.
+	specsDir := filepath.Join(root, "nested", "specs")
+	if err := os.MkdirAll(specsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(specsDir, "my-spec.md"), "# Spec")
+
+	srcs := []source.Source{{
+		Name: "s",
+		Root: root,
+		Structure: source.Structure{
+			ProjectDirNames: []string{"specs"},
+		},
+	}}
+	snippet := generateProjectsSnippet(srcs)
+
+	if !strings.Contains(snippet, "my-spec.md") {
+		t.Errorf("expected my-spec.md found via custom project dir name 'specs'; got:\n%s", snippet)
+	}
+}
+
+func TestGenerateProjectsSnippet_RecursiveFilesUnderSlug(t *testing.T) {
+	// Slug contains nested subdirs with .md files at multiple levels.
+	root := t.TempDir()
+	deepDir := filepath.Join(root, "projects", "my-project", "sub", "deep")
+	if err := os.MkdirAll(deepDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(root, "projects", "my-project", "top.md"), "# Top")
+	writeFile(t, filepath.Join(deepDir, "deep.md"), "# Deep")
+
+	srcs := []source.Source{{Name: "s", Root: root}}
+	snippet := generateProjectsSnippet(srcs)
+
+	if !strings.Contains(snippet, "top.md") {
+		t.Errorf("expected top.md in snippet; got:\n%s", snippet)
+	}
+	if !strings.Contains(snippet, "deep.md") {
+		t.Errorf("expected deep.md in snippet; got:\n%s", snippet)
+	}
+}
+
+func TestGenerateProjectsSnippet_ExplicitProjectsNotDuplicated(t *testing.T) {
+	// When Projects field matches a default discovery name, ensure no duplicates.
+	root := t.TempDir()
+	projDir := filepath.Join(root, "projects")
+	if err := os.MkdirAll(projDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(projDir, "rules.md"), "# Rules")
+
+	srcs := []source.Source{{
+		Name:      "s",
+		Root:      root,
+		Structure: source.Structure{Projects: "projects/"},
+	}}
+	snippet := generateProjectsSnippet(srcs)
+
+	// File should appear exactly once — auto-discovery and explicit path both
+	// resolve to the same dir and must be deduplicated.
+	count := strings.Count(snippet, "rules.md")
+	if count != 1 {
+		t.Errorf("expected rules.md exactly once, got %d occurrences;\n%s", count, snippet)
+	}
+}
+
+func TestFindProjectRoots_NonExistentRoot(t *testing.T) {
+	roots, err := findProjectRoots("/nonexistent/path/xyz", map[string]bool{"projects": true})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(roots) != 0 {
+		t.Errorf("expected no roots for non-existent path, got: %v", roots)
+	}
+}
+
+func TestCollectProjectFiles_SkipsHiddenDirs(t *testing.T) {
+	root := t.TempDir()
+	hiddenDir := filepath.Join(root, ".hidden")
+	if err := os.MkdirAll(hiddenDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(hiddenDir, "secret.md"), "# Secret")
+	writeFile(t, filepath.Join(root, "visible.md"), "# Visible")
+
+	files, err := collectProjectFiles(root)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, f := range files {
+		if strings.Contains(f, ".hidden") {
+			t.Errorf("hidden dir should be skipped, got: %s", f)
+		}
+	}
+	found := false
+	for _, f := range files {
+		if strings.HasSuffix(f, "visible.md") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected visible.md in results; got: %v", files)
 	}
 }
