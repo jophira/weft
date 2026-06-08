@@ -90,3 +90,39 @@ func TestAllDirs_withoutProjects_equalsManagedDirs(t *testing.T) {
 		t.Errorf("AllDirs() len=%d, ManagedDirs() len=%d; should be equal when Projects is empty", len(all), len(managed))
 	}
 }
+
+// ── EffectiveProjectDirNames ──────────────────────────────────────────────────
+
+func TestEffectiveProjectDirNames_defaultsWhenEmpty(t *testing.T) {
+	s := source.Structure{}
+	names := s.EffectiveProjectDirNames()
+	if len(names) == 0 {
+		t.Error("expected default names when ProjectDirNames is nil")
+	}
+	found := map[string]bool{}
+	for _, n := range names {
+		found[n] = true
+	}
+	if !found["projects"] {
+		t.Error("expected 'projects' in default names")
+	}
+	if !found["project-rules"] {
+		t.Error("expected 'project-rules' in default names")
+	}
+}
+
+func TestEffectiveProjectDirNames_returnsConfiguredNames(t *testing.T) {
+	s := source.Structure{ProjectDirNames: []string{"specs", "rules"}}
+	names := s.EffectiveProjectDirNames()
+	if len(names) != 2 || names[0] != "specs" || names[1] != "rules" {
+		t.Errorf("expected [specs rules], got %v", names)
+	}
+}
+
+func TestEffectiveProjectDirNames_defaultStructureHasNoExplicitNames(t *testing.T) {
+	s := source.DefaultStructure()
+	// DefaultStructure leaves ProjectDirNames nil so defaults are applied at runtime.
+	if len(s.ProjectDirNames) != 0 {
+		t.Errorf("DefaultStructure should not set ProjectDirNames; got %v", s.ProjectDirNames)
+	}
+}

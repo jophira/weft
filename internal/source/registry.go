@@ -48,7 +48,7 @@ func (r *FileRegistry) Add(s Source) error {
 	if s.Branch == "" {
 		s.Branch = "main"
 	}
-	if s.Structure == (Structure{}) {
+	if s.Structure.isZero() {
 		s.Structure = DefaultStructure()
 	}
 
