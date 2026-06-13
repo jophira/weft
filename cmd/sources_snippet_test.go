@@ -162,17 +162,70 @@ func TestClassifySourceFile_NestedUnderKnownStack(t *testing.T) {
 
 func TestCollectSourceFiles_RootOnly(t *testing.T) {
 	root := buildSourceTree(t, map[string]string{
-		"CLAUDE.md": "root rules",
+		"CLAUDE.md": "root rules — already merged by assembly, should be skipped",
 	})
 	files, err := collectSourceFiles(root, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(files) != 1 {
-		t.Fatalf("expected 1 file, got %d", len(files))
+	if len(files) != 0 {
+		t.Fatalf("expected 0 files (root-level files skipped), got %d: %v", len(files), files)
 	}
-	if files[0].condition != "" {
-		t.Errorf("root CLAUDE.md should always load, got condition %q", files[0].condition)
+}
+
+func TestCollectSourceFiles_SkipsRootLevelFiles(t *testing.T) {
+	root := buildSourceTree(t, map[string]string{
+		"CLAUDE.md":     "root — already merged",
+		"README.md":     "project readme",
+		"extra.md":      "other root file",
+		"dev/common.md": "common rules",
+	})
+	files, err := collectSourceFiles(root, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sep := string(filepath.Separator)
+	for _, f := range files {
+		rel, _ := filepath.Rel(root, f.abs)
+		if !strings.Contains(rel, sep) {
+			t.Errorf("root-level file should be skipped: %s", rel)
+		}
+	}
+	found := false
+	for _, f := range files {
+		if strings.HasSuffix(filepath.ToSlash(f.abs), "dev/common.md") {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected dev/common.md to be discovered")
+	}
+}
+
+func TestCollectSourceFiles_SkipsReadme(t *testing.T) {
+	root := buildSourceTree(t, map[string]string{
+		"README.md":        "root readme — skipped as root-level",
+		"dev/README.md":    "dev readme — skipped as README",
+		"dev/go/README.md": "go readme — skipped as README",
+		"dev/go/go.md":     "go rules",
+	})
+	files, err := collectSourceFiles(root, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range files {
+		if strings.EqualFold(filepath.Base(f.abs), "README.md") {
+			t.Errorf("README.md should be skipped at any depth: %s", f.abs)
+		}
+	}
+	found := false
+	for _, f := range files {
+		if strings.HasSuffix(filepath.ToSlash(f.abs), "dev/go/go.md") {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected dev/go/go.md to be discovered")
 	}
 }
 
@@ -196,7 +249,6 @@ func TestCollectSourceFiles_DevStackDirs(t *testing.T) {
 	}
 
 	cases := map[string]string{
-		"CLAUDE.md":        "",
 		"dev/common.md":    "",
 		"dev/doc/doc.md":   "",
 		"dev/go/go.md":     knownStacks["go"].label,
@@ -236,15 +288,9 @@ func TestCollectSourceFiles_ExcludesManagedDirs(t *testing.T) {
 			}
 		}
 	}
-	// CLAUDE.md at root must still be present.
-	found := false
-	for _, f := range files {
-		if strings.HasSuffix(f.abs, "CLAUDE.md") {
-			found = true
-		}
-	}
-	if !found {
-		t.Error("expected CLAUDE.md to be retained after managed-dir exclusion")
+	// Root-level CLAUDE.md is skipped by design; verify the result is empty.
+	if len(files) != 0 {
+		t.Errorf("expected 0 files after all managed dirs and root-level files excluded, got %d", len(files))
 	}
 }
 
@@ -370,7 +416,7 @@ func TestCollectSourceFiles_MultipleStacksAndAlways(t *testing.T) {
 		byRel[filepath.ToSlash(rel)] = f.condition
 	}
 
-	alwaysLoad := []string{"CLAUDE.md", "dev/common.md", "dev/doc/doc.md"}
+	alwaysLoad := []string{"dev/common.md", "dev/doc/doc.md"}
 	for _, rel := range alwaysLoad {
 		if cond, ok := byRel[rel]; !ok || cond != "" {
 			t.Errorf("file %q should always load, got condition %q (found=%v)", rel, cond, ok)
