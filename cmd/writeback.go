@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/jophira/weft/internal/manifest"
 	"github.com/jophira/weft/internal/profile"
@@ -63,10 +64,38 @@ func writeBackSingleSourceMap(
 	if err := os.MkdirAll(filepath.Dir(srcPath), 0o755); err != nil {
 		return false, fmt.Errorf("creating source dir for %s: %w", c.Rel, err)
 	}
-	if err := os.WriteFile(srcPath, content, 0o644); err != nil { //nolint:gosec // srcPath is derived from source root config, not user input
+	if err := os.WriteFile(srcPath, normalizeForSource(content), 0o644); err != nil { //nolint:gosec // srcPath is derived from source root config, not user input
 		return false, fmt.Errorf("writing %s to source %s: %w", c.Rel, srcName, err)
 	}
 	return true, nil
+}
+
+// normalizeForSource prepares harness file content for writing back to a source.
+// Generated placeholder expansions are collapsed to their compact placeholder form,
+// and source attribution markers are stripped — both belong only in the assembled
+// harness output, not in source files.
+func normalizeForSource(content []byte) []byte {
+	s := string(content)
+	s = replaceSourcesBlock(s, sourcesPlaceholder)
+	s = replaceProjectsBlock(s, projectsPlaceholder)
+	s = stripAttributionMarkers(s)
+	return []byte(s)
+}
+
+// stripAttributionMarkers removes <!-- weft:source:begin ... --> and
+// <!-- weft:source:end ... --> lines from s.
+func stripAttributionMarkers(s string) string {
+	lines := strings.Split(s, "\n")
+	out := lines[:0]
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "<!-- weft:source:begin") ||
+			strings.HasPrefix(trimmed, "<!-- weft:source:end") {
+			continue
+		}
+		out = append(out, line)
+	}
+	return strings.Join(out, "\n")
 }
 
 // owningSource finds the source that should receive a write-back for rel.

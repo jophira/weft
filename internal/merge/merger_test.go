@@ -12,6 +12,16 @@ import (
 )
 
 // writeFile creates a file with given content inside dir, making parent dirs.
+// nr builds a []NamedRoot slice with empty Names from bare paths. Use this for
+// tests that don't care about attribution markers — empty names suppress wrapping.
+func nr(paths ...string) []merge.NamedRoot {
+	result := make([]merge.NamedRoot, len(paths))
+	for i, p := range paths {
+		result[i] = merge.NamedRoot{Path: p}
+	}
+	return result
+}
+
 func writeFile(t *testing.T, dir, rel, content string) {
 	t.Helper()
 	path := filepath.Join(dir, rel)
@@ -40,7 +50,7 @@ func TestMergeRoots_singleSource(t *testing.T) {
 	writeFile(t, src, "CLAUDE.md", "# Rules")
 	writeFile(t, src, "commands/hello.md", "say hi")
 
-	manifest, _, err := merge.New(profile.OverlayCascade).MergeRoots([]string{src}, out)
+	manifest, _, err := merge.New(profile.OverlayCascade).MergeRoots(nr(src), out)
 	if err != nil {
 		t.Fatalf("MergeRoots: %v", err)
 	}
@@ -62,7 +72,7 @@ func TestMergeRoots_cascade_overlayWins(t *testing.T) {
 	writeFile(t, base, "CLAUDE.md", "base rules")
 	writeFile(t, overlay, "CLAUDE.md", "overlay rules")
 
-	_, _, err := merge.New(profile.OverlayCascade).MergeRoots([]string{base, overlay}, out)
+	_, _, err := merge.New(profile.OverlayCascade).MergeRoots(nr(base, overlay), out)
 	if err != nil {
 		t.Fatalf("MergeRoots: %v", err)
 	}
@@ -80,7 +90,7 @@ func TestMergeRoots_cascade_baseKeptWhenOverlayMissing(t *testing.T) {
 	writeFile(t, base, "commands/deploy.md", "deploy cmd")
 	// overlay has no commands/deploy.md
 
-	_, _, err := merge.New(profile.OverlayCascade).MergeRoots([]string{base, overlay}, out)
+	_, _, err := merge.New(profile.OverlayCascade).MergeRoots(nr(base, overlay), out)
 	if err != nil {
 		t.Fatalf("MergeRoots: %v", err)
 	}
@@ -99,7 +109,7 @@ func TestMergeRoots_append_combinesContent(t *testing.T) {
 	writeFile(t, base, "CLAUDE.md", "# Base")
 	writeFile(t, overlay, "CLAUDE.md", "# Overlay")
 
-	_, _, err := merge.New(profile.OverlayMerge).MergeRoots([]string{base, overlay}, out)
+	_, _, err := merge.New(profile.OverlayMerge).MergeRoots(nr(base, overlay), out)
 	if err != nil {
 		t.Fatalf("MergeRoots: %v", err)
 	}
@@ -119,7 +129,7 @@ func TestMergeRoots_lastWins(t *testing.T) {
 	writeFile(t, base, "CLAUDE.md", "base")
 	writeFile(t, overlay, "CLAUDE.md", "last")
 
-	_, _, err := merge.New(profile.OverlayLastWins).MergeRoots([]string{base, overlay}, out)
+	_, _, err := merge.New(profile.OverlayLastWins).MergeRoots(nr(base, overlay), out)
 	if err != nil {
 		t.Fatalf("MergeRoots: %v", err)
 	}
@@ -138,7 +148,7 @@ func TestMergeRoots_unionOfPaths(t *testing.T) {
 	writeFile(t, a, "commands/alpha.md", "alpha")
 	writeFile(t, b, "commands/beta.md", "beta")
 
-	manifest, _, err := merge.New(profile.OverlayCascade).MergeRoots([]string{a, b}, out)
+	manifest, _, err := merge.New(profile.OverlayCascade).MergeRoots(nr(a, b), out)
 	if err != nil {
 		t.Fatalf("MergeRoots: %v", err)
 	}
@@ -157,7 +167,7 @@ func TestMergeRoots_skipsHidden(t *testing.T) {
 	writeFile(t, src, ".gitignore", "hidden file")
 	writeFile(t, src, ".git/config", "git internals")
 
-	manifest, _, err := merge.New(profile.OverlayCascade).MergeRoots([]string{src}, out)
+	manifest, _, err := merge.New(profile.OverlayCascade).MergeRoots(nr(src), out)
 	if err != nil {
 		t.Fatalf("MergeRoots: %v", err)
 	}
@@ -183,7 +193,7 @@ func TestMergeRoots_withFilter(t *testing.T) {
 			strings.HasPrefix(rel, "commands"+string(filepath.Separator))
 	}
 
-	manifest, _, err := merge.New(profile.OverlayCascade).WithFilter(filter).MergeRoots([]string{src}, out)
+	manifest, _, err := merge.New(profile.OverlayCascade).WithFilter(filter).MergeRoots(nr(src), out)
 	if err != nil {
 		t.Fatalf("MergeRoots: %v", err)
 	}
@@ -208,7 +218,7 @@ func TestMergeRoots_hiddenRootDirIsWalked(t *testing.T) {
 	writeFile(t, hiddenRoot, "CLAUDE.md", "rules from hidden root")
 
 	out := t.TempDir()
-	manifest, _, err := merge.New(profile.OverlayCascade).MergeRoots([]string{hiddenRoot}, out)
+	manifest, _, err := merge.New(profile.OverlayCascade).MergeRoots(nr(hiddenRoot), out)
 	if err != nil {
 		t.Fatalf("MergeRoots: %v", err)
 	}
@@ -227,7 +237,7 @@ func TestMergeRoots_manifestSorted(t *testing.T) {
 	writeFile(t, src, "aaa.md", "a")
 	writeFile(t, src, "mmm.md", "m")
 
-	manifest, _, err := merge.New(profile.OverlayCascade).MergeRoots([]string{src}, out)
+	manifest, _, err := merge.New(profile.OverlayCascade).MergeRoots(nr(src), out)
 	if err != nil {
 		t.Fatalf("MergeRoots: %v", err)
 	}
@@ -257,7 +267,7 @@ func TestMergeRoots_assembler_singleRoot_hierarchyAssembled(t *testing.T) {
 
 	_, _, err := merge.New(profile.OverlayCascade).
 		WithAssembler(assemblerFor("**/*.md")).
-		MergeRoots([]string{src}, out)
+		MergeRoots(nr(src), out)
 	if err != nil {
 		t.Fatalf("MergeRoots: %v", err)
 	}
@@ -280,7 +290,7 @@ func TestMergeRoots_assembler_twoRoots_mergedWithCascade(t *testing.T) {
 
 	_, _, err := merge.New(profile.OverlayCascade).
 		WithAssembler(assemblerFor("**/*.md")).
-		MergeRoots([]string{base, overlay}, out)
+		MergeRoots(nr(base, overlay), out)
 	if err != nil {
 		t.Fatalf("MergeRoots: %v", err)
 	}
@@ -301,7 +311,7 @@ func TestMergeRoots_assembler_twoRoots_mergedWithAppend(t *testing.T) {
 
 	_, _, err := merge.New(profile.OverlayMerge).
 		WithAssembler(assemblerFor("**/*.md")).
-		MergeRoots([]string{base, overlay}, out)
+		MergeRoots(nr(base, overlay), out)
 	if err != nil {
 		t.Fatalf("MergeRoots: %v", err)
 	}
@@ -321,7 +331,7 @@ func TestMergeRoots_assembler_excludesHonoured(t *testing.T) {
 
 	_, _, err := merge.New(profile.OverlayCascade).
 		WithAssembler(assemblerFor("**/*.md", "skills")).
-		MergeRoots([]string{src}, out)
+		MergeRoots(nr(src), out)
 	if err != nil {
 		t.Fatalf("MergeRoots: %v", err)
 	}
@@ -342,7 +352,7 @@ func TestMergeRoots_assembler_rootNoMatchContributesNothing(t *testing.T) {
 
 	_, _, err := merge.New(profile.OverlayCascade).
 		WithAssembler(assemblerFor("**/*.md")).
-		MergeRoots([]string{base, overlay}, out)
+		MergeRoots(nr(base, overlay), out)
 	if err != nil {
 		t.Fatalf("MergeRoots: %v", err)
 	}
@@ -361,7 +371,7 @@ func TestMergeRoots_attribution_appendStrategy_multipleRoots(t *testing.T) {
 	writeFile(t, a, "CLAUDE.md", "from A")
 	writeFile(t, b, "CLAUDE.md", "from B")
 
-	_, attr, err := merge.New(profile.OverlayMerge).MergeRoots([]string{a, b}, out)
+	_, attr, err := merge.New(profile.OverlayMerge).MergeRoots(nr(a, b), out)
 	if err != nil {
 		t.Fatalf("MergeRoots: %v", err)
 	}
@@ -379,7 +389,7 @@ func TestMergeRoots_attribution_singleSource_noEntry(t *testing.T) {
 	out := t.TempDir()
 	writeFile(t, src, "CLAUDE.md", "rules")
 
-	_, attr, err := merge.New(profile.OverlayMerge).MergeRoots([]string{src}, out)
+	_, attr, err := merge.New(profile.OverlayMerge).MergeRoots(nr(src), out)
 	if err != nil {
 		t.Fatalf("MergeRoots: %v", err)
 	}
@@ -395,7 +405,7 @@ func TestMergeRoots_attribution_onlyOneRootHasFile_noEntry(t *testing.T) {
 	writeFile(t, a, "CLAUDE.md", "only in A")
 	// b has a different file entirely
 
-	_, attr, err := merge.New(profile.OverlayCascade).MergeRoots([]string{a, b}, out)
+	_, attr, err := merge.New(profile.OverlayCascade).MergeRoots(nr(a, b), out)
 	if err != nil {
 		t.Fatalf("MergeRoots: %v", err)
 	}
@@ -411,7 +421,7 @@ func TestMergeRoots_attribution_cascadeMultipleRoots_tracked(t *testing.T) {
 	writeFile(t, a, "CLAUDE.md", "base rules")
 	writeFile(t, b, "CLAUDE.md", "overlay rules")
 
-	_, attr, err := merge.New(profile.OverlayCascade).MergeRoots([]string{a, b}, out)
+	_, attr, err := merge.New(profile.OverlayCascade).MergeRoots(nr(a, b), out)
 	if err != nil {
 		t.Fatalf("MergeRoots: %v", err)
 	}
@@ -433,12 +443,108 @@ func TestMergeRoots_assembler_backwardCompat_plainFilename(t *testing.T) {
 
 	_, _, err := merge.New(profile.OverlayCascade).
 		WithAssembler(assemblerFor("CLAUDE.md")).
-		MergeRoots([]string{src}, out)
+		MergeRoots(nr(src), out)
 	if err != nil {
 		t.Fatalf("MergeRoots: %v", err)
 	}
 	got := readFile(t, out, "CLAUDE.md")
 	if got != "root rules" {
 		t.Errorf("backward compat broken: got %q", got)
+	}
+}
+
+// ── Source attribution markers ────────────────────────────────────────────────
+
+func TestMergeRoots_attributionMarkers_addedForMultiSource(t *testing.T) {
+	a := t.TempDir()
+	b := t.TempDir()
+	out := t.TempDir()
+	writeFile(t, a, "CLAUDE.md", "# Source A rules")
+	writeFile(t, b, "CLAUDE.md", "# Source B rules")
+
+	roots := []merge.NamedRoot{
+		{Name: "source-a", Path: a},
+		{Name: "source-b", Path: b},
+	}
+	_, _, err := merge.New(profile.OverlayMerge).MergeRoots(roots, out)
+	if err != nil {
+		t.Fatalf("MergeRoots: %v", err)
+	}
+	got := readFile(t, out, "CLAUDE.md")
+	if !strings.Contains(got, `<!-- weft:source:begin name="source-a" -->`) {
+		t.Errorf("expected source-a begin marker, got:\n%s", got)
+	}
+	if !strings.Contains(got, `<!-- weft:source:end name="source-a" -->`) {
+		t.Errorf("expected source-a end marker, got:\n%s", got)
+	}
+	if !strings.Contains(got, `<!-- weft:source:begin name="source-b" -->`) {
+		t.Errorf("expected source-b begin marker, got:\n%s", got)
+	}
+	if !strings.Contains(got, "# Source A rules") {
+		t.Errorf("expected content from source-a, got:\n%s", got)
+	}
+	if !strings.Contains(got, "# Source B rules") {
+		t.Errorf("expected content from source-b, got:\n%s", got)
+	}
+}
+
+func TestMergeRoots_attributionMarkers_notAddedForSingleSource(t *testing.T) {
+	src := t.TempDir()
+	out := t.TempDir()
+	writeFile(t, src, "CLAUDE.md", "# Rules")
+
+	roots := []merge.NamedRoot{{Name: "my-source", Path: src}}
+	_, _, err := merge.New(profile.OverlayMerge).MergeRoots(roots, out)
+	if err != nil {
+		t.Fatalf("MergeRoots: %v", err)
+	}
+	got := readFile(t, out, "CLAUDE.md")
+	if strings.Contains(got, "weft:source:begin") {
+		t.Errorf("single-source should not have attribution markers, got:\n%s", got)
+	}
+	if got != "# Rules" {
+		t.Errorf("single-source content should be unmodified, got %q", got)
+	}
+}
+
+func TestMergeRoots_attributionMarkers_notAddedWhenNameEmpty(t *testing.T) {
+	a := t.TempDir()
+	b := t.TempDir()
+	out := t.TempDir()
+	writeFile(t, a, "CLAUDE.md", "# A")
+	writeFile(t, b, "CLAUDE.md", "# B")
+
+	// Roots with empty names → no markers, even with multiple contributors.
+	_, _, err := merge.New(profile.OverlayMerge).MergeRoots(nr(a, b), out)
+	if err != nil {
+		t.Fatalf("MergeRoots: %v", err)
+	}
+	got := readFile(t, out, "CLAUDE.md")
+	if strings.Contains(got, "weft:source:begin") {
+		t.Errorf("empty-name roots should not produce attribution markers, got:\n%s", got)
+	}
+}
+
+func TestMergeRoots_attributionMarkers_fileUniqueToOneRoot_noMarkers(t *testing.T) {
+	a := t.TempDir()
+	b := t.TempDir()
+	out := t.TempDir()
+	writeFile(t, a, "commands/deploy.md", "deploy cmd")
+	// b does not have commands/deploy.md
+
+	roots := []merge.NamedRoot{
+		{Name: "source-a", Path: a},
+		{Name: "source-b", Path: b},
+	}
+	_, _, err := merge.New(profile.OverlayCascade).MergeRoots(roots, out)
+	if err != nil {
+		t.Fatalf("MergeRoots: %v", err)
+	}
+	got := readFile(t, out, "commands/deploy.md")
+	if strings.Contains(got, "weft:source") {
+		t.Errorf("file unique to one root should not have markers, got:\n%s", got)
+	}
+	if got != "deploy cmd" {
+		t.Errorf("content should be unmodified, got %q", got)
 	}
 }
