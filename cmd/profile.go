@@ -279,6 +279,9 @@ func mergeAndApply(p *profile.Profile, roots []string, srcs []source.Source, cfg
 	if err := expandProjectsPlaceholder(stagedDir, srcs); err != nil {
 		return fmt.Errorf("expanding projects placeholder: %w", err)
 	}
+	if err := expandSourcesPlaceholder(stagedDir, srcs, p); err != nil {
+		return fmt.Errorf("expanding sources placeholder: %w", err)
+	}
 	if !quiet {
 		fmt.Printf("  %d file(s) merged into staging\n", len(staged))
 		printQualityReport(stagedDir, p, contribs)
@@ -820,7 +823,8 @@ Formats:
 		}
 		defer func() { _ = os.RemoveAll(tmpDir) }()
 		if _, _, contribs, stageErr := stageProfile(p, roots, srcs, tmpDir); stageErr == nil {
-			_ = expandProjectsPlaceholder(tmpDir, srcs) // best-effort for inspect
+			_ = expandProjectsPlaceholder(tmpDir, srcs)   // best-effort for inspect
+			_ = expandSourcesPlaceholder(tmpDir, srcs, p) // best-effort for inspect
 			fmt.Println()
 			fmt.Println("Quality report:")
 			printQualityReport(tmpDir, p, contribs)
