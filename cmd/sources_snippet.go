@@ -145,10 +145,6 @@ func generateSourcesSnippet(srcs []source.Source, p *profile.Profile) string {
 		}
 	}
 
-	if len(alwaysFiles) == 0 && len(condMap) == 0 {
-		return sourcesBegin + "\n" + sourcesEnd
-	}
-
 	condLabels := make([]string, 0, len(condMap))
 	for label := range condMap {
 		condLabels = append(condLabels, label)
@@ -252,6 +248,15 @@ func collectSourceFiles(sourceRoot string, managedDirs []string, projectDirNames
 		}
 
 		if filepath.Ext(d.Name()) != ".md" {
+			return nil
+		}
+		// Root-level files are already merged into the harness by the assembly
+		// step — listing them again in the snippet would duplicate their content.
+		if !strings.Contains(rel, string(filepath.Separator)) {
+			return nil
+		}
+		// README files are project documentation, not AI rules.
+		if strings.EqualFold(d.Name(), "README.md") {
 			return nil
 		}
 
