@@ -73,10 +73,11 @@ func writeBackMergedSourceMap(
 
 	baseline := rebuildMerged(bodies)
 
-	edited, err := os.ReadFile(filepath.Join(c.Root, c.Rel))
+	editedRaw, err := os.ReadFile(filepath.Join(c.Root, c.Rel))
 	if err != nil {
 		return false, fmt.Errorf("reading target %s: %w", c.Rel, err)
 	}
+	edited := normalizeForSource(editedRaw)
 	if bytes.Equal(baseline, edited) {
 		return false, nil
 	}
@@ -146,10 +147,11 @@ func writeBackCascadeWinner(
 		return false, nil
 	}
 
-	edited, err := os.ReadFile(filepath.Join(c.Root, c.Rel))
+	editedRaw, err := os.ReadFile(filepath.Join(c.Root, c.Rel))
 	if err != nil {
 		return false, fmt.Errorf("reading target %s: %w", c.Rel, err)
 	}
+	edited := normalizeForSource(editedRaw)
 
 	winner := srcMap[winnerName]
 	dst := filepath.Join(winner.Root, c.Rel)

@@ -158,8 +158,18 @@ func stageProfile(p *profile.Profile, roots []string, srcs []source.Source, outp
 				"file", rel,
 				"hint", "configure project_dir_names in source structure, or move to a managed dir (commands/, skills/, etc.)")
 		}).
-		MergeRoots(roots, outputDir)
+		MergeRoots(namedRoots(roots, srcs), outputDir)
 	return written, attr, contribs, err
+}
+
+// namedRoots pairs each root path with the corresponding source name so the
+// merger can generate attribution markers in multi-source merged files.
+func namedRoots(roots []string, srcs []source.Source) []merge.NamedRoot {
+	nr := make([]merge.NamedRoot, len(roots))
+	for i, root := range roots {
+		nr[i] = merge.NamedRoot{Name: srcs[i].Name, Path: root}
+	}
+	return nr
 }
 
 // sourceAttribution converts root-index attribution from stageProfile into

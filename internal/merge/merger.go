@@ -1,11 +1,13 @@
 package merge
 
 import (
+	"bytes"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/jophira/weft/internal/profile"
@@ -19,6 +21,15 @@ type Filter func(rel string) bool
 // with hierarchical instruction files to be assembled before merging.
 // Return nil, nil when the root contributes no instruction content.
 type Assembler func(root string) ([]byte, error)
+
+// NamedRoot pairs a source name with its filesystem path for use in MergeRoots.
+// The Name is used to generate attribution markers in the merged output when a
+// file has contributions from more than one source; an empty Name disables
+// attribution for that root.
+type NamedRoot struct {
+	Name string // human-readable source name (used in attribution comments)
+	Path string // absolute filesystem path to the source root
+}
 
 // instructionFile is the canonical output path for assembled instructions.
 const instructionFile = "CLAUDE.md"
@@ -65,8 +76,16 @@ func (m *Merger) WithSkipLogger(fn func(string)) *Merger {
 // and an attribution map (rel path -> contributing root indices) for files
 // assembled from more than one root.
 //
+// When a file has contributions from two or more roots that carry a non-empty
+// Name, each source's block is wrapped with attribution comments:
+//
+//	<!-- weft:source:begin name="source-name" -->
+//	...content...
+//	<!-- weft:source:end name="source-name" -->
+//
+// Single-source files are written without wrappers.
 // Hidden directories (e.g. .git) and hidden files are skipped.
-func (m *Merger) MergeRoots(roots []string, outputDir string) ([]string, map[string][]int, error) {
+func (m *Merger) MergeRoots(roots []NamedRoot, outputDir string) ([]string, map[string][]int, error) {
 	// Collect the union of relative file paths across all roots.
 	seen := map[string]struct{}{}
 	// When an assembler is configured, ensure the instruction file is always
@@ -76,8 +95,8 @@ func (m *Merger) MergeRoots(roots []string, outputDir string) ([]string, map[str
 		seen[instructionFile] = struct{}{}
 	}
 	for _, root := range roots {
-		if err := collectPaths(root, seen); err != nil {
-			return nil, nil, fmt.Errorf("scanning %s: %w", root, err)
+		if err := collectPaths(root.Path, seen); err != nil {
+			return nil, nil, fmt.Errorf("scanning %s: %w", root.Path, err)
 		}
 	}
 
@@ -122,28 +141,67 @@ func (m *Merger) MergeRoots(roots []string, outputDir string) ([]string, map[str
 // When an Assembler is configured and rel is the instruction file, the assembler
 // is called instead of reading from disk. The returned []int is the set of root
 // indices that contributed content (in order).
-func (m *Merger) foldFile(rel string, roots []string) ([]byte, []int, error) {
-	var acc []byte
-	var contributors []int
+//
+// When two or more roots contribute to the same file and their NamedRoot.Name is
+// non-empty, each root's block is wrapped in attribution comment markers before
+// folding so the assembled output clearly shows which source provided each section.
+func (m *Merger) foldFile(rel string, roots []NamedRoot) ([]byte, []int, error) {
+	// Pre-collect contributions so we know whether attribution markers are needed
+	// before we start folding. We must read all roots first.
+	type contrib struct {
+		idx  int
+		data []byte
+	}
+	var contribs []contrib
 	for i, root := range roots {
-		data, err := m.readContent(rel, root)
+		data, err := m.readContent(rel, root.Path)
 		if err != nil {
 			return nil, nil, err
 		}
 		if data == nil {
 			continue
 		}
-		contributors = append(contributors, i)
+		contribs = append(contribs, contrib{i, data})
+	}
+	if len(contribs) == 0 {
+		return nil, nil, nil
+	}
+
+	multiSource := len(contribs) > 1
+
+	var acc []byte
+	var contributors []int
+	for _, c := range contribs {
+		contributors = append(contributors, c.idx)
+		data := c.data
+		if multiSource && roots[c.idx].Name != "" {
+			data = wrapWithAttribution(data, roots[c.idx].Name)
+		}
 		if acc == nil {
 			acc = data
 			continue
 		}
+		var err error
 		acc, err = m.strategy(acc, data)
 		if err != nil {
 			return nil, nil, fmt.Errorf("merging %s: %w", rel, err)
 		}
 	}
 	return acc, contributors, nil
+}
+
+// wrapWithAttribution surrounds content with HTML comment markers identifying
+// the source that produced it. The markers are stripped by the write-back
+// normalization path before content is written back to source files.
+func wrapWithAttribution(content []byte, name string) []byte {
+	begin := "<!-- weft:source:begin name=" + strconv.Quote(name) + " -->\n"
+	end := "\n<!-- weft:source:end name=" + strconv.Quote(name) + " -->\n"
+	trimmed := bytes.TrimRight(content, "\n")
+	result := make([]byte, 0, len(begin)+len(trimmed)+len(end))
+	result = append(result, begin...)
+	result = append(result, trimmed...)
+	result = append(result, end...)
+	return result
 }
 
 // readContent returns the content for rel from root. When an assembler is set
