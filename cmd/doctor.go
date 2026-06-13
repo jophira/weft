@@ -50,35 +50,38 @@ func runDoctor(w io.Writer) {
 
 	active := activeProfileName()
 	if active != "" {
-		p, err := newProfileManager().Get(active)
-		if err == nil {
-			targets := p.ResolvedTargets()
-			if len(targets) > 0 {
-				fmt.Fprintf(w, "\nActive profile %q — target health:\n", active)
-				hReg := harness.NewRegistry(harness.Instances()...)
-				for _, t := range targets {
-					h, ok := hReg.Get(t)
-					if !ok {
-						fmt.Fprintf(w, "  ✗ %s: unknown harness\n", t)
-						continue
-					}
-					if h.Detect() {
-						fmt.Fprintf(w, "  ✓ %s: detected\n", t)
-					} else {
-						fmt.Fprintf(w, "  – %s: not detected\n", t)
+		if pm, err := newProfileManager(); err == nil {
+			if p, err := pm.Get(active); err == nil {
+				targets := p.ResolvedTargets()
+				if len(targets) > 0 {
+					fmt.Fprintf(w, "\nActive profile %q — target health:\n", active)
+					hReg := harness.NewRegistry(harness.Instances()...)
+					for _, t := range targets {
+						h, ok := hReg.Get(t)
+						if !ok {
+							fmt.Fprintf(w, "  ✗ %s: unknown harness\n", t)
+							continue
+						}
+						if h.Detect() {
+							fmt.Fprintf(w, "  ✓ %s: detected\n", t)
+						} else {
+							fmt.Fprintf(w, "  – %s: not detected\n", t)
+						}
 					}
 				}
 			}
 		}
 	} else {
-		profiles, _ := newProfileManager().List()
-		if len(profiles) > 0 {
-			var names []string
-			for _, p := range profiles {
-				names = append(names, p.Name)
+		if pm, err := newProfileManager(); err == nil {
+			profiles, _ := pm.List()
+			if len(profiles) > 0 {
+				var names []string
+				for _, p := range profiles {
+					names = append(names, p.Name)
+				}
+				fmt.Fprintf(w, "\nNo active profile. Available: %s\n", strings.Join(names, ", "))
+				fmt.Fprintf(w, "Activate one with: weft profile use <name>\n")
 			}
-			fmt.Fprintf(w, "\nNo active profile. Available: %s\n", strings.Join(names, ", "))
-			fmt.Fprintf(w, "Activate one with: weft profile use <name>\n")
 		}
 	}
 }

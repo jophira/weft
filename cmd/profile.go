@@ -31,13 +31,16 @@ import (
 )
 
 // newProfileManager builds a FileManager using the configured profiles directory.
-func newProfileManager() *profile.FileManager {
+func newProfileManager() (*profile.FileManager, error) {
 	dir := viper.GetString("profiles_dir")
 	if dir == "" {
-		cfg, _ := config.Defaults()
+		cfg, err := config.Defaults()
+		if err != nil {
+			return nil, err
+		}
 		dir = cfg.ProfilesDir
 	}
-	return profile.NewFileManager(dir)
+	return profile.NewFileManager(dir), nil
 }
 
 // managedFilter returns a merge.Filter that restricts merging to the union of
@@ -92,11 +95,18 @@ func buildAssembler(roots []string, srcs []source.Source) merge.Assembler {
 // verifies each root exists on disk. Returns the profile, expanded root paths,
 // and the corresponding Source values in the same order.
 func resolveProfileRoots(name string) (*profile.Profile, []string, []source.Source, error) {
-	p, err := newProfileManager().Get(name)
+	pm, err := newProfileManager()
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	reg := newRegistry()
+	p, err := pm.Get(name)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	reg, err := newRegistry()
+	if err != nil {
+		return nil, nil, nil, err
+	}
 	var roots []string
 	var srcs []source.Source
 	for _, srcName := range p.Sources {
@@ -409,7 +419,10 @@ var profileCreateCmd = &cobra.Command{
 		}
 
 		// Verify every referenced source is registered.
-		reg := newRegistry()
+		reg, err := newRegistry()
+		if err != nil {
+			return err
+		}
 		for _, name := range names {
 			if _, err := reg.Get(name); err != nil {
 				registered, _ := reg.List()
@@ -431,7 +444,11 @@ var profileCreateCmd = &cobra.Command{
 			Overlay: profile.Overlay(profileOverlay),
 			Targets: profileTargets,
 		}
-		if err := newProfileManager().Create(p); err != nil {
+		pm, err := newProfileManager()
+		if err != nil {
+			return err
+		}
+		if err := pm.Create(p); err != nil {
 			return err
 		}
 
@@ -477,7 +494,11 @@ var profileListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all profiles",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		profiles, err := newProfileManager().List()
+		pm, err := newProfileManager()
+		if err != nil {
+			return err
+		}
+		profiles, err := pm.List()
 		if err != nil {
 			return err
 		}
@@ -979,7 +1000,11 @@ var profileDeleteCmd = &cobra.Command{
 	Short: "Delete a profile (does not affect sources)",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := newProfileManager().Delete(args[0]); err != nil {
+		pm, err := newProfileManager()
+		if err != nil {
+			return err
+		}
+		if err := pm.Delete(args[0]); err != nil {
 			return err
 		}
 		fmt.Printf("✓ Profile %q deleted\n", args[0])

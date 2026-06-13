@@ -33,9 +33,17 @@ Add to Claude Code's .claude/settings.json:
   }`,
 	RunE: func(_ *cobra.Command, _ []string) error {
 		cfgDir, _ := config.DefaultDir()
+		reg, err := newRegistry()
+		if err != nil {
+			return err
+		}
+		pm, err := newProfileManager()
+		if err != nil {
+			return err
+		}
 		srv := weftmcp.NewServer(
-			newRegistry(),
-			newProfileManager(),
+			reg,
+			pm,
 			weftmcp.Config{
 				Version:         Version,
 				ActiveProfileFn: func() string { return viper.GetString("active_profile") },

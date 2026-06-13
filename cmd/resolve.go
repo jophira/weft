@@ -123,12 +123,19 @@ func findManifest(cfgDir, targetPath string) (*manifest.Manifest, string, error)
 // findSingleSource loads the profile's sources and finds which source root
 // contains rel. Returns the source name and absolute source path.
 func findSingleSource(_, profileName, rel string) (name, absPath string, err error) {
-	p, err := newProfileManager().Get(profileName)
+	pm, err := newProfileManager()
+	if err != nil {
+		return "", "", err
+	}
+	p, err := pm.Get(profileName)
 	if err != nil {
 		return "", "", fmt.Errorf("loading profile %q: %w", profileName, err)
 	}
 
-	reg := newRegistry()
+	reg, err := newRegistry()
+	if err != nil {
+		return "", "", err
+	}
 	srcs, listErr := reg.List()
 	if listErr != nil {
 		return "", "", fmt.Errorf("listing sources: %w", listErr)

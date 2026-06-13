@@ -20,13 +20,16 @@ import (
 
 // newRegistry builds a FileRegistry using the configured sources directory,
 // falling back to the default path when no config file is present.
-func newRegistry() *source.FileRegistry {
+func newRegistry() (*source.FileRegistry, error) {
 	dir := viper.GetString("sources_dir")
 	if dir == "" {
-		cfg, _ := config.Defaults()
+		cfg, err := config.Defaults()
+		if err != nil {
+			return nil, err
+		}
 		dir = cfg.SourcesDir
 	}
-	return source.NewFileRegistry(dir)
+	return source.NewFileRegistry(dir), nil
 }
 
 // ── Flags ─────────────────────────────────────────────────────────────────────
@@ -131,7 +134,10 @@ place the marker <!-- weft:projects --> where the list should appear.`,
 			AutoPush:  false,
 			Structure: structure,
 		}
-		reg := newRegistry()
+		reg, err := newRegistry()
+		if err != nil {
+			return err
+		}
 		if err := reg.Add(s); err != nil {
 			return err
 		}
@@ -168,7 +174,11 @@ var sourceListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List registered sources",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		sources, err := newRegistry().List()
+		reg, err := newRegistry()
+		if err != nil {
+			return err
+		}
+		sources, err := reg.List()
 		if err != nil {
 			return err
 		}
@@ -196,7 +206,10 @@ var sourceSyncCmd = &cobra.Command{
 Without a name: syncs every source where auto_pull is true.
 With a name:    syncs that source regardless of auto_pull.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		reg := newRegistry()
+		reg, err := newRegistry()
+		if err != nil {
+			return err
+		}
 		all, err := reg.List()
 		if err != nil {
 			return err
@@ -263,7 +276,11 @@ and committed before pushing. Without --message, a dirty tree aborts with a
 hint. --force skips the confirmation prompt but does not auto-commit.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		s, err := newRegistry().Get(args[0])
+		reg, err := newRegistry()
+		if err != nil {
+			return err
+		}
+		s, err := reg.Get(args[0])
 		if err != nil {
 			return err
 		}
@@ -337,7 +354,11 @@ var sourceStatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show git state for all registered sources",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		sources, err := newRegistry().List()
+		reg, err := newRegistry()
+		if err != nil {
+			return err
+		}
+		sources, err := reg.List()
 		if err != nil {
 			return err
 		}
@@ -389,7 +410,11 @@ var sourceRemoveCmd = &cobra.Command{
 	Short: "Deregister a source (does not delete local files or remote)",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := newRegistry().Remove(args[0]); err != nil {
+		reg, err := newRegistry()
+		if err != nil {
+			return err
+		}
+		if err := reg.Remove(args[0]); err != nil {
 			return err
 		}
 		fmt.Printf("✓ Source %q removed\n", args[0])
