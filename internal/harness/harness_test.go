@@ -50,57 +50,6 @@ func readFile(t *testing.T, path string) string {
 	return string(data)
 }
 
-// ── copyWithRename ────────────────────────────────────────────────────────────
-
-func TestCopyWithRename_NoRename(t *testing.T) {
-	src := t.TempDir()
-	write(t, filepath.Join(src, "CLAUDE.md"), "hello")
-	write(t, filepath.Join(src, "commands", "foo.yaml"), "x: 1")
-
-	dst := t.TempDir()
-	if err := copyWithRename(src, dst, nil); err != nil {
-		t.Fatal(err)
-	}
-
-	if got := readFile(t, filepath.Join(dst, "CLAUDE.md")); got != "hello" {
-		t.Errorf("CLAUDE.md content = %q, want %q", got, "hello")
-	}
-	if got := readFile(t, filepath.Join(dst, "commands", "foo.yaml")); got != "x: 1" {
-		t.Errorf("commands/foo.yaml content = %q, want %q", got, "x: 1")
-	}
-}
-
-func TestCopyWithRename_Renamed(t *testing.T) {
-	src := t.TempDir()
-	write(t, filepath.Join(src, "CLAUDE.md"), "instructions")
-	write(t, filepath.Join(src, "commands", "foo.yaml"), "x: 1")
-
-	dst := t.TempDir()
-	renames := map[string]string{"CLAUDE.md": "AGENTS.md"}
-	if err := copyWithRename(src, dst, renames); err != nil {
-		t.Fatal(err)
-	}
-
-	if _, err := os.Stat(filepath.Join(dst, "CLAUDE.md")); err == nil {
-		t.Error("CLAUDE.md should not exist in dst after rename")
-	}
-	if got := readFile(t, filepath.Join(dst, "AGENTS.md")); got != "instructions" {
-		t.Errorf("AGENTS.md content = %q, want %q", got, "instructions")
-	}
-	// non-renamed files should still be present
-	if got := readFile(t, filepath.Join(dst, "commands", "foo.yaml")); got != "x: 1" {
-		t.Errorf("commands/foo.yaml content = %q, want %q", got, "x: 1")
-	}
-}
-
-func TestCopyWithRename_EmptySourceDir(t *testing.T) {
-	src := t.TempDir()
-	dst := t.TempDir()
-	if err := copyWithRename(src, dst, nil); err != nil {
-		t.Fatal(err)
-	}
-}
-
 // ── applyWithManifest ─────────────────────────────────────────────────────────
 
 func TestApplyWithManifest_FirstApply_NoConflict(t *testing.T) {

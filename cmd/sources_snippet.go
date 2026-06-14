@@ -103,16 +103,7 @@ func expandSourcesPlaceholder(stagedDir string, srcs []source.Source, p *profile
 // <!-- weft:sources:end --> block in content with replacement.
 // Returns content unchanged when either marker is absent or malformed.
 func replaceSourcesBlock(content, replacement string) string {
-	start := strings.Index(content, sourcesBegin)
-	if start < 0 {
-		return content
-	}
-	end := strings.Index(content[start:], sourcesEnd)
-	if end < 0 {
-		return content
-	}
-	end += start + len(sourcesEnd)
-	return content[:start] + replacement + content[end:]
+	return replacePlaceholderBlock(content, sourcesBegin, sourcesEnd, replacement)
 }
 
 // generateSourcesSnippet builds the <!-- weft:sources:begin/end --> block for

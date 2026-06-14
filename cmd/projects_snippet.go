@@ -72,16 +72,7 @@ func expandProjectsPlaceholder(stagedDir string, srcs []source.Source) error {
 // <!-- weft:projects:end --> block in content with replacement.
 // Returns content unchanged if the block is malformed or end marker is missing.
 func replaceProjectsBlock(content, replacement string) string {
-	start := strings.Index(content, projectsBegin)
-	if start < 0 {
-		return content
-	}
-	end := strings.Index(content[start:], projectsEnd)
-	if end < 0 {
-		return content
-	}
-	end += start + len(projectsEnd)
-	return content[:start] + replacement + content[end:]
+	return replacePlaceholderBlock(content, projectsBegin, projectsEnd, replacement)
 }
 
 // generateProjectsSnippet builds the <!-- weft:projects:begin/end --> block
@@ -211,16 +202,4 @@ func collectProjectFiles(root string) ([]string, error) {
 		return nil
 	})
 	return files, err
-}
-
-// buildNameSet converts a slice of directory names into a lookup map, stripping
-// any trailing slashes or whitespace.
-func buildNameSet(names []string) map[string]bool {
-	set := make(map[string]bool, len(names))
-	for _, n := range names {
-		if n = strings.TrimRight(strings.TrimSpace(n), "/\\"); n != "" {
-			set[n] = true
-		}
-	}
-	return set
 }

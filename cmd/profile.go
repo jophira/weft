@@ -141,8 +141,10 @@ func stageProfile(p *profile.Profile, roots []string, srcs []source.Source, outp
 	// This avoids a second collect.Collect walk inside computeProvenance later.
 	// (cf. Java: we memoize by wrapping the function, not by a separate cache map)
 	contribs := make([]sourceContrib, len(roots))
-	for i := range roots {
+	rootIdx := make(map[string]int, len(roots))
+	for i, r := range roots {
 		contribs[i].name = srcs[i].Name
+		rootIdx[r] = i
 	}
 	rawAssembler := buildAssembler(roots, srcs)
 	capturingAssembler := func(root string) ([]byte, error) {
@@ -150,12 +152,8 @@ func stageProfile(p *profile.Profile, roots []string, srcs []source.Source, outp
 		if err != nil {
 			return nil, err
 		}
-		// Find the index for this root to record byte count.
-		for i, r := range roots {
-			if r == root {
-				contribs[i].bytes = len(data)
-				break
-			}
+		if i, ok := rootIdx[root]; ok {
+			contribs[i].bytes = len(data)
 		}
 		return data, nil
 	}
@@ -634,19 +632,11 @@ file inside any source root changes. Pass --no-watch to apply once and exit
 								continue // not a weft-managed file — ignore silently
 							}
 							fmt.Printf("\n[weft] target changed: %s\n", c.Rel)
-							performed, wbErr := writeBackSingleSourceMap(m, c, p, wbSrcMap)
+							performed, wbErr := dispatchWriteBack(m, c, p, wbSrcMap)
 							if wbErr != nil {
 								fmt.Fprintf(os.Stderr, "[weft] write-back error for %s: %v\n", c.Rel, wbErr)
 								slog.Error("write-back failed", slog.String("file", c.Rel), slog.Any("error", wbErr))
 								continue
-							}
-							if !performed && len(m.SourceFiles[c.Rel]) > 1 {
-								performed, wbErr = writeBackMergedSourceMap(m, c, p, wbSrcMap)
-								if wbErr != nil {
-									fmt.Fprintf(os.Stderr, "[weft] write-back error for %s: %v\n", c.Rel, wbErr)
-									slog.Error("merged write-back failed", slog.String("file", c.Rel), slog.Any("error", wbErr))
-									continue
-								}
 							}
 							if performed {
 								fmt.Printf("[weft] wrote %s back to source (source watcher will re-apply)\n", c.Rel)

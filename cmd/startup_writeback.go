@@ -80,15 +80,9 @@ func startupWriteBack(
 		// File is externally modified — attempt write-back.
 		c := watch.TargetChange{Root: targetRoot, Rel: rel}
 
-		performed, wbErr := writeBackSingleSourceMap(m, c, p, wbSrcMap)
+		performed, wbErr := dispatchWriteBack(m, c, p, wbSrcMap)
 		if wbErr != nil {
 			return fmt.Errorf("write-back for %s: %w", rel, wbErr)
-		}
-		if !performed && len(m.SourceFiles[rel]) > 1 {
-			performed, wbErr = writeBackMergedSourceMap(m, c, p, wbSrcMap)
-			if wbErr != nil {
-				return fmt.Errorf("merged write-back for %s: %w", rel, wbErr)
-			}
 		}
 
 		if performed {

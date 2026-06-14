@@ -98,6 +98,20 @@ func stripAttributionMarkers(s string) string {
 	return strings.Join(out, "\n")
 }
 
+// dispatchWriteBack attempts single-source write-back first, then falls back to
+// the merged write-back path for files with multiple contributing sources.
+// Returns (true, nil) when at least one source was updated.
+func dispatchWriteBack(m *manifest.Manifest, c watch.TargetChange, p *profile.Profile, srcMap map[string]source.Source) (bool, error) {
+	performed, err := writeBackSingleSourceMap(m, c, p, srcMap)
+	if err != nil {
+		return false, err
+	}
+	if !performed && len(m.SourceFiles[c.Rel]) > 1 {
+		return writeBackMergedSourceMap(m, c, p, srcMap)
+	}
+	return performed, nil
+}
+
 // owningSource finds the source that should receive a write-back for rel.
 // Priority: (1) source root that already has the file, (2) write_back.overrides[rel],
 // (3) write_back.default. Returns ok=false when no source can be determined.
