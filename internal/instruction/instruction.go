@@ -76,6 +76,51 @@ func InlineBody(sources []SourceContent) string {
 	return b.String()
 }
 
+// ParseInline splits an inline (Tier B) block body back into per-source content
+// by its attribution markers, in document order. Text outside any
+// begin/end pair is ignored (e.g. the leading note line). The returned content
+// is trimmed of surrounding newlines — the inverse of InlineBody, so an
+// InlineBody→ParseInline round-trip recovers each source's content.
+func ParseInline(body string) []SourceContent {
+	lines := strings.Split(body, "\n")
+	var out []SourceContent
+	var curName string
+	var buf []string
+	inSection := false
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if name, ok := parseMarker(trimmed, "begin"); ok {
+			curName, buf, inSection = name, nil, true
+			continue
+		}
+		if name, ok := parseMarker(trimmed, "end"); ok && inSection && name == curName {
+			out = append(out, SourceContent{Name: curName, Content: strings.Trim(strings.Join(buf, "\n"), "\n")})
+			inSection = false
+			continue
+		}
+		if inSection {
+			buf = append(buf, line)
+		}
+	}
+	return out
+}
+
+// parseMarker reports whether trimmed is a weft:source begin/end marker of the
+// given kind and, if so, returns the quoted name it carries.
+func parseMarker(trimmed, kind string) (name string, ok bool) {
+	prefix := "<!-- weft:source:" + kind + " name="
+	if !strings.HasPrefix(trimmed, prefix) {
+		return "", false
+	}
+	rest := strings.TrimSuffix(strings.TrimPrefix(trimmed, prefix), " -->")
+	unquoted, err := strconv.Unquote(strings.TrimSpace(rest))
+	if err != nil {
+		return "", false
+	}
+	return unquoted, true
+}
+
 // attributionBegin/End render the per-source markers. The name is quoted so it
 // survives names containing spaces or punctuation.
 func attributionBegin(name string) string {

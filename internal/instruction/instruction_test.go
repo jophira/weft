@@ -112,3 +112,34 @@ func TestExtract_notFound(t *testing.T) {
 		t.Error("expected found=false for content without a managed block")
 	}
 }
+
+func TestParseInline_roundTripsInlineBody(t *testing.T) {
+	in := []SourceContent{
+		{Name: "personal", Content: "p-rules\nline2"},
+		{Name: "company", Content: "c-rules"},
+	}
+	got := ParseInline(InlineBody(in))
+	if len(got) != len(in) {
+		t.Fatalf("got %d sections, want %d: %+v", len(got), len(in), got)
+	}
+	for i := range in {
+		if got[i].Name != in[i].Name || got[i].Content != in[i].Content {
+			t.Errorf("section %d = %+v, want %+v", i, got[i], in[i])
+		}
+	}
+}
+
+func TestParseInline_ignoresContentOutsideMarkers(t *testing.T) {
+	body := "stray note\n" +
+		`<!-- weft:source:begin name="x" -->` + "\nXC\n" + `<!-- weft:source:end name="x" -->` + "\ntrailing"
+	got := ParseInline(body)
+	if len(got) != 1 || got[0].Name != "x" || got[0].Content != "XC" {
+		t.Errorf("ParseInline = %+v, want one section x=XC", got)
+	}
+}
+
+func TestParseInline_noMarkersYieldsNothing(t *testing.T) {
+	if got := ParseInline("just some text\nno markers"); len(got) != 0 {
+		t.Errorf("expected no sections, got %+v", got)
+	}
+}

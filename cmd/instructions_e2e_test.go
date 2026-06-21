@@ -139,6 +139,51 @@ func TestMergeAndApply_TierB_inlineAttributedContent(t *testing.T) {
 	}
 }
 
+func TestInstructionWriteBack_TierBEditFlowsToSource(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	cfgDir := t.TempDir()
+
+	srcs := buildLayeredSources(t)
+	p := &profile.Profile{
+		Name:    "layered",
+		Sources: []string{"personal", "team", "company"},
+		Overlay: profile.OverlayCascade,
+		Targets: []string{"codex"},
+	}
+
+	// Initial apply writes the Tier B inline block.
+	if err := mergeAndApply(p, rootsOf(srcs), srcs, cfgDir, false); err != nil {
+		t.Fatalf("initial mergeAndApply: %v", err)
+	}
+
+	// Simulate the user editing the inlined personal section in the harness file.
+	agentsPath := filepath.Join(home, ".codex", "AGENTS.md")
+	edited := strings.Replace(readFile(t, agentsPath), "# personal rules", "# EDITED personal rules", 1)
+	if !strings.Contains(edited, "# EDITED personal rules") {
+		t.Fatal("test setup: edit did not apply")
+	}
+	writeFile(t, agentsPath, edited)
+
+	// Re-apply: write-back must carry the edit into the personal source.
+	if err := mergeAndApply(p, rootsOf(srcs), srcs, cfgDir, false); err != nil {
+		t.Fatalf("re-apply mergeAndApply: %v", err)
+	}
+
+	personalSrc := readFile(t, filepath.Join(srcs[0].Root, "CLAUDE.md"))
+	if !strings.Contains(personalSrc, "# EDITED personal rules") {
+		t.Errorf("edit did not reach the personal source:\n%s", personalSrc)
+	}
+	// Generated projects block must be collapsed back to its placeholder in source.
+	if !strings.Contains(personalSrc, "<!-- weft:projects -->") {
+		t.Errorf("projects placeholder not restored on write-back:\n%s", personalSrc)
+	}
+	if strings.Contains(personalSrc, "weft:source:begin") {
+		t.Errorf("attribution markers leaked into source:\n%s", personalSrc)
+	}
+}
+
 func TestMergeAndApply_preservesUserContentOutsideBlock(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

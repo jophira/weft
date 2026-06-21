@@ -326,6 +326,33 @@ func mergeAndApply(p *profile.Profile, roots []string, srcs []source.Source, cfg
 		printQualityReport(stagedDir, p, contribs)
 	}
 
+	targets := resolveApplyTargets(p, quiet)
+	if len(targets) == 0 {
+		if !quiet {
+			fmt.Println("  no harness target — staged output is at:", stagedDir)
+		}
+		return nil
+	}
+
+	hReg := harness.NewRegistry(harness.Instances()...)
+	attr := sourceAttribution(rootAttribution, srcs)
+
+	// Preserve external edits to a Tier B harness's managed instruction block by
+	// writing each source's section back to its source BEFORE re-assembling, so
+	// the regenerated block reflects those edits instead of discarding them.
+	if !quiet {
+		for _, target := range targets {
+			h, ok := hReg.Get(target)
+			if !ok {
+				continue
+			}
+			if wbErr := instructionWriteBack(h, cfgDir, p, srcs); wbErr != nil {
+				fmt.Fprintf(os.Stderr, "[weft] instruction write-back warning: %v\n", wbErr)
+				slog.Warn("instruction write-back warning", slog.String("target", target), slog.Any("error", wbErr))
+			}
+		}
+	}
+
 	// Assemble weft-owned per-source instruction copies (priority-ordered), then
 	// drop the merged CLAUDE.md from the staged tree: the instruction file is now
 	// projected separately per harness tier, while harness Apply copies only the
@@ -338,17 +365,6 @@ func mergeAndApply(p *profile.Profile, roots []string, srcs []source.Source, cfg
 	if rmErr := os.Remove(filepath.Join(stagedDir, "CLAUDE.md")); rmErr != nil && !os.IsNotExist(rmErr) {
 		return fmt.Errorf("removing merged instruction file from staging: %w", rmErr)
 	}
-
-	targets := resolveApplyTargets(p, quiet)
-	if len(targets) == 0 {
-		if !quiet {
-			fmt.Println("  no harness target — staged output is at:", stagedDir)
-		}
-		return nil
-	}
-
-	hReg := harness.NewRegistry(harness.Instances()...)
-	attr := sourceAttribution(rootAttribution, srcs)
 
 	for _, target := range targets {
 		h, ok := hReg.Get(target)
