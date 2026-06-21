@@ -149,6 +149,42 @@ structure:
 
 The legacy single-path `projects:` field is still honoured for backward compatibility.
 
+## How weft writes instructions — priority layering & two-tier projection
+
+Weft no longer dumps the full merged ruleset into a harness's global file. Instead it keeps its own
+per-source copies and writes only a small managed block into each harness, so your global file stays
+yours.
+
+**Priority.** Give each source a `--priority` (higher wins). Weft assembles them lowest-first so the
+highest-priority source is emitted last and takes precedence on conflict:
+
+```bash
+weft source add company ~/.rules/company --priority 30
+weft source add team    ~/.rules/team    --priority 20
+weft source add me      ~/.rules/me      --priority 10
+```
+
+Weft writes one copy per source to `~/.config/weft/profiles/<profile>/instructions/NN-<source>.md`
+(`NN` = priority order) and projects them into each harness by its capability:
+
+- **Import-capable (Tier A)** — Claude Code, Gemini CLI: the harness file gets only a managed block
+  of import directives pointing at weft's copies, in priority order. Content stays out of your global
+  file.
+- **Single-file (Tier B)** — Codex, Windsurf, Aider, Cursor, and any unknown/user-defined harness:
+  weft inlines the per-source content (with attribution markers) inside a `<!-- weft:begin/end -->`
+  block. This is the default, so a new harness always works safely.
+
+Everything **outside** the managed block is preserved byte-for-byte. Editing the inlined content in a
+Tier B harness writes back to the owning source on the next apply, and re-projects to every harness —
+so weft is the cross-harness sync hub.
+
+Check the projection state at any time:
+
+```bash
+weft status            # active profile + per-harness profile, instruction path, block drift
+weft status --short    # one line for a shell prompt / harness status line
+```
+
 ## Safe apply — manifest, write-back and backups
 
 Weft keeps a manifest (`~/.config/weft/manifests/<harness>.json`) recording the sha256 hash of
@@ -181,7 +217,7 @@ weft target backups claude-code                   # list all available backups
 
 | Command | Description |
 |---|---|
-| `source add <name> <path>` | Register a source; remote inferred from repo origin or set with `--remote` |
+| `source add <name> <path>` | Register a source; `--priority N` sets layering (higher wins); remote inferred from repo origin or set with `--remote` |
 | `source list/status/remove` | List, inspect git state, or deregister sources |
 | `source sync [name]` | Pull latest from remotes (auto-synced in background; use to force immediately) |
 | `source push <name>` | Push commits; aborts if working tree is dirty — use `-m` to commit first |
@@ -190,6 +226,7 @@ weft target backups claude-code                   # list all available backups
 | `profile use <name>` | Activate profile: merge sources, apply to all targets, and watch for changes (use `--no-watch` to apply once and exit) |
 | `target list/apply/backups/revert` | Manage AI harness targets; inspect and restore backups |
 | `hook add/list/run/remove` | Manage lifecycle hooks |
+| `status [--short]` | Show active profile and per-harness projection state (instruction path, block drift) |
 | `doctor` | Health check — shows discovered harnesses and config issues |
 | `version` | Print version, commit, and build date |
 | `bug-report` | Print diagnostic bundle (version, environment, doctor, recent logs) for filing a GitHub issue |
