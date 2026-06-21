@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 
 	"github.com/jophira/weft/internal/locate"
 )
@@ -46,6 +47,18 @@ func (g *GenericHarness) ConfigPath() string {
 		return locate.Tilde(g.root)
 	}
 	return locate.Display(g.candidates)
+}
+
+// InstructionSpec: directory-copy harnesses have no known include directive, so
+// weft inlines content (Tier B) into <root>/CLAUDE.md. The default for any
+// unknown or user-defined harness — the safe, fool-proof fallback.
+func (g *GenericHarness) InstructionSpec() (InstructionSpec, error) {
+	if g.root == "" {
+		if !g.Detect() {
+			return InstructionSpec{}, fmt.Errorf("%s not detected — install it or create its config directory", g.name)
+		}
+	}
+	return InstructionSpec{Path: filepath.Join(g.root, "CLAUDE.md"), Strategy: StrategyInline}, nil
 }
 
 func (g *GenericHarness) Apply(stagedRoot string, ctx ApplyCtx) error {

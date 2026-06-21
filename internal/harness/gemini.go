@@ -30,3 +30,9 @@ func (g *GeminiCLI) Apply(stagedRoot string, ctx ApplyCtx) error {
 		"CLAUDE.md": "GEMINI.md",
 	})
 }
+
+// InstructionSpec: Gemini CLI supports @-imports in ~/.gemini/GEMINI.md (Tier A).
+func (g *GeminiCLI) InstructionSpec() (InstructionSpec, error) {
+	path, err := homeJoin(".gemini", "GEMINI.md")
+	return InstructionSpec{Path: path, Strategy: StrategyImport, ImportTemplate: "@{path}"}, err
+}

@@ -31,3 +31,10 @@ func (a *Aider) Apply(stagedRoot string, ctx ApplyCtx) error {
 		"CLAUDE.md": "CONVENTIONS.md",
 	})
 }
+
+// InstructionSpec: aider reads a single conventions file, so weft inlines
+// content within a managed block (Tier B).
+func (a *Aider) InstructionSpec() (InstructionSpec, error) {
+	path, err := homeJoin(".aider", "CONVENTIONS.md")
+	return InstructionSpec{Path: path, Strategy: StrategyInline}, err
+}

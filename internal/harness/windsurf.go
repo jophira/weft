@@ -27,3 +27,10 @@ func (w *Windsurf) Apply(stagedRoot string, ctx ApplyCtx) error {
 		"CLAUDE.md": "global_rules.md",
 	})
 }
+
+// InstructionSpec: Windsurf reads a single global_rules.md, so weft inlines
+// content within a managed block (Tier B).
+func (w *Windsurf) InstructionSpec() (InstructionSpec, error) {
+	path, err := homeJoin(".codeium", "windsurf", "global_rules.md")
+	return InstructionSpec{Path: path, Strategy: StrategyInline}, err
+}
