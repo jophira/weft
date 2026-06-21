@@ -7,6 +7,7 @@ import (
 
 	"github.com/jophira/weft/internal/profile"
 	"github.com/jophira/weft/internal/source"
+	"github.com/jophira/weft/internal/testenv"
 )
 
 // ── resolveApplyTargets ───────────────────────────────────────────────────────
@@ -35,7 +36,7 @@ func TestResolveApplyTargets_LegacyActiveTarget(t *testing.T) {
 
 func TestResolveApplyTargets_AutoDetect_ClaudeCode(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +55,7 @@ func TestResolveApplyTargets_AutoDetect_ClaudeCode(t *testing.T) {
 
 func TestResolveApplyTargets_NoneDetected(t *testing.T) {
 	home := t.TempDir() // empty home — no harnesses installed
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	p := &profile.Profile{}
 	got := resolveApplyTargets(p, true)
 	if len(got) != 0 {
@@ -68,7 +69,7 @@ func TestResolveApplyTargets_NoneDetected(t *testing.T) {
 // every target listed in the profile.
 func TestMergeAndApply_MultiTarget(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 
 	srcRoot := t.TempDir()
 	writeFile(t, filepath.Join(srcRoot, "CLAUDE.md"), "# shared rules")
@@ -102,7 +103,7 @@ func TestMergeAndApply_MultiTarget(t *testing.T) {
 // TestMergeAndApply_SingleTarget verifies the single-target path is unchanged.
 func TestMergeAndApply_SingleTarget(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 
 	srcRoot := t.TempDir()
 	writeFile(t, filepath.Join(srcRoot, "CLAUDE.md"), "# rules")
@@ -133,7 +134,7 @@ func TestMergeAndApply_SingleTarget(t *testing.T) {
 // configured targets nor detectable harnesses exist.
 func TestMergeAndApply_NoTargetsNoHarnesses(t *testing.T) {
 	home := t.TempDir() // empty home — nothing installed
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 
 	srcRoot := t.TempDir()
 	writeFile(t, filepath.Join(srcRoot, "CLAUDE.md"), "# rules")

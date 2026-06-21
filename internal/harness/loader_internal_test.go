@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/jophira/weft/internal/locate"
+	"github.com/jophira/weft/internal/testenv"
 )
 
 // ── entryCandidates ───────────────────────────────────────────────────────────
@@ -51,16 +52,8 @@ func TestEntryCandidates_empty(t *testing.T) {
 // ── loadConfigHarnesses ───────────────────────────────────────────────────────
 
 func TestLoadConfigHarnesses_missingFile(t *testing.T) {
-	orig, hadOrig := os.LookupEnv("HOME")
 	tmp := t.TempDir()
-	t.Setenv("HOME", tmp)
-	defer func() {
-		if hadOrig {
-			os.Setenv("HOME", orig) //nolint:errcheck,gosec // restoring env in test teardown is best-effort
-		} else {
-			os.Unsetenv("HOME") //nolint:errcheck,gosec // restoring env in test teardown is best-effort
-		}
-	}()
+	testenv.SetHome(t, tmp)
 
 	result, err := loadConfigHarnesses()
 	if err != nil {
@@ -72,16 +65,8 @@ func TestLoadConfigHarnesses_missingFile(t *testing.T) {
 }
 
 func TestLoadConfigHarnesses_withEntries(t *testing.T) {
-	orig, hadOrig := os.LookupEnv("HOME")
 	tmp := t.TempDir()
-	t.Setenv("HOME", tmp)
-	defer func() {
-		if hadOrig {
-			os.Setenv("HOME", orig) //nolint:errcheck,gosec // restoring env in test teardown is best-effort
-		} else {
-			os.Unsetenv("HOME") //nolint:errcheck,gosec // restoring env in test teardown is best-effort
-		}
-	}()
+	testenv.SetHome(t, tmp)
 
 	cfgDir := filepath.Join(tmp, ".config", "weft")
 	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
@@ -108,16 +93,8 @@ func TestLoadConfigHarnesses_withEntries(t *testing.T) {
 }
 
 func TestLoadConfigHarnesses_corruptYAML(t *testing.T) {
-	orig, hadOrig := os.LookupEnv("HOME")
 	tmp := t.TempDir()
-	t.Setenv("HOME", tmp)
-	defer func() {
-		if hadOrig {
-			os.Setenv("HOME", orig) //nolint:errcheck,gosec // restoring env in test teardown is best-effort
-		} else {
-			os.Unsetenv("HOME") //nolint:errcheck,gosec // restoring env in test teardown is best-effort
-		}
-	}()
+	testenv.SetHome(t, tmp)
 
 	cfgDir := filepath.Join(tmp, ".config", "weft")
 	if err := os.MkdirAll(cfgDir, 0o755); err != nil {

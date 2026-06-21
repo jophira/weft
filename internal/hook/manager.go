@@ -124,7 +124,12 @@ func validateHook(h Hook) error {
 		if h.Action.SummaryTo == "" {
 			return fmt.Errorf("append_memory action requires --summary-to")
 		}
-		if filepath.IsAbs(h.Action.SummaryTo) {
+		// Reject absolute paths on any OS. filepath.IsAbs only recognises the
+		// host OS's form, so a leading "/" or "\" (rooted on the other OS, e.g. a
+		// Unix path in a config synced to Windows) is rejected explicitly too.
+		if filepath.IsAbs(h.Action.SummaryTo) ||
+			strings.HasPrefix(h.Action.SummaryTo, "/") ||
+			strings.HasPrefix(h.Action.SummaryTo, `\`) {
 			return fmt.Errorf("summary_to must be a relative path")
 		}
 		// Reject .. components as an early defence-in-depth check.

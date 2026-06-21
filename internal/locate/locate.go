@@ -78,18 +78,24 @@ func ExpandHome(path string) string {
 }
 
 // Tilde replaces the user's home directory prefix with "~" for display.
+//
+// Output always uses forward slashes so the contracted form round-trips through
+// ExpandHome (which only recognises a "~/" prefix) and stays portable when
+// persisted to config or written into instruction files. On Unix this is a
+// no-op; on Windows it normalises "\" to "/". cf. FileRegistry.Add, which stores
+// Tilde(root) and later re-expands it.
 func Tilde(path string) string {
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
-		return path
+		return filepath.ToSlash(path)
 	}
 	if path == home {
 		return "~"
 	}
 	if strings.HasPrefix(path, home+string(filepath.Separator)) {
-		return "~" + path[len(home):]
+		return "~/" + filepath.ToSlash(path[len(home)+1:])
 	}
-	return path
+	return filepath.ToSlash(path)
 }
 
 // HomeRel returns a Candidate whose path is home/rel on all platforms.

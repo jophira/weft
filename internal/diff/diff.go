@@ -142,7 +142,9 @@ func listFiles(dir string) (map[string]struct{}, error) {
 			return err
 		}
 		rel, _ := filepath.Rel(dir, path)
-		paths[rel] = struct{}{}
+		// Store the logical path with forward slashes so keys are stable and
+		// comparable across OSes; filepath.Join re-accepts them when reading.
+		paths[filepath.ToSlash(rel)] = struct{}{}
 		return nil
 	})
 	return paths, err

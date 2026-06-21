@@ -131,6 +131,21 @@ func (w *rotatingWriter) Write(p []byte) (int, error) {
 	return n, err
 }
 
+// Close releases the underlying file handle. Required on Windows, where an open
+// handle blocks removal of the containing directory (e.g. a test's t.TempDir
+// cleanup). The process-wide logger from Init lives for the process lifetime and
+// is never closed.
+func (w *rotatingWriter) Close() error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.f == nil {
+		return nil
+	}
+	err := w.f.Close()
+	w.f = nil
+	return err
+}
+
 func (w *rotatingWriter) rotate() {
 	_ = w.f.Close()
 	backup := w.path + ".1"

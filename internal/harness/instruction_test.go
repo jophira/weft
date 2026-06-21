@@ -8,6 +8,7 @@ import (
 
 	"github.com/jophira/weft/internal/instruction"
 	"github.com/jophira/weft/internal/manifest"
+	"github.com/jophira/weft/internal/testenv"
 )
 
 // stubInstructed is a Harness that consumes a root instruction file at a
@@ -147,8 +148,7 @@ func TestProjectInstruction_noInstructionFileIsNoOp(t *testing.T) {
 
 func TestAdapterInstructionSpecs(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home) // Windows home resolution
+	testenv.SetHome(t, home)
 
 	cases := []struct {
 		h          InstructionConsumer

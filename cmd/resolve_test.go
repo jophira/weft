@@ -26,12 +26,15 @@ func TestExpandAndAbs_HomeTilde(t *testing.T) {
 }
 
 func TestExpandAndAbs_AbsolutePassThrough(t *testing.T) {
-	got, err := expandAndAbs("/tmp/foo")
+	// Use an OS-native absolute path so the assertion holds on Windows too,
+	// where "/tmp/foo" is not absolute (no drive letter).
+	abs := filepath.Join(t.TempDir(), "foo")
+	got, err := expandAndAbs(abs)
 	if err != nil {
 		t.Fatalf("expandAndAbs: %v", err)
 	}
-	if got != "/tmp/foo" {
-		t.Errorf("expandAndAbs(/tmp/foo) = %q, want %q", got, "/tmp/foo")
+	if got != abs {
+		t.Errorf("expandAndAbs(%q) = %q, want %q", abs, got, abs)
 	}
 }
 
