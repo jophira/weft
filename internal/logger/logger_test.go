@@ -96,9 +96,9 @@ func TestTailLines_singleLine(t *testing.T) {
 // ── defaultLogPath ─────────────────────────────────────────────────────────────
 
 func TestDefaultLogPath_xdgOverride(t *testing.T) {
-	t.Setenv("XDG_DATA_HOME", "/custom/data")
+	t.Setenv("XDG_DATA_HOME", filepath.FromSlash("/custom/data"))
 	got := defaultLogPath()
-	want := "/custom/data/weft/weft.log"
+	want := filepath.FromSlash("/custom/data/weft/weft.log")
 	if got != want {
 		t.Errorf("defaultLogPath() = %q, want %q", got, want)
 	}
@@ -121,6 +121,7 @@ func TestRotatingWriter_writesData(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newRotatingWriter: %v", err)
 	}
+	t.Cleanup(func() { _ = rw.Close() })
 
 	msg := []byte("hello\n")
 	if _, err := rw.Write(msg); err != nil {
@@ -144,6 +145,7 @@ func TestRotatingWriter_rotatesWhenFull(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newRotatingWriter: %v", err)
 	}
+	t.Cleanup(func() { _ = rw.Close() })
 
 	// First write — fits within the cap.
 	if _, err := rw.Write([]byte("123456789\n")); err != nil {
@@ -186,6 +188,7 @@ func TestRotatingWriter_overwritesOldBackup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newRotatingWriter: %v", err)
 	}
+	t.Cleanup(func() { _ = rw.Close() })
 	// Exceed the cap to trigger rotation.
 	_, _ = rw.Write([]byte("123456\n"))
 	_, _ = rw.Write([]byte("after\n"))

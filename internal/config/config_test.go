@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/jophira/weft/internal/config"
+	"github.com/jophira/weft/internal/testenv"
 )
 
 // ── DefaultDir ────────────────────────────────────────────────────────────────
@@ -102,16 +103,8 @@ func TestEnsureDirs_idempotent(t *testing.T) {
 // SetWarnInstructionSizeKB and SetActiveProfile write to an isolated path.
 func withHome(t *testing.T, f func(home string)) {
 	t.Helper()
-	orig, hadOrig := os.LookupEnv("HOME")
 	tmp := t.TempDir()
-	t.Setenv("HOME", tmp)
-	defer func() {
-		if hadOrig {
-			os.Setenv("HOME", orig) //nolint:errcheck,gosec // restoring env in test teardown is best-effort
-		} else {
-			os.Unsetenv("HOME") //nolint:errcheck,gosec // restoring env in test teardown is best-effort
-		}
-	}()
+	testenv.SetHome(t, tmp)
 	f(tmp)
 }
 

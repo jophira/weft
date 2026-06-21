@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/jophira/weft/internal/manifest"
+	"github.com/jophira/weft/internal/testenv"
 )
 
 // testCtx returns an ApplyCtx backed by a temp directory (output discarded).
@@ -281,7 +282,7 @@ func TestApplyWithManifest_NilOut_NoOutput(t *testing.T) {
 func TestCodexApply_WritesAgentsMD(t *testing.T) {
 	staged := seedStaged(t, "codex rules")
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 
 	if err := (&Codex{}).Apply(staged, testCtx(t)); err != nil {
 		t.Fatal(err)
@@ -298,7 +299,7 @@ func TestCodexApply_WritesAgentsMD(t *testing.T) {
 func TestCodexApply_PreservesOtherFiles(t *testing.T) {
 	staged := seedStaged(t, "rules")
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 
 	if err := (&Codex{}).Apply(staged, testCtx(t)); err != nil {
 		t.Fatal(err)
@@ -314,7 +315,7 @@ func TestCodexApply_PreservesOtherFiles(t *testing.T) {
 func TestWindsurfApply_WritesGlobalRules(t *testing.T) {
 	staged := seedStaged(t, "windsurf rules")
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 
 	if err := (&Windsurf{}).Apply(staged, testCtx(t)); err != nil {
 		t.Fatal(err)
@@ -334,7 +335,7 @@ func TestWindsurfApply_WritesGlobalRules(t *testing.T) {
 func TestGeminiCLIApply_WritesGeminiMD(t *testing.T) {
 	staged := seedStaged(t, "gemini rules")
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 
 	if err := (&GeminiCLI{}).Apply(staged, testCtx(t)); err != nil {
 		t.Fatal(err)
@@ -354,7 +355,7 @@ func TestGeminiCLIApply_WritesGeminiMD(t *testing.T) {
 func TestCursorApply_WritesMDCWithFrontmatter(t *testing.T) {
 	staged := seedStaged(t, "cursor rules")
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 
 	if err := (&Cursor{}).Apply(staged, testCtx(t)); err != nil {
 		t.Fatal(err)
@@ -370,7 +371,7 @@ func TestCursorApply_WritesMDCWithFrontmatter(t *testing.T) {
 func TestCursorApply_NoCLAUDEMD_NoError(t *testing.T) {
 	staged := t.TempDir() // no CLAUDE.md
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 
 	if err := (&Cursor{}).Apply(staged, testCtx(t)); err != nil {
 		t.Fatalf("expected no error when CLAUDE.md absent, got: %v", err)
@@ -382,7 +383,7 @@ func TestCursorApply_NoCLAUDEMD_NoError(t *testing.T) {
 func TestAiderApply_WritesConventionsMD(t *testing.T) {
 	staged := seedStaged(t, "aider conventions")
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 
 	if err := (&Aider{}).Apply(staged, testCtx(t)); err != nil {
 		t.Fatal(err)
@@ -402,7 +403,7 @@ func TestAiderApply_WritesConventionsMD(t *testing.T) {
 func TestClaudeCodeApply_PreservesFilename(t *testing.T) {
 	staged := seedStaged(t, "claude rules")
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 
 	if err := (&ClaudeCode{}).Apply(staged, testCtx(t)); err != nil {
 		t.Fatal(err)
@@ -416,7 +417,7 @@ func TestClaudeCodeApply_PreservesFilename(t *testing.T) {
 func TestClaudeCodeApply_UntouchedFilesNotRemoved(t *testing.T) {
 	staged := seedStaged(t, "claude rules")
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 
 	// Pre-existing file that weft does not stage — should survive apply.
 	write(t, filepath.Join(home, ".claude", "todos.md"), "my todos")

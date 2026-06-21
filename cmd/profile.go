@@ -58,8 +58,12 @@ func managedFilter(sources []source.Source) merge.Filter {
 		}
 	}
 	return func(rel string) bool {
+		// Normalise to forward slashes so the filter matches regardless of the
+		// OS-native separator carried by the rel path (Windows uses "\").
+		rel = filepath.ToSlash(rel)
 		for _, p := range prefixes {
-			if rel == p || strings.HasPrefix(rel, p+string(filepath.Separator)) {
+			p = filepath.ToSlash(p)
+			if rel == p || strings.HasPrefix(rel, p+"/") {
 				return true
 			}
 		}

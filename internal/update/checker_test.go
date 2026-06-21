@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jophira/weft/internal/testenv"
 	"github.com/jophira/weft/internal/update"
 )
 
@@ -397,16 +398,8 @@ func TestCheck_devBuild_skipped(t *testing.T) {
 func TestIgnoreVersion_writesField(t *testing.T) {
 	// IgnoreVersion uses CacheFilePath (HOME-based). We redirect HOME so
 	// no real user data is touched.
-	orig, hadOrig := os.LookupEnv("HOME")
 	tmp := t.TempDir()
-	t.Setenv("HOME", tmp)
-	defer func() {
-		if hadOrig {
-			os.Setenv("HOME", orig) //nolint:errcheck,gosec // restoring env in test teardown is best-effort
-		} else {
-			os.Unsetenv("HOME") //nolint:errcheck,gosec // restoring env in test teardown is best-effort
-		}
-	}()
+	testenv.SetHome(t, tmp)
 
 	if err := update.IgnoreVersion("1.2.3"); err != nil {
 		t.Fatalf("IgnoreVersion: %v", err)
@@ -423,16 +416,8 @@ func TestIgnoreVersion_writesField(t *testing.T) {
 }
 
 func TestIgnoreVersion_stripsV(t *testing.T) {
-	orig, hadOrig := os.LookupEnv("HOME")
 	tmp := t.TempDir()
-	t.Setenv("HOME", tmp)
-	defer func() {
-		if hadOrig {
-			os.Setenv("HOME", orig) //nolint:errcheck,gosec // restoring env in test teardown is best-effort
-		} else {
-			os.Unsetenv("HOME") //nolint:errcheck,gosec // restoring env in test teardown is best-effort
-		}
-	}()
+	testenv.SetHome(t, tmp)
 
 	if err := update.IgnoreVersion("v2.0.0"); err != nil {
 		t.Fatalf("IgnoreVersion: %v", err)
