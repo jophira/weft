@@ -11,13 +11,16 @@ import (
 // ── targetRoot ────────────────────────────────────────────────────────────────
 
 func TestTargetRoot_found(t *testing.T) {
-	roots := []string{"/home/user/.claude", "/home/user/.codex"}
-	root, rel, ok := targetRoot(roots, "/home/user/.claude/CLAUDE.md")
+	// FromSlash builds OS-native paths so targetRoot's separator-based prefix
+	// match works on Windows (where filepath.Separator is "\").
+	claude := filepath.FromSlash("/home/user/.claude")
+	roots := []string{claude, filepath.FromSlash("/home/user/.codex")}
+	root, rel, ok := targetRoot(roots, filepath.Join(claude, "CLAUDE.md"))
 	if !ok {
 		t.Fatal("targetRoot: expected ok=true")
 	}
-	if root != "/home/user/.claude" {
-		t.Errorf("root = %q, want /home/user/.claude", root)
+	if root != claude {
+		t.Errorf("root = %q, want %q", root, claude)
 	}
 	if rel != "CLAUDE.md" {
 		t.Errorf("rel = %q, want CLAUDE.md", rel)
@@ -25,34 +28,36 @@ func TestTargetRoot_found(t *testing.T) {
 }
 
 func TestTargetRoot_exactRoot(t *testing.T) {
-	roots := []string{"/home/user/.claude"}
-	root, _, ok := targetRoot(roots, "/home/user/.claude")
+	claude := filepath.FromSlash("/home/user/.claude")
+	roots := []string{claude}
+	root, _, ok := targetRoot(roots, claude)
 	if !ok {
 		t.Fatal("targetRoot on exact root path: expected ok=true")
 	}
-	if root != "/home/user/.claude" {
-		t.Errorf("root = %q, want /home/user/.claude", root)
+	if root != claude {
+		t.Errorf("root = %q, want %q", root, claude)
 	}
 }
 
 func TestTargetRoot_notFound(t *testing.T) {
-	roots := []string{"/home/user/.claude"}
-	_, _, ok := targetRoot(roots, "/home/user/.codex/CLAUDE.md")
+	roots := []string{filepath.FromSlash("/home/user/.claude")}
+	_, _, ok := targetRoot(roots, filepath.FromSlash("/home/user/.codex/CLAUDE.md"))
 	if ok {
 		t.Error("targetRoot outside any root: expected ok=false")
 	}
 }
 
 func TestTargetRoot_emptyRoots(t *testing.T) {
-	_, _, ok := targetRoot(nil, "/some/path")
+	_, _, ok := targetRoot(nil, filepath.FromSlash("/some/path"))
 	if ok {
 		t.Error("targetRoot with nil roots: expected ok=false")
 	}
 }
 
 func TestTargetRoot_subdir(t *testing.T) {
-	roots := []string{"/home/user/.claude"}
-	_, rel, ok := targetRoot(roots, "/home/user/.claude/commands/foo.md")
+	claude := filepath.FromSlash("/home/user/.claude")
+	roots := []string{claude}
+	_, rel, ok := targetRoot(roots, filepath.Join(claude, "commands", "foo.md"))
 	if !ok {
 		t.Fatal("targetRoot in subdir: expected ok=true")
 	}

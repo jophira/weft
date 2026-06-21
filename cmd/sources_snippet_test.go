@@ -532,7 +532,8 @@ func TestGenerateSourcesSnippet_PrimarySourceFromWriteBack(t *testing.T) {
 	if !strings.Contains(snippet, "Primary source for edits:") {
 		t.Error("expected primary source write-back instruction")
 	}
-	if !strings.Contains(snippet, src.Root) {
+	// The snippet renders the root via locate.Tilde (forward slashes on every OS).
+	if !strings.Contains(snippet, filepath.ToSlash(src.Root)) {
 		t.Errorf("expected source root path in write-back instruction; snippet:\n%s", snippet)
 	}
 }

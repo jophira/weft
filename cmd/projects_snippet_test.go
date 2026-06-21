@@ -119,13 +119,15 @@ func TestExpandProjectsPlaceholder_TwoSources(t *testing.T) {
 
 	got := readFile(t, filepath.Join(stagedDir, "CLAUDE.md"))
 
-	if !strings.Contains(got, filepath.Join(projA, "common.md")) {
+	// The snippet renders paths via locate.Tilde, which emits forward slashes
+	// on every OS, so compare against the forward-slash form.
+	if !strings.Contains(got, filepath.ToSlash(filepath.Join(projA, "common.md"))) {
 		t.Errorf("missing rootA common.md in snippet; got:\n%s", got)
 	}
-	if !strings.Contains(got, filepath.Join(projB, "common.md")) {
+	if !strings.Contains(got, filepath.ToSlash(filepath.Join(projB, "common.md"))) {
 		t.Errorf("missing rootB common.md in snippet; got:\n%s", got)
 	}
-	if !strings.Contains(got, filepath.Join(projB, "common-backend.md")) {
+	if !strings.Contains(got, filepath.ToSlash(filepath.Join(projB, "common-backend.md"))) {
 		t.Errorf("missing rootB common-backend.md in snippet; got:\n%s", got)
 	}
 }

@@ -49,6 +49,10 @@ jobs:
           go-version-file: go.mod
 
       - name: Run tests
+        # Force bash on all OSes: the Windows runner's default PowerShell mangles
+        # the `-coverprofile=coverage.out ./...` arguments. Git Bash ships on the
+        # windows-latest image and parses the command identically to ubuntu/macOS.
+        shell: bash
         run: go test -race -coverprofile=coverage.out ./...
 
       - name: Upload coverage report

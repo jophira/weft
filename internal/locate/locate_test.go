@@ -47,7 +47,9 @@ func TestTilde_replacesHome(t *testing.T) {
 	}
 	path := filepath.Join(home, ".claude", "settings.json")
 	got := locate.Tilde(path)
-	want := "~" + string(filepath.Separator) + filepath.Join(".claude", "settings.json")
+	// Tilde emits forward slashes on every OS so the form round-trips through
+	// ExpandHome and stays portable when persisted.
+	want := "~/" + filepath.ToSlash(filepath.Join(".claude", "settings.json"))
 	if got != want {
 		t.Errorf("Tilde(%q) = %q, want %q", path, got, want)
 	}
