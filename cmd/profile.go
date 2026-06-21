@@ -122,8 +122,16 @@ func resolveProfileRoots(name string) (*profile.Profile, []string, []source.Sour
 			)
 		}
 		s.Root = expanded
-		roots = append(roots, expanded)
 		srcs = append(srcs, *s)
+	}
+
+	// Order by priority: higher priority is emitted later so it wins on conflict
+	// under the cascade/last-wins overlay. Stable, so sources sharing a priority
+	// keep the profile's source order (the all-zero default is unchanged).
+	source.SortByPriority(srcs)
+	roots = make([]string, len(srcs))
+	for i := range srcs {
+		roots[i] = srcs[i].Root
 	}
 	return p, roots, srcs, nil
 }
@@ -290,6 +298,19 @@ func mergeAndApply(p *profile.Profile, roots []string, srcs []source.Source, cfg
 		fmt.Printf("Merging %d source(s) [%s] with strategy %q...\n",
 			len(roots), strings.Join(p.Sources, ", "), p.Overlay)
 	}
+
+	// Scaffold a CLAUDE.md in any flat-mode source that lacks one so the source
+	// always contributes a (possibly empty) instruction file to the layered output.
+	for _, s := range srcs {
+		created, scErr := s.EnsureInstructionFile()
+		if scErr != nil {
+			return fmt.Errorf("scaffolding instruction file for source %q: %w", s.Name, scErr)
+		}
+		if created && !quiet {
+			fmt.Printf("  + scaffolded CLAUDE.md in source %q\n", s.Name)
+		}
+	}
+
 	staged, rootAttribution, contribs, err := stageProfile(p, roots, srcs, stagedDir)
 	if err != nil {
 		return fmt.Errorf("merging sources: %w", err)

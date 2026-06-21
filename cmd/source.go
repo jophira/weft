@@ -40,6 +40,7 @@ var (
 	addInstructionGlob string
 	addRemote          string
 	addProjectDirNames string
+	addPriority        int
 )
 
 // ── Commands ──────────────────────────────────────────────────────────────────
@@ -128,6 +129,7 @@ place the marker <!-- weft:projects --> where the list should appear.`,
 		s := source.Source{
 			Name:      name,
 			Root:      rawPath,
+			Priority:  addPriority,
 			Remote:    remote,
 			Branch:    addBranch,
 			AutoPull:  addAutoPull,
@@ -155,6 +157,7 @@ place the marker <!-- weft:projects --> where the list should appear.`,
 
 		fmt.Printf("✓ Source %q registered\n", saved.Name)
 		fmt.Printf("  root:               %s\n", saved.Root)
+		fmt.Printf("  priority:           %d\n", saved.Priority)
 		fmt.Printf("  remote:             %s\n", remoteDisplay)
 		fmt.Printf("  branch:             %s\n", saved.Branch)
 		fmt.Printf("  auto-pull:          %v\n", boolWord(saved.AutoPull))
@@ -438,6 +441,7 @@ func init() {
 	sourceAddCmd.Flags().BoolVar(&addAutoPull, "auto-pull", true, "pull on 'weft source sync'")
 	sourceAddCmd.Flags().StringVar(&addInstructionGlob, "instruction-glob", source.DefaultStructure().InstructionGlob, `glob pattern for instruction files: "CLAUDE.md" (root only) or "**/*.md" (full hierarchy)`)
 	sourceAddCmd.Flags().StringVar(&addProjectDirNames, "project-dir-names", "", `comma-separated directory names to search anywhere in the source tree for project rule files (default: "projects,project-rules")`)
+	sourceAddCmd.Flags().IntVar(&addPriority, "priority", 0, "layering priority: higher numbers win on conflict (applied later); unset = 0 (lowest)")
 	sourcePushCmd.Flags().BoolVarP(&pushForce, "force", "f", false, "skip confirmation prompt")
 	sourcePushCmd.Flags().StringVarP(&pushMessage, "message", "m", "", "stage all changes, commit with this message, then push")
 }

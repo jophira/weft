@@ -1,6 +1,27 @@
 package source
 
-import "strings"
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+
+	"github.com/jophira/weft/internal/locate"
+)
+
+// SortByPriority orders sources in place by ascending Priority so that
+// higher-priority sources are emitted later and win on conflict under the
+// cascade/last-wins overlay. The sort is stable: sources sharing a priority keep
+// their incoming relative order, so the all-zero default leaves order untouched
+// (backward compatible with the previous profile-order behaviour).
+func SortByPriority(srcs []Source) {
+	slices.SortStableFunc(srcs, func(a, b Source) int { return a.Priority - b.Priority })
+}
+
+// scaffoldInstructionFile is the canonical instruction filename created in a
+// flat-mode source root that has none.
+const scaffoldInstructionFile = "CLAUDE.md"
 
 // Structure describes the subdirectory layout within a source root.
 type Structure struct {
@@ -56,13 +77,50 @@ func (s Structure) EffectiveProjectDirNames() []string {
 
 // Source is a directory of AI rules backed by a git remote.
 type Source struct {
-	Name      string    `yaml:"name"       mapstructure:"name"`
-	Root      string    `yaml:"root"       mapstructure:"root"`
+	Name string `yaml:"name"       mapstructure:"name"`
+	Root string `yaml:"root"       mapstructure:"root"`
+	// Priority orders a source within a profile's layered assembly. Higher
+	// numbers are more important and are emitted *later* so they take precedence
+	// on conflict (consistent with the cascade/last-wins overlay semantics and
+	// LLM recency bias). Unset (0) is the lowest priority; sources sharing a
+	// priority keep their relative order from the profile's source list.
+	// cf. Java: a comparator key — Go sorts with a stable sort.SliceStable.
+	Priority  int       `yaml:"priority"   mapstructure:"priority"`
 	Remote    string    `yaml:"remote"     mapstructure:"remote"`
 	Branch    string    `yaml:"branch"     mapstructure:"branch"`
 	AutoPull  bool      `yaml:"auto_pull"  mapstructure:"auto_pull"`
 	AutoPush  bool      `yaml:"auto_push"  mapstructure:"auto_push"`
 	Structure Structure `yaml:"structure"  mapstructure:"structure"`
+}
+
+// EnsureInstructionFile creates a minimal CLAUDE.md in the source root when the
+// source uses flat instruction mode (InstructionGlob empty or "CLAUDE.md") and
+// no instruction file exists yet. It is a no-op for hierarchical sources (a
+// glob other than the canonical name) and when the file already exists.
+// Returns true when a file was created.
+//
+// cf. Java: a guarded "create if absent" — Go has no Files.createFile + EXCL
+// helper, so we Stat then Write.
+func (s Source) EnsureInstructionFile() (bool, error) {
+	if glob := s.Structure.InstructionGlob; glob != "" && glob != scaffoldInstructionFile {
+		return false, nil // hierarchical source — author manages their own tree
+	}
+	root := locate.ExpandHome(s.Root)
+	path := filepath.Join(root, scaffoldInstructionFile)
+	switch _, err := os.Stat(path); {
+	case err == nil:
+		return false, nil // already present
+	case !os.IsNotExist(err):
+		return false, fmt.Errorf("checking %s: %w", path, err)
+	}
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		return false, fmt.Errorf("creating source root %s: %w", root, err)
+	}
+	content := fmt.Sprintf("# %s rules\n\n<!-- weft: add this source's instructions here -->\n", s.Name)
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil { //nolint:gosec // path derived from registered source root, not user input
+		return false, fmt.Errorf("scaffolding %s: %w", path, err)
+	}
+	return true, nil
 }
 
 // ManagedDirs returns the non-empty, trimmed names of the managed
