@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/jophira/weft/internal/locate"
 )
 
 // compile-time check: FileManager must satisfy Manager.
@@ -146,10 +148,9 @@ func isValidOverlay(o Overlay) bool {
 	return false
 }
 
+// expandHome replaces a leading ~/ with the user's absolute home directory.
+// Thin wrapper around locate.ExpandHome so path expansion has a single source
+// of truth (e.g. cross-OS prefix handling) rather than a divergent copy.
 func expandHome(path string) string {
-	if strings.HasPrefix(path, "~/") {
-		home, _ := os.UserHomeDir()
-		return filepath.Join(home, path[2:])
-	}
-	return path
+	return locate.ExpandHome(path)
 }
