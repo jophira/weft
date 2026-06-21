@@ -326,6 +326,19 @@ func mergeAndApply(p *profile.Profile, roots []string, srcs []source.Source, cfg
 		printQualityReport(stagedDir, p, contribs)
 	}
 
+	// Assemble weft-owned per-source instruction copies (priority-ordered), then
+	// drop the merged CLAUDE.md from the staged tree: the instruction file is now
+	// projected separately per harness tier, while harness Apply copies only the
+	// sidecar assets (commands/, skills/, …).
+	instrDir := filepath.Join(cfgDir, "profiles", p.Name, "instructions")
+	sourceInstrs, err := stageInstructions(roots, srcs, p, instrDir)
+	if err != nil {
+		return fmt.Errorf("staging instructions: %w", err)
+	}
+	if rmErr := os.Remove(filepath.Join(stagedDir, "CLAUDE.md")); rmErr != nil && !os.IsNotExist(rmErr) {
+		return fmt.Errorf("removing merged instruction file from staging: %w", rmErr)
+	}
+
 	targets := resolveApplyTargets(p, quiet)
 	if len(targets) == 0 {
 		if !quiet {
@@ -367,6 +380,12 @@ func mergeAndApply(p *profile.Profile, roots []string, srcs []source.Source, cfg
 		}
 		if err := h.Apply(stagedDir, ctx); err != nil {
 			return fmt.Errorf("applying to %s: %w", target, err)
+		}
+		// Project the instruction file: a thin import block (Tier A) or inlined
+		// content within managed markers (Tier B), preserving the user's own
+		// content outside the block.
+		if err := harness.ProjectInstruction(h, sourceInstrs, ctx); err != nil {
+			return fmt.Errorf("projecting instructions to %s: %w", target, err)
 		}
 	}
 	return nil

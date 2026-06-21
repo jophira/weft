@@ -46,26 +46,11 @@ func expandProjectsPlaceholder(stagedDir string, srcs []source.Source) error {
 		return fmt.Errorf("reading staged CLAUDE.md: %w", err)
 	}
 
-	content := string(data)
-	hasPlaceholder := strings.Contains(content, projectsPlaceholder)
-	hasBlock := strings.Contains(content, projectsBegin)
-	if !hasPlaceholder && !hasBlock {
+	expanded := expandProjectsInContent(string(data), srcs)
+	if expanded == string(data) {
 		return nil
 	}
-
-	snippet := generateProjectsSnippet(srcs)
-
-	// Replace the raw placeholder first (canonical case).
-	if hasPlaceholder {
-		content = strings.ReplaceAll(content, projectsPlaceholder, snippet)
-	}
-
-	// Replace any existing begin/end block (write-back propagated case).
-	if hasBlock {
-		content = replaceProjectsBlock(content, snippet)
-	}
-
-	return os.WriteFile(claudePath, []byte(content), 0o644) //nolint:gosec // claudePath is derived from weft's own staged dir, not user input
+	return os.WriteFile(claudePath, []byte(expanded), 0o644) //nolint:gosec // claudePath is derived from weft's own staged dir, not user input
 }
 
 // replaceProjectsBlock replaces the first <!-- weft:projects:begin -->...
