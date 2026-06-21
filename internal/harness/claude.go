@@ -25,3 +25,10 @@ func (c *ClaudeCode) Detect() bool {
 func (c *ClaudeCode) Apply(stagedRoot string, ctx ApplyCtx) error {
 	return applyToHomeDir(stagedRoot, ".claude", c.Name(), ctx, nil)
 }
+
+// InstructionSpec: Claude Code follows @-imports in ~/.claude/CLAUDE.md, so weft
+// keeps content in its own copies and imports them (Tier A).
+func (c *ClaudeCode) InstructionSpec() (InstructionSpec, error) {
+	path, err := homeJoin(".claude", "CLAUDE.md")
+	return InstructionSpec{Path: path, Strategy: StrategyImport, ImportTemplate: "@{path}"}, err
+}

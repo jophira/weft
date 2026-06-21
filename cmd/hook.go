@@ -15,23 +15,29 @@ import (
 )
 
 // newHookManager builds a FileManager using the configured hooks directory.
-func newHookManager() *hook.FileManager {
+func newHookManager() (*hook.FileManager, error) {
 	dir := viper.GetString("hooks_dir")
 	if dir == "" {
-		cfg, _ := config.Defaults()
+		cfg, err := config.Defaults()
+		if err != nil {
+			return nil, err
+		}
 		dir = cfg.HooksDir
 	}
-	return hook.NewFileManager(dir)
+	return hook.NewFileManager(dir), nil
 }
 
 // newExecutor builds an Executor using the configured sources directory.
-func newExecutor() *hook.Executor {
+func newExecutor() (*hook.Executor, error) {
 	dir := viper.GetString("sources_dir")
 	if dir == "" {
-		cfg, _ := config.Defaults()
+		cfg, err := config.Defaults()
+		if err != nil {
+			return nil, err
+		}
 		dir = cfg.SourcesDir
 	}
-	return hook.NewExecutor(dir)
+	return hook.NewExecutor(dir), nil
 }
 
 // ── Flags ─────────────────────────────────────────────────────────────────────
@@ -58,7 +64,11 @@ var hookListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all registered hooks",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		hooks, err := newHookManager().List()
+		mgr, err := newHookManager()
+		if err != nil {
+			return err
+		}
+		hooks, err := mgr.List()
 		if err != nil {
 			return err
 		}
@@ -102,13 +112,19 @@ var hookRunCmd = &cobra.Command{
 	Short: "Manually execute a hook (ignores trigger type)",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		mgr := newHookManager()
+		mgr, err := newHookManager()
+		if err != nil {
+			return err
+		}
 		h, err := mgr.Get(args[0])
 		if err != nil {
 			return err
 		}
 
-		exec := newExecutor()
+		exec, err := newExecutor()
+		if err != nil {
+			return err
+		}
 		fmt.Printf("Running hook %q (%s/%s)...\n", h.Name, h.Trigger, h.Action.Type)
 		err = exec.Run(*h)
 		if errors.Is(err, hook.ErrConfirmRequired) {
@@ -180,7 +196,11 @@ Action types:   shell   append_memory   ai_improve`,
 			}
 		}
 
-		if err := newHookManager().Add(h); err != nil {
+		mgr, err := newHookManager()
+		if err != nil {
+			return err
+		}
+		if err := mgr.Add(h); err != nil {
 			return err
 		}
 
@@ -207,7 +227,11 @@ var hookRemoveCmd = &cobra.Command{
 	Short: "Deregister a hook",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := newHookManager().Remove(args[0]); err != nil {
+		mgr, err := newHookManager()
+		if err != nil {
+			return err
+		}
+		if err := mgr.Remove(args[0]); err != nil {
 			return err
 		}
 		fmt.Printf("✓ Hook %q removed\n", args[0])

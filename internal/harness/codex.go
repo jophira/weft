@@ -30,3 +30,10 @@ func (c *Codex) Apply(stagedRoot string, ctx ApplyCtx) error {
 		"CLAUDE.md": "AGENTS.md",
 	})
 }
+
+// InstructionSpec: Codex reads a single ~/.codex/AGENTS.md with no include
+// directive, so weft inlines content within a managed block (Tier B).
+func (c *Codex) InstructionSpec() (InstructionSpec, error) {
+	path, err := homeJoin(".codex", "AGENTS.md")
+	return InstructionSpec{Path: path, Strategy: StrategyInline}, err
+}

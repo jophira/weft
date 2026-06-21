@@ -46,42 +46,18 @@ func expandProjectsPlaceholder(stagedDir string, srcs []source.Source) error {
 		return fmt.Errorf("reading staged CLAUDE.md: %w", err)
 	}
 
-	content := string(data)
-	hasPlaceholder := strings.Contains(content, projectsPlaceholder)
-	hasBlock := strings.Contains(content, projectsBegin)
-	if !hasPlaceholder && !hasBlock {
+	expanded := expandProjectsInContent(string(data), srcs)
+	if expanded == string(data) {
 		return nil
 	}
-
-	snippet := generateProjectsSnippet(srcs)
-
-	// Replace the raw placeholder first (canonical case).
-	if hasPlaceholder {
-		content = strings.ReplaceAll(content, projectsPlaceholder, snippet)
-	}
-
-	// Replace any existing begin/end block (write-back propagated case).
-	if hasBlock {
-		content = replaceProjectsBlock(content, snippet)
-	}
-
-	return os.WriteFile(claudePath, []byte(content), 0o644) //nolint:gosec // claudePath is derived from weft's own staged dir, not user input
+	return os.WriteFile(claudePath, []byte(expanded), 0o644) //nolint:gosec // claudePath is derived from weft's own staged dir, not user input
 }
 
 // replaceProjectsBlock replaces the first <!-- weft:projects:begin -->...
 // <!-- weft:projects:end --> block in content with replacement.
 // Returns content unchanged if the block is malformed or end marker is missing.
 func replaceProjectsBlock(content, replacement string) string {
-	start := strings.Index(content, projectsBegin)
-	if start < 0 {
-		return content
-	}
-	end := strings.Index(content[start:], projectsEnd)
-	if end < 0 {
-		return content
-	}
-	end += start + len(projectsEnd)
-	return content[:start] + replacement + content[end:]
+	return replacePlaceholderBlock(content, projectsBegin, projectsEnd, replacement)
 }
 
 // generateProjectsSnippet builds the <!-- weft:projects:begin/end --> block
@@ -211,16 +187,4 @@ func collectProjectFiles(root string) ([]string, error) {
 		return nil
 	})
 	return files, err
-}
-
-// buildNameSet converts a slice of directory names into a lookup map, stripping
-// any trailing slashes or whitespace.
-func buildNameSet(names []string) map[string]bool {
-	set := make(map[string]bool, len(names))
-	for _, n := range names {
-		if n = strings.TrimRight(strings.TrimSpace(n), "/\\"); n != "" {
-			set[n] = true
-		}
-	}
-	return set
 }

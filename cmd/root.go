@@ -143,7 +143,11 @@ func runAutoSync() {
 	if os.Getenv("CI") != "" {
 		return
 	}
-	sources, err := newRegistry().List()
+	reg, err := newRegistry()
+	if err != nil {
+		return
+	}
+	sources, err := reg.List()
 	if err != nil || len(sources) == 0 {
 		return
 	}

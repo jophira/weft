@@ -27,6 +27,9 @@ vendor/
 .claude/settings.local.json
 .claude/worktrees/
 
+# -- AO -----
+graphify-out
+
 # ── IDE and editors ───────────────────────────────────────────────────────────
 .idea/
 *.iml

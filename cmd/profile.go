@@ -31,13 +31,16 @@ import (
 )
 
 // newProfileManager builds a FileManager using the configured profiles directory.
-func newProfileManager() *profile.FileManager {
+func newProfileManager() (*profile.FileManager, error) {
 	dir := viper.GetString("profiles_dir")
 	if dir == "" {
-		cfg, _ := config.Defaults()
+		cfg, err := config.Defaults()
+		if err != nil {
+			return nil, err
+		}
 		dir = cfg.ProfilesDir
 	}
-	return profile.NewFileManager(dir)
+	return profile.NewFileManager(dir), nil
 }
 
 // managedFilter returns a merge.Filter that restricts merging to the union of
@@ -92,11 +95,18 @@ func buildAssembler(roots []string, srcs []source.Source) merge.Assembler {
 // verifies each root exists on disk. Returns the profile, expanded root paths,
 // and the corresponding Source values in the same order.
 func resolveProfileRoots(name string) (*profile.Profile, []string, []source.Source, error) {
-	p, err := newProfileManager().Get(name)
+	pm, err := newProfileManager()
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	reg := newRegistry()
+	p, err := pm.Get(name)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	reg, err := newRegistry()
+	if err != nil {
+		return nil, nil, nil, err
+	}
 	var roots []string
 	var srcs []source.Source
 	for _, srcName := range p.Sources {
@@ -112,8 +122,16 @@ func resolveProfileRoots(name string) (*profile.Profile, []string, []source.Sour
 			)
 		}
 		s.Root = expanded
-		roots = append(roots, expanded)
 		srcs = append(srcs, *s)
+	}
+
+	// Order by priority: higher priority is emitted later so it wins on conflict
+	// under the cascade/last-wins overlay. Stable, so sources sharing a priority
+	// keep the profile's source order (the all-zero default is unchanged).
+	source.SortByPriority(srcs)
+	roots = make([]string, len(srcs))
+	for i := range srcs {
+		roots[i] = srcs[i].Root
 	}
 	return p, roots, srcs, nil
 }
@@ -131,8 +149,10 @@ func stageProfile(p *profile.Profile, roots []string, srcs []source.Source, outp
 	// This avoids a second collect.Collect walk inside computeProvenance later.
 	// (cf. Java: we memoize by wrapping the function, not by a separate cache map)
 	contribs := make([]sourceContrib, len(roots))
-	for i := range roots {
+	rootIdx := make(map[string]int, len(roots))
+	for i, r := range roots {
 		contribs[i].name = srcs[i].Name
+		rootIdx[r] = i
 	}
 	rawAssembler := buildAssembler(roots, srcs)
 	capturingAssembler := func(root string) ([]byte, error) {
@@ -140,12 +160,8 @@ func stageProfile(p *profile.Profile, roots []string, srcs []source.Source, outp
 		if err != nil {
 			return nil, err
 		}
-		// Find the index for this root to record byte count.
-		for i, r := range roots {
-			if r == root {
-				contribs[i].bytes = len(data)
-				break
-			}
+		if i, ok := rootIdx[root]; ok {
+			contribs[i].bytes = len(data)
 		}
 		return data, nil
 	}
@@ -282,6 +298,19 @@ func mergeAndApply(p *profile.Profile, roots []string, srcs []source.Source, cfg
 		fmt.Printf("Merging %d source(s) [%s] with strategy %q...\n",
 			len(roots), strings.Join(p.Sources, ", "), p.Overlay)
 	}
+
+	// Scaffold a CLAUDE.md in any flat-mode source that lacks one so the source
+	// always contributes a (possibly empty) instruction file to the layered output.
+	for _, s := range srcs {
+		created, scErr := s.EnsureInstructionFile()
+		if scErr != nil {
+			return fmt.Errorf("scaffolding instruction file for source %q: %w", s.Name, scErr)
+		}
+		if created && !quiet {
+			fmt.Printf("  + scaffolded CLAUDE.md in source %q\n", s.Name)
+		}
+	}
+
 	staged, rootAttribution, contribs, err := stageProfile(p, roots, srcs, stagedDir)
 	if err != nil {
 		return fmt.Errorf("merging sources: %w", err)
@@ -307,6 +336,35 @@ func mergeAndApply(p *profile.Profile, roots []string, srcs []source.Source, cfg
 
 	hReg := harness.NewRegistry(harness.Instances()...)
 	attr := sourceAttribution(rootAttribution, srcs)
+
+	// Preserve external edits to a Tier B harness's managed instruction block by
+	// writing each source's section back to its source BEFORE re-assembling, so
+	// the regenerated block reflects those edits instead of discarding them.
+	if !quiet {
+		for _, target := range targets {
+			h, ok := hReg.Get(target)
+			if !ok {
+				continue
+			}
+			if wbErr := instructionWriteBack(h, cfgDir, p, srcs); wbErr != nil {
+				fmt.Fprintf(os.Stderr, "[weft] instruction write-back warning: %v\n", wbErr)
+				slog.Warn("instruction write-back warning", slog.String("target", target), slog.Any("error", wbErr))
+			}
+		}
+	}
+
+	// Assemble weft-owned per-source instruction copies (priority-ordered), then
+	// drop the merged CLAUDE.md from the staged tree: the instruction file is now
+	// projected separately per harness tier, while harness Apply copies only the
+	// sidecar assets (commands/, skills/, …).
+	instrDir := filepath.Join(cfgDir, "profiles", p.Name, "instructions")
+	sourceInstrs, err := stageInstructions(roots, srcs, p, instrDir)
+	if err != nil {
+		return fmt.Errorf("staging instructions: %w", err)
+	}
+	if rmErr := os.Remove(filepath.Join(stagedDir, "CLAUDE.md")); rmErr != nil && !os.IsNotExist(rmErr) {
+		return fmt.Errorf("removing merged instruction file from staging: %w", rmErr)
+	}
 
 	for _, target := range targets {
 		h, ok := hReg.Get(target)
@@ -338,6 +396,12 @@ func mergeAndApply(p *profile.Profile, roots []string, srcs []source.Source, cfg
 		}
 		if err := h.Apply(stagedDir, ctx); err != nil {
 			return fmt.Errorf("applying to %s: %w", target, err)
+		}
+		// Project the instruction file: a thin import block (Tier A) or inlined
+		// content within managed markers (Tier B), preserving the user's own
+		// content outside the block.
+		if err := harness.ProjectInstruction(h, sourceInstrs, ctx); err != nil {
+			return fmt.Errorf("projecting instructions to %s: %w", target, err)
 		}
 	}
 	return nil
@@ -409,7 +473,10 @@ var profileCreateCmd = &cobra.Command{
 		}
 
 		// Verify every referenced source is registered.
-		reg := newRegistry()
+		reg, err := newRegistry()
+		if err != nil {
+			return err
+		}
 		for _, name := range names {
 			if _, err := reg.Get(name); err != nil {
 				registered, _ := reg.List()
@@ -431,7 +498,11 @@ var profileCreateCmd = &cobra.Command{
 			Overlay: profile.Overlay(profileOverlay),
 			Targets: profileTargets,
 		}
-		if err := newProfileManager().Create(p); err != nil {
+		pm, err := newProfileManager()
+		if err != nil {
+			return err
+		}
+		if err := pm.Create(p); err != nil {
 			return err
 		}
 
@@ -477,7 +548,11 @@ var profileListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all profiles",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		profiles, err := newProfileManager().List()
+		pm, err := newProfileManager()
+		if err != nil {
+			return err
+		}
+		profiles, err := pm.List()
 		if err != nil {
 			return err
 		}
@@ -613,19 +688,11 @@ file inside any source root changes. Pass --no-watch to apply once and exit
 								continue // not a weft-managed file — ignore silently
 							}
 							fmt.Printf("\n[weft] target changed: %s\n", c.Rel)
-							performed, wbErr := writeBackSingleSourceMap(m, c, p, wbSrcMap)
+							performed, wbErr := dispatchWriteBack(m, c, p, wbSrcMap)
 							if wbErr != nil {
 								fmt.Fprintf(os.Stderr, "[weft] write-back error for %s: %v\n", c.Rel, wbErr)
 								slog.Error("write-back failed", slog.String("file", c.Rel), slog.Any("error", wbErr))
 								continue
-							}
-							if !performed && len(m.SourceFiles[c.Rel]) > 1 {
-								performed, wbErr = writeBackMergedSourceMap(m, c, p, wbSrcMap)
-								if wbErr != nil {
-									fmt.Fprintf(os.Stderr, "[weft] write-back error for %s: %v\n", c.Rel, wbErr)
-									slog.Error("merged write-back failed", slog.String("file", c.Rel), slog.Any("error", wbErr))
-									continue
-								}
 							}
 							if performed {
 								fmt.Printf("[weft] wrote %s back to source (source watcher will re-apply)\n", c.Rel)
@@ -979,7 +1046,11 @@ var profileDeleteCmd = &cobra.Command{
 	Short: "Delete a profile (does not affect sources)",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := newProfileManager().Delete(args[0]); err != nil {
+		pm, err := newProfileManager()
+		if err != nil {
+			return err
+		}
+		if err := pm.Delete(args[0]); err != nil {
 			return err
 		}
 		fmt.Printf("✓ Profile %q deleted\n", args[0])

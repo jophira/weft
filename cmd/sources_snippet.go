@@ -69,50 +69,18 @@ func expandSourcesPlaceholder(stagedDir string, srcs []source.Source, p *profile
 		return fmt.Errorf("reading staged CLAUDE.md: %w", err)
 	}
 
-	content := string(data)
-	hasPlaceholder := strings.Contains(content, sourcesPlaceholder)
-	hasBlock := strings.Contains(content, sourcesBegin)
-	if !hasPlaceholder && !hasBlock {
+	expanded := expandSourcesInContent(string(data), srcs, p)
+	if expanded == string(data) {
 		return nil
 	}
-
-	snippet := generateSourcesSnippet(srcs, p)
-
-	switch {
-	case hasPlaceholder && hasBlock:
-		// Placeholder defines the target position; all existing blocks are stale.
-		// Remove every block first, then expand the placeholder in one pass.
-		for strings.Contains(content, sourcesBegin) {
-			next := replaceSourcesBlock(content, "")
-			if next == content {
-				break // safety: stop if no progress
-			}
-			content = next
-		}
-		content = strings.ReplaceAll(content, sourcesPlaceholder, snippet)
-	case hasPlaceholder:
-		content = strings.ReplaceAll(content, sourcesPlaceholder, snippet)
-	case hasBlock:
-		content = replaceSourcesBlock(content, snippet)
-	}
-
-	return os.WriteFile(claudePath, []byte(content), 0o644) //nolint:gosec // claudePath is derived from weft's own staged dir, not user input
+	return os.WriteFile(claudePath, []byte(expanded), 0o644) //nolint:gosec // claudePath is derived from weft's own staged dir, not user input
 }
 
 // replaceSourcesBlock replaces the first <!-- weft:sources:begin -->...
 // <!-- weft:sources:end --> block in content with replacement.
 // Returns content unchanged when either marker is absent or malformed.
 func replaceSourcesBlock(content, replacement string) string {
-	start := strings.Index(content, sourcesBegin)
-	if start < 0 {
-		return content
-	}
-	end := strings.Index(content[start:], sourcesEnd)
-	if end < 0 {
-		return content
-	}
-	end += start + len(sourcesEnd)
-	return content[:start] + replacement + content[end:]
+	return replacePlaceholderBlock(content, sourcesBegin, sourcesEnd, replacement)
 }
 
 // generateSourcesSnippet builds the <!-- weft:sources:begin/end --> block for

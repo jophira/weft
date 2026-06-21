@@ -45,3 +45,11 @@ func (c *Cursor) Apply(stagedRoot string, ctx ApplyCtx) error {
 	dst := filepath.Join(rulesDir, "weft.mdc")
 	return trackAndWriteFile(dst, "weft.mdc", c.Name(), content, ctx)
 }
+
+// InstructionSpec: Cursor reads .mdc rule files (no include directive), so weft
+// inlines content (Tier B) into ~/.cursor/rules/weft.mdc, seeding the
+// always-apply frontmatter as the preamble when the file is first created.
+func (c *Cursor) InstructionSpec() (InstructionSpec, error) {
+	path, err := homeJoin(".cursor", "rules", "weft.mdc")
+	return InstructionSpec{Path: path, Strategy: StrategyInline, Preamble: cursorMDCHeader}, err
+}

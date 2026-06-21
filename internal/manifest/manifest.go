@@ -18,6 +18,15 @@ type Manifest struct {
 	AppliedAt   time.Time           `json:"applied_at"`
 	Files       map[string]string   `json:"files"`                  // rel path -> "sha256:<hex>"
 	SourceFiles map[string][]string `json:"source_files,omitempty"` // rel path -> ordered source names (AppendStrategy files only)
+	// InstructionPath is the absolute path of the harness root instruction file
+	// (CLAUDE.md, AGENTS.md, …) in which weft manages a <!-- weft:begin/end -->
+	// block. Empty for harnesses with no instruction file (e.g. Warp).
+	InstructionPath string `json:"instruction_path,omitempty"`
+	// InstructionBlock is the sha256 of the managed block body weft last wrote.
+	// Unlike Files (whole-file ownership), weft owns only the block — content
+	// outside it is the user's. Write-back compares the on-disk block to this
+	// hash to detect external edits.
+	InstructionBlock string `json:"instruction_block,omitempty"`
 }
 
 func manifestPath(cfgDir, harnessName string) string {
