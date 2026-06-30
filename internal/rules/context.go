@@ -24,6 +24,12 @@ type Context struct {
 	// package.json (dependencies + devDependencies keys) and pom.xml
 	// (each dependency's groupId and artifactId).
 	Deps []string
+	// Repo is the repository directory's base name (e.g. "weft"), letting a
+	// project-scoped rule detect by identity: detect: repo == "weft".
+	Repo string
+	// Remote is the origin URL from <repo>/.git/config, or empty when there is
+	// no parseable origin. Enables detect: remote.contains("jophira/weft").
+	Remote string
 }
 
 // manifest file names inspected for dependency identifiers.
@@ -58,7 +64,50 @@ func BuildContext(repoRoot string) (Context, error) {
 		deps = append(deps, mavenDeps(filepath.Join(repoRoot, pomXMLFile))...)
 	}
 
-	return Context{Files: files, Deps: dedupeSorted(deps)}, nil
+	return Context{
+		Files:  files,
+		Deps:   dedupeSorted(deps),
+		Repo:   filepath.Base(repoRoot),
+		Remote: gitOriginRemote(repoRoot),
+	}, nil
+}
+
+// gitOriginRemote returns the origin remote URL from <repoRoot>/.git/config, or
+// empty when .git is absent, is a worktree/submodule pointer file, or has no
+// origin. Parsing the config file directly avoids shelling out to git and works
+// even when git is not installed.
+func gitOriginRemote(repoRoot string) string {
+	gitPath := filepath.Join(repoRoot, ".git")
+	info, err := os.Stat(gitPath)
+	if err != nil || !info.IsDir() {
+		// No .git, or a worktree/submodule ".git" file (gitdir pointer) — the
+		// latter's config layout is out of scope; degrade to no remote.
+		return ""
+	}
+	data, err := os.ReadFile(filepath.Join(gitPath, "config")) //nolint:gosec // path is <repoRoot>/.git/config
+	if err != nil {
+		return ""
+	}
+	return parseOriginURL(string(data))
+}
+
+// parseOriginURL extracts the url of the [remote "origin"] section from a git
+// config file body, or "" when absent.
+func parseOriginURL(cfg string) string {
+	inOrigin := false
+	for _, line := range strings.Split(cfg, "\n") {
+		t := strings.TrimSpace(line)
+		if strings.HasPrefix(t, "[") {
+			inOrigin = t == `[remote "origin"]`
+			continue
+		}
+		if inOrigin {
+			if key, val, ok := strings.Cut(t, "="); ok && strings.TrimSpace(key) == "url" {
+				return strings.TrimSpace(val)
+			}
+		}
+	}
+	return ""
 }
 
 // npmDeps returns the dependency and devDependency names declared in a

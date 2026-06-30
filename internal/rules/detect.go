@@ -21,8 +21,10 @@ type Evaluator interface {
 
 // CEL variable names exposed to detect predicates.
 const (
-	varFiles = "files"
-	varDeps  = "deps"
+	varFiles  = "files"
+	varDeps   = "deps"
+	varRepo   = "repo"
+	varRemote = "remote"
 )
 
 // celEvaluator evaluates detect predicates with google/cel-go. Compiled
@@ -40,6 +42,8 @@ func NewCELEvaluator() (Evaluator, error) {
 	env, err := cel.NewEnv(
 		cel.Variable(varFiles, cel.ListType(cel.StringType)),
 		cel.Variable(varDeps, cel.ListType(cel.StringType)),
+		cel.Variable(varRepo, cel.StringType),
+		cel.Variable(varRemote, cel.StringType),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("building CEL environment: %w", err)
@@ -56,8 +60,10 @@ func (e *celEvaluator) Eval(detect string, ctx Context) (bool, error) {
 		return false, err
 	}
 	out, _, err := prg.Eval(map[string]any{
-		varFiles: ctx.Files,
-		varDeps:  ctx.Deps,
+		varFiles:  ctx.Files,
+		varDeps:   ctx.Deps,
+		varRepo:   ctx.Repo,
+		varRemote: ctx.Remote,
 	})
 	if err != nil {
 		return false, fmt.Errorf("evaluating predicate %q: %w", detect, err)
