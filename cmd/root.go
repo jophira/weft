@@ -132,6 +132,10 @@ var skipAutoSyncCmds = map[string]bool{
 	"diff":    true,
 	"sync":    true,
 	"push":    true,
+	// resolve is read-only and may be invoked from a session-start hook on
+	// every session; a background git auto-sync there would add latency and can
+	// stall offline. Covers both "weft resolve" and "weft rules resolve".
+	"resolve": true,
 }
 
 // isReadOnlyCmd reports whether cmd should skip background auto-sync.
