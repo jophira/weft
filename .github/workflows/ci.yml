@@ -14,7 +14,7 @@ jobs:
     name: lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-go@v6
         with:
@@ -42,7 +42,7 @@ jobs:
     # resolution, "/"-separator assumptions in tests and a few production paths,
     # Unix abs-path test fixtures) was cleared in #138.
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-go@v6
         with:
@@ -67,7 +67,7 @@ jobs:
     name: vulnerability scan
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-go@v6
         with:
