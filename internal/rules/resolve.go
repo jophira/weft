@@ -2,6 +2,7 @@ package rules
 
 import (
 	"io/fs"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -9,6 +10,21 @@ import (
 
 // ruleFileExt is the extension of files considered as rule candidates.
 const ruleFileExt = ".md"
+
+// ruleMeta is everything resolution needs about a rule *except* its body:
+// detection, wiring and ordering. Bodies are fetched lazily and only for the
+// rules that end up loaded, so the cache path never has to read the whole tree.
+type ruleMeta struct {
+	Label    string
+	Detect   string
+	Extends  []string
+	Priority int
+	Path     string
+}
+
+func metaOf(r Rule) ruleMeta {
+	return ruleMeta{Label: r.Label, Detect: r.Detect, Extends: r.Extends, Priority: r.Priority, Path: r.Path}
+}
 
 // LoadedRule is a rule selected by a resolve, in final load order.
 type LoadedRule struct {
@@ -66,22 +82,44 @@ func Resolve(rulesRoot string, ctx Context, ev Evaluator) (Resolution, error) {
 	if err != nil {
 		return Resolution{}, err
 	}
+	return resolveRulesInMemory(rules, skipped, ctx, ev)
+}
 
-	byLabel := make(map[string]Rule, len(rules))
+// resolveRulesInMemory resolves an already-parsed rule set, serving bodies from
+// the in-memory Rule values (no re-read).
+func resolveRulesInMemory(rules []Rule, skipped []SkippedRule, ctx Context, ev Evaluator) (Resolution, error) {
+	metas := make([]ruleMeta, 0, len(rules))
+	bodies := make(map[string]string, len(rules))
 	for _, r := range rules {
-		byLabel[r.Label] = r
+		metas = append(metas, metaOf(r))
+		bodies[r.Path] = r.Body
+	}
+	return resolveMeta(metas, skipped, ctx, ev, func(path string) (string, error) {
+		return bodies[path], nil
+	})
+}
+
+// resolveMeta is the shared resolution core: detect → closure → order → load.
+// bodyOf supplies a loaded rule's body by path; both the in-memory and cache
+// paths funnel through here so they cannot diverge. The skipped slice is seeded
+// by the caller (e.g. duplicate-label reports from loadTree) and extended with
+// predicate-evaluation failures.
+func resolveMeta(metas []ruleMeta, skipped []SkippedRule, ctx Context, ev Evaluator, bodyOf func(path string) (string, error)) (Resolution, error) {
+	byLabel := make(map[string]ruleMeta, len(metas))
+	for _, m := range metas {
+		byLabel[m.Label] = m
 	}
 
 	// Phase 1: direct matches from Detect predicates.
 	direct := make(map[string]bool)
-	for _, r := range rules {
-		matched, evalErr := ev.Eval(r.Detect, ctx)
+	for _, m := range metas {
+		matched, evalErr := ev.Eval(m.Detect, ctx)
 		if evalErr != nil {
-			skipped = append(skipped, SkippedRule{Label: r.Label, Path: r.Path, Reason: evalErr.Error()})
+			skipped = append(skipped, SkippedRule{Label: m.Label, Path: m.Path, Reason: evalErr.Error()})
 			continue
 		}
 		if matched {
-			direct[r.Label] = true
+			direct[m.Label] = true
 		}
 	}
 
@@ -93,13 +131,18 @@ func Resolve(rulesRoot string, ctx Context, ev Evaluator) (Resolution, error) {
 
 	loaded := make([]LoadedRule, 0, len(ordered))
 	for _, label := range ordered {
-		r := byLabel[label]
+		m := byLabel[label]
+		body, err := bodyOf(m.Path)
+		if err != nil {
+			skipped = append(skipped, SkippedRule{Label: label, Path: m.Path, Reason: err.Error()})
+			continue
+		}
 		loaded = append(loaded, LoadedRule{
-			Label:    r.Label,
-			Path:     r.Path,
+			Label:    m.Label,
+			Path:     m.Path,
 			Direct:   direct[label],
-			Priority: r.Priority,
-			Body:     r.Body,
+			Priority: m.Priority,
+			Body:     body,
 		})
 	}
 
@@ -157,7 +200,7 @@ func loadTree(rulesRoot string) (rules []Rule, skipped []SkippedRule, err error)
 
 // closure expands the directly-matched labels with everything they transitively
 // Extend. Extends targets that name no known rule are collected in unknown.
-func closure(direct map[string]bool, byLabel map[string]Rule) (required, unknown map[string]bool) {
+func closure(direct map[string]bool, byLabel map[string]ruleMeta) (required, unknown map[string]bool) {
 	required = make(map[string]bool)
 	unknown = make(map[string]bool)
 	var visit func(label string)
@@ -188,7 +231,7 @@ func closure(direct map[string]bool, byLabel map[string]Rule) (required, unknown
 // Among labels that are ready simultaneously, ordering is by ascending Priority
 // then path, so higher-priority rules land later (last-wins). Any labels left in
 // a cycle are appended in the same deterministic tie-break order.
-func topoOrder(required map[string]bool, byLabel map[string]Rule) []string {
+func topoOrder(required map[string]bool, byLabel map[string]ruleMeta) []string {
 	indegree := make(map[string]int, len(required))
 	dependents := make(map[string][]string, len(required)) // dep -> labels needing it
 	for label := range required {
@@ -264,4 +307,15 @@ func sortedKeys(set map[string]bool) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// readFileBody reads path and returns its content with any front-matter block
+// stripped. Used by the cache path to fetch bodies of loaded rules on demand.
+func readFileBody(path string) (string, error) {
+	data, err := os.ReadFile(path) //nolint:gosec // path comes from the cache's own file list
+	if err != nil {
+		return "", err
+	}
+	_, body := splitFrontMatter(data)
+	return body, nil
 }

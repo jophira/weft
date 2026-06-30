@@ -22,6 +22,15 @@ type ManifestSkip struct {
 	Reason string `json:"reason"`
 }
 
+// CacheInfo records what the resolution cache did, for the audit trail.
+type CacheInfo struct {
+	Used         bool   `json:"used"`
+	StaleRebuilt bool   `json:"stale_rebuilt"`
+	Wrote        bool   `json:"wrote"`
+	Fingerprint  string `json:"fingerprint,omitempty"`
+	Path         string `json:"path,omitempty"`
+}
+
 // Manifest is the audit record of a resolve: what loaded, what was skipped, and
 // a ResolutionHash that changes only when the *selection* changes — not when
 // unrelated repo content changes. That makes it the natural dedup key for an
@@ -31,9 +40,22 @@ type Manifest struct {
 	RulesRoot      string          `json:"rules_root"`
 	RepoRoot       string          `json:"repo_root"`
 	ResolutionHash string          `json:"resolution_hash"`
+	Cache          *CacheInfo      `json:"cache,omitempty"`
 	Loaded         []ManifestEntry `json:"loaded"`
 	Skipped        []ManifestSkip  `json:"skipped,omitempty"`
 	UnknownExtends []string        `json:"unknown_extends,omitempty"`
+}
+
+// WithCache returns m annotated with the cache status from a ResolveWithCache.
+func (m Manifest) WithCache(s CacheStatus) Manifest {
+	m.Cache = &CacheInfo{
+		Used:         s.Used,
+		StaleRebuilt: s.StaleRebuilt,
+		Wrote:        s.Wrote,
+		Fingerprint:  s.Fingerprint,
+		Path:         s.Path,
+	}
+	return m
 }
 
 // NewManifest builds the audit manifest for a resolution. now is injected so
