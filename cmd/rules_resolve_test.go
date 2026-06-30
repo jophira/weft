@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jophira/weft/internal/rules"
 )
@@ -66,6 +67,25 @@ func TestResolveAcrossRoots_ExplicitRootErrorIsFatal(t *testing.T) {
 	roots := []namedRoot{{Root: filepath.Join(t.TempDir(), "nope")}}
 	if _, err := resolveAcrossRoots(repo, roots, rules.CacheOptions{Disabled: true}); err == nil {
 		t.Error("expected explicit-root resolution failure to be fatal")
+	}
+}
+
+func TestBuildResolveRecord_FlattensSourcesInOrder(t *testing.T) {
+	ress := []sourceResolution{
+		{Source: "personal", Res: rules.Resolution{Loaded: []rules.LoadedRule{{Label: "p-common", Body: "P"}}}},
+		{Source: "work", Res: rules.Resolution{Loaded: []rules.LoadedRule{{Label: "w-common", Body: "W"}}}},
+	}
+	rec := buildResolveRecord("/repo", "hybrid", ress, time.Unix(0, 0).UTC())
+	if rec.Profile != "hybrid" || rec.Repo != "/repo" {
+		t.Errorf("unexpected record header: %+v", rec)
+	}
+	if len(rec.Loaded) != 2 ||
+		rec.Loaded[0].Source != "personal" || rec.Loaded[0].Label != "p-common" ||
+		rec.Loaded[1].Source != "work" || rec.Loaded[1].Label != "w-common" {
+		t.Errorf("loaded entries not flattened in order: %+v", rec.Loaded)
+	}
+	if rec.ResolutionHash == "" {
+		t.Error("expected a resolution hash")
 	}
 }
 

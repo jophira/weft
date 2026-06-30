@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -21,6 +22,7 @@ var (
 	rulesNoCache    bool
 	rulesRebuild    bool
 	rulesCachePath  string
+	rulesRecord     bool
 
 	rulesBuildRoot   string
 	rulesBuildOutput string
@@ -87,11 +89,49 @@ Examples:
 
 		out := cmd.OutOrStdout()
 		if rulesShowManife {
-			return printResolveManifest(out, ress, repoAbs, profileName)
+			if err := printResolveManifest(out, ress, repoAbs, profileName); err != nil {
+				return err
+			}
+		} else {
+			fmt.Fprintln(out, layerBundles(ress))
 		}
-		fmt.Fprintln(out, layerBundles(ress))
+
+		// Persistence is opt-in and best-effort: it must never corrupt the
+		// stdout bundle a hook consumes, nor fail the resolve.
+		if rulesRecord {
+			if err := recordResolve(repoAbs, profileName, ress); err != nil {
+				fmt.Fprintf(os.Stderr, "weft: could not record resolve: %v\n", err)
+			}
+		}
 		return nil
 	},
+}
+
+// recordResolve persists an audit record of the resolve to the repo's
+// .weft/ logs and the global monthly rollup.
+func recordResolve(repoAbs, profileName string, ress []sourceResolution) error {
+	rec := buildResolveRecord(repoAbs, profileName, ress, time.Now().UTC())
+
+	targets := rules.RecordTargets{
+		RepoLog: filepath.Join(repoAbs, ".weft", "resolve.log.jsonl"),
+		Latest:  filepath.Join(repoAbs, ".weft", "resolve.latest.json"),
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		targets.GlobalLog = filepath.Join(home, ".weft", "audit", rec.Timestamp.Format("2006-01")+".jsonl")
+	}
+
+	_, err := rules.PersistRecord(rec, targets)
+	return err
+}
+
+// buildResolveRecord converts the per-source resolutions into a combined audit
+// record.
+func buildResolveRecord(repoAbs, profileName string, ress []sourceResolution, now time.Time) rules.ResolveRecord {
+	parts := make([]rules.RecordPart, 0, len(ress))
+	for _, r := range ress {
+		parts = append(parts, rules.RecordPart{Source: r.Source, Res: r.Res})
+	}
+	return rules.NewResolveRecord(repoAbs, profileName, parts, now)
 }
 
 var rulesBuildCmd = &cobra.Command{
@@ -293,6 +333,7 @@ func init() {
 	rulesResolveCmd.Flags().BoolVar(&rulesNoCache, "no-cache", false, "bypass the signals.yaml cache and resolve from the tree")
 	rulesResolveCmd.Flags().BoolVar(&rulesRebuild, "rebuild-cache", false, "ignore any existing cache and regenerate it")
 	rulesResolveCmd.Flags().StringVar(&rulesCachePath, "cache", "", "cache file path (only with --rules-root; default: <rules-root>/signals.yaml)")
+	rulesResolveCmd.Flags().BoolVar(&rulesRecord, "record", false, "append a deduped audit record to <repo>/.weft/ and the global ~/.weft/audit rollup")
 
 	rulesBuildCmd.Flags().StringVar(&rulesBuildRoot, "rules-root", "", "path to the rules tree to index (required)")
 	rulesBuildCmd.Flags().StringVarP(&rulesBuildOutput, "output", "o", "", "cache output path (default: <rules-root>/signals.yaml)")
