@@ -189,6 +189,45 @@ func (c Cache) fresh(fingerprint string) bool {
 	return c.Meta.GeneratorVersion == cacheGeneratorVersion && c.Meta.SourceFingerprint == fingerprint
 }
 
+// RefreshCache regenerates rulesRoot's signals.yaml, but only when it is missing
+// or stale, and reports what it did. It is the optimization-only pre-warm used by
+// watch mode: a rule edit is turned into an up-to-date cache before the next
+// resolve, so the SessionStart hook never pays the rebuild.
+//
+// It is loop-safe by construction. Fingerprint deliberately ignores the cache
+// file, so writing signals.yaml does not change the fingerprint; a watcher that
+// re-fires on that very write finds the cache fresh and no-ops (Wrote=false).
+// Like the rest of the resolver it is total: any selection produced later is
+// identical whether or not this ever ran.
+func RefreshCache(rulesRoot string, now time.Time) (CacheStatus, error) {
+	cachePath := DefaultCachePath(rulesRoot)
+	status := CacheStatus{Path: cachePath}
+
+	fp, err := Fingerprint(rulesRoot)
+	if err != nil {
+		return status, err
+	}
+	status.Fingerprint = fp
+
+	if cached, loadErr := LoadCache(cachePath); loadErr == nil {
+		if cached.fresh(fp) {
+			status.Used = true
+			return status, nil // already current — no write, so a re-fire cannot loop
+		}
+		status.StaleRebuilt = true // a cache existed but no longer matches
+	}
+
+	cache, _, err := BuildCache(rulesRoot, now)
+	if err != nil {
+		return status, err
+	}
+	if err := cache.Save(cachePath); err != nil {
+		return status, err
+	}
+	status.Wrote = true
+	return status, nil
+}
+
 // CacheOptions controls the cache behaviour of ResolveWithCache.
 type CacheOptions struct {
 	// Path overrides the cache file location; empty uses DefaultCachePath.

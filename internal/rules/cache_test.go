@@ -224,3 +224,74 @@ func TestResolveWithCache_ForceRebuild(t *testing.T) {
 		t.Error("force-rebuild should rewrite the cache")
 	}
 }
+
+// TestRefreshCache_BuildsWhenAbsent proves the first refresh of a tree with no
+// cache writes a fresh one.
+func TestRefreshCache_BuildsWhenAbsent(t *testing.T) {
+	root := stdRulesTree(t)
+	status, err := RefreshCache(root, fixedNow())
+	if err != nil {
+		t.Fatalf("RefreshCache: %v", err)
+	}
+	if !status.Wrote {
+		t.Errorf("expected a write for an absent cache, got %+v", status)
+	}
+	if status.StaleRebuilt {
+		t.Error("absent cache is not a stale rebuild")
+	}
+	if _, err := os.Stat(DefaultCachePath(root)); err != nil {
+		t.Errorf("signals.yaml should exist after refresh: %v", err)
+	}
+}
+
+// TestRefreshCache_NoWriteWhenFresh proves the loop-safety invariant: a second
+// refresh with no source change does not rewrite the cache. This is what stops
+// the watch loop from re-firing on its own signals.yaml write.
+func TestRefreshCache_NoWriteWhenFresh(t *testing.T) {
+	root := stdRulesTree(t)
+	if _, err := RefreshCache(root, fixedNow()); err != nil {
+		t.Fatalf("first RefreshCache: %v", err)
+	}
+	status, err := RefreshCache(root, fixedNow())
+	if err != nil {
+		t.Fatalf("second RefreshCache: %v", err)
+	}
+	if status.Wrote {
+		t.Error("a fresh cache must not be rewritten (would loop the watcher)")
+	}
+	if !status.Used {
+		t.Errorf("expected the fresh cache to be recognised, got %+v", status)
+	}
+}
+
+// TestRefreshCache_RebuildsWhenStale proves a rule edit triggers a rebuild.
+func TestRefreshCache_RebuildsWhenStale(t *testing.T) {
+	root := stdRulesTree(t)
+	if _, err := RefreshCache(root, fixedNow()); err != nil {
+		t.Fatalf("initial RefreshCache: %v", err)
+	}
+
+	// Edit a rule and bump its mtime so the fingerprint changes.
+	edited := writeFile(t, root, "java/java.md", "---\nlabel: java\ndetect: \"false\"\nextends: [common-backend]\npriority: 20\n---\nEDITED")
+	future := time.Now().Add(2 * time.Second)
+	if err := os.Chtimes(edited, future, future); err != nil {
+		t.Fatalf("Chtimes: %v", err)
+	}
+
+	status, err := RefreshCache(root, fixedNow())
+	if err != nil {
+		t.Fatalf("RefreshCache after edit: %v", err)
+	}
+	if !status.StaleRebuilt || !status.Wrote {
+		t.Errorf("expected stale rebuild + write after edit, got %+v", status)
+	}
+
+	reloaded, err := LoadCache(DefaultCachePath(root))
+	if err != nil {
+		t.Fatalf("LoadCache: %v", err)
+	}
+	fp, _ := Fingerprint(root)
+	if !reloaded.fresh(fp) {
+		t.Error("cache should be fresh for the new fingerprint after rebuild")
+	}
+}

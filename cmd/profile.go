@@ -25,6 +25,7 @@ import (
 	"github.com/jophira/weft/internal/merge"
 	"github.com/jophira/weft/internal/pidlock"
 	"github.com/jophira/weft/internal/profile"
+	"github.com/jophira/weft/internal/rules"
 	"github.com/jophira/weft/internal/source"
 	"github.com/jophira/weft/internal/validate"
 	"github.com/jophira/weft/internal/watch"
@@ -649,6 +650,10 @@ file inside any source root changes. Pass --no-watch to apply once and exit
 			fmt.Println("\nWatching for changes... (Ctrl-C to stop)")
 			var guard watch.ApplyGuard
 
+			// Pre-warm the resolver cache once up front so the first hook
+			// resolve after `profile use` is already fast.
+			prewarmRulesCaches(roots)
+
 			// Source watcher: re-apply when source files change.
 			stopSrc, err := watch.Debounced(roots, 300*time.Millisecond, func() {
 				fmt.Printf("\n[weft] source change detected — re-applying...\n")
@@ -660,6 +665,9 @@ file inside any source root changes. Pass --no-watch to apply once and exit
 					return
 				}
 				fmt.Printf("[weft] applied at %s\n", time.Now().Format("15:04:05"))
+				// Keep each tree's signals.yaml current so the resolver hook
+				// never pays the rebuild. Optimization-only and best-effort.
+				prewarmRulesCaches(roots)
 			})
 			if err != nil {
 				return fmt.Errorf("starting source watcher: %w", err)
@@ -728,6 +736,31 @@ file inside any source root changes. Pass --no-watch to apply once and exit
 
 		return nil
 	},
+}
+
+// prewarmRulesCaches refreshes the signals.yaml resolution cache for each source
+// root, but only for roots that already have one. A root without a cache is one
+// the user has not opted into the resolver for, so watch mode must not
+// materialise a surprise signals.yaml there. Refreshing an existing cache is
+// optimization-only and best-effort: failures warn and are skipped, and because
+// the fingerprint ignores the cache file, the write cannot make the source
+// watcher loop.
+func prewarmRulesCaches(roots []string) {
+	for _, root := range roots {
+		cachePath := rules.DefaultCachePath(root)
+		if _, err := os.Stat(cachePath); err != nil {
+			continue // no existing cache to keep warm — leave the tree untouched
+		}
+		status, err := rules.RefreshCache(root, time.Now().UTC())
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "[weft] rules cache refresh for %s: %v\n", root, err)
+			slog.Warn("rules cache refresh failed", slog.String("root", root), slog.Any("error", err))
+			continue
+		}
+		if status.Wrote {
+			fmt.Printf("[weft] rebuilt rules cache: %s\n", status.Path)
+		}
+	}
 }
 
 var diffVerbose bool
