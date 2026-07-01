@@ -53,6 +53,31 @@ func expandProjectsPlaceholder(stagedDir string, srcs []source.Source) error {
 	return os.WriteFile(claudePath, []byte(expanded), 0o644) //nolint:gosec // claudePath is derived from weft's own staged dir, not user input
 }
 
+// stagedUsesProjectsSnippet reports whether the staged CLAUDE.md still relies on
+// the deprecated projects mechanism — either the raw placeholder or an expanded
+// begin/end block. Called after expansion, where the raw placeholder has already
+// become a block, so the block check is what normally fires. A missing or
+// unreadable file is treated as "not used".
+func stagedUsesProjectsSnippet(stagedDir string) bool {
+	data, err := os.ReadFile(filepath.Join(stagedDir, "CLAUDE.md"))
+	if err != nil {
+		return false
+	}
+	content := string(data)
+	return strings.Contains(content, projectsPlaceholder) || strings.Contains(content, projectsBegin)
+}
+
+// warnProjectsSnippetDeprecated prints a migration notice for the projects
+// mechanism. It is emitted only when a profile actually expands the snippet, so
+// users who don't use it are never nagged. Best-effort to stderr: the snippet
+// still works today, so this never affects the apply's success.
+func warnProjectsSnippetDeprecated() {
+	fmt.Fprintln(os.Stderr, "⚠ weft: the projects-snippet ("+projectsPlaceholder+") is deprecated;")
+	fmt.Fprintln(os.Stderr, "  migrate project rules to resolver front-matter (detect:/extends:) — see")
+	fmt.Fprintln(os.Stderr, "  `weft rules resolve` and the rules-resolver guide. The snippet still")
+	fmt.Fprintln(os.Stderr, "  works today; it will be removed in a future release.")
+}
+
 // replaceProjectsBlock replaces the first <!-- weft:projects:begin -->...
 // <!-- weft:projects:end --> block in content with replacement.
 // Returns content unchanged if the block is malformed or end marker is missing.

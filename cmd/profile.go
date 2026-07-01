@@ -323,6 +323,12 @@ func mergeAndApply(p *profile.Profile, roots []string, srcs []source.Source, cfg
 	if err := expandProjectsPlaceholder(stagedDir, srcs); err != nil {
 		return fmt.Errorf("expanding projects placeholder: %w", err)
 	}
+	// The projects-snippet is deprecated in favour of the convention-driven
+	// resolver. Nudge only profiles that actually use it, and only on the initial
+	// apply (quiet is set on watch re-applies) so watch mode doesn't nag.
+	if !quiet && stagedUsesProjectsSnippet(stagedDir) {
+		warnProjectsSnippetDeprecated()
+	}
 	if err := expandSourcesPlaceholder(stagedDir, srcs, p); err != nil {
 		return fmt.Errorf("expanding sources placeholder: %w", err)
 	}
