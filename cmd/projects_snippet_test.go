@@ -485,3 +485,46 @@ func TestCollectProjectFiles_SkipsHiddenDirs(t *testing.T) {
 		t.Errorf("expected visible.md in results; got: %v", files)
 	}
 }
+
+func TestStagedUsesProjectsSnippet_Placeholder(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "CLAUDE.md"), "# Rules\n"+projectsPlaceholder+"\n")
+	if !stagedUsesProjectsSnippet(dir) {
+		t.Error("expected raw placeholder to be detected as in use")
+	}
+}
+
+func TestStagedUsesProjectsSnippet_ExpandedBlock(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "CLAUDE.md"), "# Rules\n"+projectsBegin+"\nlist\n"+projectsEnd+"\n")
+	if !stagedUsesProjectsSnippet(dir) {
+		t.Error("expected an expanded begin/end block to be detected as in use")
+	}
+}
+
+func TestStagedUsesProjectsSnippet_AbsentOrMissing(t *testing.T) {
+	dir := t.TempDir()
+	// No CLAUDE.md at all.
+	if stagedUsesProjectsSnippet(dir) {
+		t.Error("missing CLAUDE.md must not count as using the snippet")
+	}
+	// CLAUDE.md without any projects marker.
+	writeFile(t, filepath.Join(dir, "CLAUDE.md"), "# Rules\nnothing to see here\n")
+	if stagedUsesProjectsSnippet(dir) {
+		t.Error("CLAUDE.md without a projects marker must not count as using the snippet")
+	}
+}
+
+// TestStagedUsesProjectsSnippet_AfterExpansion proves the realistic flow: a raw
+// placeholder becomes a block after expandProjectsPlaceholder, and the detector
+// still reports the feature as in use (via the block marker).
+func TestStagedUsesProjectsSnippet_AfterExpansion(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "CLAUDE.md"), "# Rules\n"+projectsPlaceholder+"\n")
+	if err := expandProjectsPlaceholder(dir, nil); err != nil {
+		t.Fatalf("expandProjectsPlaceholder: %v", err)
+	}
+	if !stagedUsesProjectsSnippet(dir) {
+		t.Error("after expansion the block marker should still be detected as in use")
+	}
+}
