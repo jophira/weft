@@ -64,6 +64,52 @@ func NewResolveRecord(repo, profile string, parts []RecordPart, now time.Time) R
 	}
 }
 
+// ReadRecords parses a resolve JSONL log into records in file order. It is the
+// read side of the audit trail and is total: a missing log yields no records and
+// no error (there simply is no history), and a malformed line is skipped rather
+// than failing the whole read — mirroring how the writer tolerates a corrupt
+// tail. A pathological unscannable line ends the read at what was parsed so far
+// rather than erroring, so history stays viewable.
+func ReadRecords(path string) ([]ResolveRecord, error) {
+	data, err := os.ReadFile(path) //nolint:gosec // audit log path derived from repo/home
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var out []ResolveRecord
+	sc := bufio.NewScanner(bytes.NewReader(data))
+	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	for sc.Scan() {
+		line := bytes.TrimSpace(sc.Bytes())
+		if len(line) == 0 {
+			continue
+		}
+		var rec ResolveRecord
+		if err := json.Unmarshal(line, &rec); err != nil {
+			continue // skip a corrupt line; keep reading the rest
+		}
+		out = append(out, rec)
+	}
+	return out, nil
+}
+
+// Labels returns the unique loaded labels in first-seen order — the compact
+// per-record summary a report renders.
+func (r ResolveRecord) Labels() []string {
+	seen := make(map[string]struct{}, len(r.Loaded))
+	out := make([]string, 0, len(r.Loaded))
+	for _, e := range r.Loaded {
+		if _, ok := seen[e.Label]; ok {
+			continue
+		}
+		seen[e.Label] = struct{}{}
+		out = append(out, e.Label)
+	}
+	return out
+}
+
 // RecordTargets names the files a record may be written to. Empty fields are
 // skipped.
 type RecordTargets struct {

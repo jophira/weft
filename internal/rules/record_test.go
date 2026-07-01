@@ -144,3 +144,62 @@ func TestLastRecordHash_CorruptTailIsTolerated(t *testing.T) {
 		t.Errorf("expected empty hash for corrupt tail, got %q", h)
 	}
 }
+
+func TestReadRecords_AbsentIsEmpty(t *testing.T) {
+	recs, err := ReadRecords(filepath.Join(t.TempDir(), "nope.jsonl"))
+	if err != nil {
+		t.Fatalf("ReadRecords on absent file should not error: %v", err)
+	}
+	if len(recs) != 0 {
+		t.Errorf("expected no records, got %d", len(recs))
+	}
+}
+
+func TestReadRecords_SkipsCorruptLines(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "resolve.log.jsonl")
+	a := NewResolveRecord("/repo", "p", []RecordPart{partFor("s", "common", "java")}, recNow())
+	c := NewResolveRecord("/repo", "p", []RecordPart{partFor("s", "common")}, recNow().Add(time.Hour))
+	if err := appendJSONLine(path, a); err != nil {
+		t.Fatalf("append a: %v", err)
+	}
+	// A corrupt line in the middle must be skipped, not fatal.
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	if _, err := f.WriteString("{ this is not json\n\n"); err != nil {
+		t.Fatalf("write corrupt: %v", err)
+	}
+	_ = f.Close()
+	if err := appendJSONLine(path, c); err != nil {
+		t.Fatalf("append c: %v", err)
+	}
+
+	recs, err := ReadRecords(path)
+	if err != nil {
+		t.Fatalf("ReadRecords: %v", err)
+	}
+	if len(recs) != 2 {
+		t.Fatalf("expected 2 valid records (corrupt + blank skipped), got %d", len(recs))
+	}
+	if recs[0].ResolutionHash != a.ResolutionHash || recs[1].ResolutionHash != c.ResolutionHash {
+		t.Error("records should be returned in file order")
+	}
+}
+
+func TestResolveRecord_LabelsUniqueInOrder(t *testing.T) {
+	rec := NewResolveRecord("/repo", "p", []RecordPart{
+		partFor("a", "common", "java"),
+		partFor("b", "java", "springboot"), // java repeats across sources
+	}, recNow())
+	got := rec.Labels()
+	want := []string{"common", "java", "springboot"}
+	if len(got) != len(want) {
+		t.Fatalf("Labels() = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("Labels() = %v, want %v", got, want)
+		}
+	}
+}
