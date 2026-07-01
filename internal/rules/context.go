@@ -30,6 +30,10 @@ type Context struct {
 	// Remote is the origin URL from <repo>/.git/config, or empty when there is
 	// no parseable origin. Enables detect: remote.contains("jophira/weft").
 	Remote string
+	// Root is the repository root path. It is not exposed as a detect variable;
+	// it is the base the has() CEL function globs against for nested-manifest
+	// detection (e.g. has("**/pom.xml")). Empty Root makes has() match nothing.
+	Root string
 }
 
 // manifest file names inspected for dependency identifiers.
@@ -69,6 +73,7 @@ func BuildContext(repoRoot string) (Context, error) {
 		Deps:   dedupeSorted(deps),
 		Repo:   filepath.Base(repoRoot),
 		Remote: gitOriginRemote(repoRoot),
+		Root:   repoRoot,
 	}, nil
 }
 
