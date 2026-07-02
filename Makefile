@@ -7,7 +7,7 @@ AIR     := $(shell go env GOPATH)/bin/air
 # cmd/ is excluded — Cobra RunE wiring is validated by integration tests, not unit tests.
 COVERAGE_PKGS := ./internal/...
 
-.PHONY: build run dev test test-integration coverage lint clean install
+.PHONY: build run dev test test-integration e2e coverage lint clean install
 
 build:
 	$(GO) build -o $(BIN_DIR)/$(BINARY) .
@@ -40,6 +40,11 @@ test:
 # JSON-RPC protocol loop end-to-end.
 test-integration:
 	$(GO) test -tags integration ./...
+
+# Black-box CLI e2e: builds the binary and drives the full source → profile →
+# apply → write-back lifecycle against an isolated $HOME. No Docker, no network.
+e2e:
+	$(GO) test -tags e2e ./test/e2e/...
 
 # Unit coverage measured over internal packages only (cmd/ excluded — integration only).
 # Run all package tests so cmd regressions are still caught, but only instrument internal/.
