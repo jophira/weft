@@ -168,6 +168,10 @@ func TestCLIEndToEnd(t *testing.T) {
 
 	// personal: flat CLAUDE.md with a projects placeholder, a project-rules tree,
 	// and a commands/ sidecar.
+	// TODO: the projects-snippet is deprecated (#161) in favour of the resolver.
+	// When it is fully removed, drop the "<!-- weft:projects -->" placeholder here,
+	// the project-rules/ fixture below, and the placeholder/myproj.md assertions in
+	// step 5 + the write-back placeholder-restore assertion in step 6.
 	writeFile(t, filepath.Join(personal, "CLAUDE.md"), "# personal rules\n\n<!-- weft:projects -->\n")
 	writeFile(t, filepath.Join(personal, "project-rules", "myproj", "myproj.md"), "# myproj project rules")
 	writeFile(t, filepath.Join(personal, "commands", "hello.md"), "say hello")
