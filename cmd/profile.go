@@ -16,6 +16,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
+	"github.com/jophira/weft/internal/anchor"
 	"github.com/jophira/weft/internal/collect"
 	"github.com/jophira/weft/internal/config"
 	"github.com/jophira/weft/internal/diff"
@@ -174,6 +175,7 @@ func stageProfile(p *profile.Profile, roots []string, srcs []source.Source, outp
 	written, attr, err := merge.New(p.Overlay).
 		WithFilter(managedFilter(srcs)).
 		WithAssembler(capturingAssembler).
+		WithTransform(anchorTransform(srcs)).
 		WithSkipLogger(func(rel string) {
 			slog.Debug("source file not synced — not in a managed directory",
 				"file", rel,
@@ -181,6 +183,25 @@ func stageProfile(p *profile.Profile, roots []string, srcs []source.Source, outp
 		}).
 		MergeRoots(namedRoots(roots, srcs), outputDir)
 	return written, attr, contribs, err
+}
+
+// sourceRootMap maps each source name to its (expanded) root path, for
+// resolving {{weft.source:NAME}} anchors.
+func sourceRootMap(srcs []source.Source) map[string]string {
+	m := make(map[string]string, len(srcs))
+	for _, s := range srcs {
+		m[s.Name] = s.Root
+	}
+	return m
+}
+
+// anchorTransform returns a merge transform that expands weft path anchors in
+// each file, keyed by the owning source root (see package anchor).
+func anchorTransform(srcs []source.Source) func(root string, data []byte) []byte {
+	byName := sourceRootMap(srcs)
+	return func(root string, data []byte) []byte {
+		return anchor.Expand(data, root, byName)
+	}
 }
 
 // namedRoots pairs each root path with the corresponding source name so the

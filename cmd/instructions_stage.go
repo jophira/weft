@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/jophira/weft/internal/anchor"
 	"github.com/jophira/weft/internal/harness"
 	"github.com/jophira/weft/internal/profile"
 	"github.com/jophira/weft/internal/source"
@@ -72,6 +73,7 @@ func stageInstructions(roots []string, srcs []source.Source, p *profile.Profile,
 	}
 
 	assembler := buildAssembler(roots, srcs)
+	byName := sourceRootMap(srcs)
 	out := make([]harness.SourceInstruction, 0, len(srcs))
 	for i, s := range srcs {
 		raw, err := assembler(roots[i])
@@ -80,6 +82,9 @@ func stageInstructions(roots []string, srcs []source.Source, p *profile.Profile,
 		}
 		content := expandProjectsInContent(string(raw), []source.Source{s})
 		content = expandSourcesInContent(content, srcs, p)
+		// Expand weft path anchors ({{weft.root}}, {{weft.source:NAME}}) so the
+		// projected/imported instruction resolves to real paths on this machine.
+		content = string(anchor.Expand([]byte(content), s.Root, byName))
 
 		fname := fmt.Sprintf("%02d-%s.md", i, s.Name)
 		path := filepath.Join(instrDir, fname)

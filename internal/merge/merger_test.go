@@ -62,6 +62,24 @@ func TestMergeRoots_singleSource(t *testing.T) {
 	}
 }
 
+func TestMergeRoots_transformExpandsPerRoot(t *testing.T) {
+	src := t.TempDir()
+	out := t.TempDir()
+	writeFile(t, src, "commands/ship.md", "load {{root}}/java/x.md")
+
+	// Transform receives the owning root; expand a sentinel token to it.
+	m := merge.New(profile.OverlayCascade).
+		WithTransform(func(root string, data []byte) []byte {
+			return []byte(strings.ReplaceAll(string(data), "{{root}}", root))
+		})
+	if _, _, err := m.MergeRoots(nr(src), out); err != nil {
+		t.Fatalf("MergeRoots: %v", err)
+	}
+	if got, want := readFile(t, out, "commands/ship.md"), "load "+src+"/java/x.md"; got != want {
+		t.Errorf("transformed file = %q, want %q", got, want)
+	}
+}
+
 // ── Cascade: overlay wins on conflict ─────────────────────────────────────────
 
 func TestMergeRoots_cascade_overlayWins(t *testing.T) {

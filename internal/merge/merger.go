@@ -42,6 +42,17 @@ type Merger struct {
 	filter    Filter       // nil = include all files
 	assembler Assembler    // nil = read CLAUDE.md directly from disk
 	onSkip    func(string) // called with rel path when filter rejects a file; nil = no-op
+	// transform runs on each file's content after it is read/assembled from a
+	// root, keyed by that owning root; nil = identity. Used to expand
+	// root-relative anchors (see package anchor).
+	transform func(root string, data []byte) []byte
+}
+
+// clone returns a shallow copy of m so the With* builders never mutate the
+// receiver; each builder overrides only the field it sets.
+func (m *Merger) clone() *Merger {
+	c := *m
+	return &c
 }
 
 // New creates a Merger for the given overlay mode.
@@ -52,7 +63,9 @@ func New(o profile.Overlay) *Merger {
 // WithFilter returns a copy of the Merger that only processes files for which
 // f returns true. Use this to restrict the merge to managed paths.
 func (m *Merger) WithFilter(f Filter) *Merger {
-	return &Merger{overlay: m.overlay, strategy: m.strategy, filter: f, assembler: m.assembler, onSkip: m.onSkip}
+	c := m.clone()
+	c.filter = f
+	return c
 }
 
 // WithAssembler returns a copy of the Merger that uses fn to produce CLAUDE.md
@@ -60,14 +73,28 @@ func (m *Merger) WithFilter(f Filter) *Merger {
 // source roots contain hierarchical instruction files that must be assembled
 // before merging (see package collect).
 func (m *Merger) WithAssembler(fn Assembler) *Merger {
-	return &Merger{overlay: m.overlay, strategy: m.strategy, filter: m.filter, assembler: fn, onSkip: m.onSkip}
+	c := m.clone()
+	c.assembler = fn
+	return c
 }
 
 // WithSkipLogger returns a copy of the Merger that calls fn with the relative
 // path of each file rejected by the filter. Use this to surface skipped files
 // to the user as warnings or debug log entries.
 func (m *Merger) WithSkipLogger(fn func(string)) *Merger {
-	return &Merger{overlay: m.overlay, strategy: m.strategy, filter: m.filter, assembler: m.assembler, onSkip: fn}
+	c := m.clone()
+	c.onSkip = fn
+	return c
+}
+
+// WithTransform returns a copy of the Merger that passes every file's content
+// through fn after it is read (or assembled) from a root, before merging. fn
+// receives the owning root path so callers can expand root-relative anchors
+// (see package anchor). A nil fn is the identity transform.
+func (m *Merger) WithTransform(fn func(root string, data []byte) []byte) *Merger {
+	c := m.clone()
+	c.transform = fn
+	return c
 }
 
 // MergeRoots walks every root, collects unique relative file paths, folds each
@@ -213,7 +240,7 @@ func (m *Merger) readContent(rel, root string) ([]byte, error) {
 		if err != nil {
 			return nil, fmt.Errorf("assembling instructions from %s: %w", root, err)
 		}
-		return data, nil // nil means this root contributes nothing
+		return m.applyTransform(root, data), nil // nil means this root contributes nothing
 	}
 	data, err := os.ReadFile(filepath.Join(root, rel))
 	if os.IsNotExist(err) {
@@ -222,7 +249,16 @@ func (m *Merger) readContent(rel, root string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("reading %s from %s: %w", rel, root, err)
 	}
-	return data, nil
+	return m.applyTransform(root, data), nil
+}
+
+// applyTransform runs the configured content transform for root, if any.
+// A nil transform or nil data passes through unchanged.
+func (m *Merger) applyTransform(root string, data []byte) []byte {
+	if m.transform == nil || data == nil {
+		return data
+	}
+	return m.transform(root, data)
 }
 
 // collectPaths walks root and adds each non-hidden file's relative path to seen.
