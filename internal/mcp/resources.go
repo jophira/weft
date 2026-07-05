@@ -60,7 +60,7 @@ func sourceInstructionsResource(reg *source.FileRegistry) server.ResourceTemplat
 		if err != nil {
 			return nil, err
 		}
-		data, err := collect.Collect(locate.ExpandHome(s.Root), s.Structure.InstructionGlob, s.Structure.ManagedDirs()...)
+		data, err := collect.Collect(locate.ExpandHome(s.Root), s.Structure.InstructionGlob, s.Structure.InstructionExcludes()...)
 		if err != nil {
 			return nil, err
 		}
@@ -113,7 +113,7 @@ func mergeProfileInstructions(p *profile.Profile, reg *source.FileRegistry) (str
 		if err != nil {
 			return "", err
 		}
-		data, err := collect.Collect(locate.ExpandHome(s.Root), s.Structure.InstructionGlob, s.Structure.ManagedDirs()...)
+		data, err := collect.Collect(locate.ExpandHome(s.Root), s.Structure.InstructionGlob, s.Structure.InstructionExcludes()...)
 		if err != nil {
 			return "", fmt.Errorf("collecting from source %s: %w", srcName, err)
 		}

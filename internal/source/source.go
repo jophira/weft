@@ -52,6 +52,14 @@ type Structure struct {
 	// subdirectory files (commands, skills, etc.) are always excluded from
 	// assembly regardless of this pattern.
 	InstructionGlob string `yaml:"instruction_glob" mapstructure:"instruction_glob"`
+	// InstructionExclude lists root-relative path prefixes (directories or
+	// files) excluded from instruction assembly, in addition to the always-
+	// excluded managed dirs. This lets a mixed-content source inline only a
+	// subset with a broad glob — e.g. "**/*.md" with
+	// InstructionExclude ["java/", "tickets/", "docs/"] assembles the always-on
+	// rules while leaving language/ticket/doc trees on-disk and on-demand.
+	// Configure via --instruction-exclude on `weft source add`.
+	InstructionExclude []string `yaml:"instruction_exclude" mapstructure:"instruction_exclude"`
 }
 
 // isZero reports whether s is a zero-value Structure (no fields set).
@@ -59,7 +67,8 @@ type Structure struct {
 func (s Structure) isZero() bool {
 	return s.Commands == "" && s.Agents == "" && s.Skills == "" &&
 		s.Memory == "" && s.Hooks == "" && s.Projects == "" &&
-		s.InstructionGlob == "" && len(s.ProjectDirNames) == 0
+		s.InstructionGlob == "" && len(s.ProjectDirNames) == 0 &&
+		len(s.InstructionExclude) == 0
 }
 
 // defaultProjectDirNames are the directory names weft searches for when no
@@ -135,6 +144,15 @@ func (s Structure) ManagedDirs() []string {
 // also be omitted.
 func (s Structure) AllDirs() []string {
 	return cleanDirs(s.Commands, s.Agents, s.Skills, s.Memory, s.Hooks, s.Projects)
+}
+
+// InstructionExcludes returns every root-relative prefix excluded from
+// instruction assembly: the always-excluded managed/project dirs (AllDirs)
+// plus any user-configured InstructionExclude entries. Use this as the exclude
+// set when assembling instruction content so a mixed-content source can inline
+// only a subset with a broad glob.
+func (s Structure) InstructionExcludes() []string {
+	return append(s.AllDirs(), cleanDirs(s.InstructionExclude...)...)
 }
 
 // cleanDirs trims whitespace and trailing path separators from each name,

@@ -6,6 +6,17 @@ Maintain separate rule repositories (personal, team, company) and compose them i
 
 Sources can use a flat `CLAUDE.md` or a full domain hierarchy (`Backend/BACKEND.md`, `Backend/Java/JAVA.md`, …). Set `instruction_glob: "**/*.md"` in the source config and Weft assembles every matching file — parent directories before children — before merging and applying.
 
+For a **mixed-content source** (rules alongside tickets, docs, or knowledge dumps), pair the broad glob with `--instruction-exclude` to inline only a subset:
+
+```bash
+# assemble the always-on rules; leave language/ticket/doc trees on-disk and on-demand
+weft source add work ~/.rules/work \
+  --instruction-glob "**/*.md" \
+  --instruction-exclude "java/,php/,tickets/,docs/"
+```
+
+Excludes are root-relative path prefixes, applied on top of the always-excluded managed dirs.
+
 Per-project rules are also supported: any directory in your source tree named `projects` or `project-rules` is automatically discovered. Weft lists every `.md` file found inside (recursively) as explicit paths in the assembled CLAUDE.md, grouped by project root so the AI can load the right rules for the active project.
 
 ## Install

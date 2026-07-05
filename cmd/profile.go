@@ -89,7 +89,7 @@ func buildAssembler(roots []string, srcs []source.Source) merge.Assembler {
 		if glob == "" {
 			glob = source.DefaultStructure().InstructionGlob
 		}
-		byRoot[root] = entry{glob: glob, excludes: s.Structure.AllDirs()}
+		byRoot[root] = entry{glob: glob, excludes: s.Structure.InstructionExcludes()}
 	}
 	return func(root string) ([]byte, error) {
 		e := byRoot[root]
