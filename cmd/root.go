@@ -6,9 +6,12 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/jophira/weft/internal/autosync"
+	"github.com/jophira/weft/internal/config"
+	"github.com/jophira/weft/internal/locate"
 	"github.com/jophira/weft/internal/logger"
 	"github.com/jophira/weft/internal/source"
 	"github.com/jophira/weft/internal/update"
@@ -18,6 +21,26 @@ import (
 )
 
 var cfgFile string
+
+// cfgBaseDir is the directory weft's state (sources, profiles, hooks, staged,
+// manifests) is rooted at. It is set by initConfig to follow the active
+// --config file's directory, so a custom --config isolates all state. Use
+// configDir() to read it safely (it falls back to the global default when
+// initConfig has not run, e.g. in unit tests).
+var cfgBaseDir string
+
+// configDir returns the base config directory for weft state, honouring
+// --config. Falls back to the global ~/.config/weft when unset.
+func configDir() string {
+	if cfgBaseDir != "" {
+		return cfgBaseDir
+	}
+	dir, err := config.DefaultDir()
+	if err != nil {
+		return ""
+	}
+	return dir
+}
 
 // updateResultCh carries the async update-check outcome from PersistentPreRun to
 // PersistentPostRun. Buffered with capacity 1 so the goroutine never blocks even
@@ -166,18 +189,37 @@ func runAutoSync() {
 }
 
 func initConfig() {
+	// baseDir is the directory the managed sub-directories (sources, profiles,
+	// hooks) default to. It follows the *active config file* so that a custom
+	// --config fully isolates weft's state instead of silently falling back to
+	// the global ~/.config/weft.
+	var baseDir string
 	if cfgFile != "" {
-		viper.SetConfigFile(cfgFile)
+		expanded := locate.ExpandHome(cfgFile)
+		viper.SetConfigFile(expanded)
+		if abs, err := filepath.Abs(filepath.Dir(expanded)); err == nil {
+			baseDir = abs
+		} else {
+			baseDir = filepath.Dir(expanded)
+		}
+		cfgBaseDir = baseDir
 	} else {
-		home, err := os.UserHomeDir()
+		dir, err := config.DefaultDir()
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
-		viper.AddConfigPath(fmt.Sprintf("%s/.config/weft", home))
+		baseDir = dir
+		cfgBaseDir = baseDir
+		viper.AddConfigPath(dir)
 		viper.SetConfigName("config")
 		viper.SetConfigType("yaml")
 	}
+	// Default the managed sub-directories relative to baseDir. An explicit key in
+	// the config file (or a *_DIR env var) still wins via viper's precedence.
+	viper.SetDefault("sources_dir", filepath.Join(baseDir, "sources"))
+	viper.SetDefault("profiles_dir", filepath.Join(baseDir, "profiles"))
+	viper.SetDefault("hooks_dir", filepath.Join(baseDir, "hooks"))
 	viper.SetDefault("warn_instruction_size_kb", validate.DefaultWarnSizeKB)
 	viper.AutomaticEnv()
 	_ = viper.ReadInConfig()

@@ -612,9 +612,11 @@ file inside any source root changes. Pass --no-watch to apply once and exit
 		name := args[0]
 
 		// 1. Resolve config dir early so we can acquire the lock before any work.
-		cfgDir, err := config.DefaultDir()
-		if err != nil {
-			return err
+		//    Honours --config so custom config isolates all state (staged,
+		//    manifests, profile instructions), not just the source registry.
+		cfgDir := configDir()
+		if cfgDir == "" {
+			return fmt.Errorf("resolving config directory")
 		}
 
 		// 2. In watch mode, acquire the singleton lock before doing any work.
