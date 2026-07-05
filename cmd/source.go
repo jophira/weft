@@ -35,12 +35,13 @@ func newRegistry() (*source.FileRegistry, error) {
 // ── Flags ─────────────────────────────────────────────────────────────────────
 
 var (
-	addBranch          string
-	addAutoPull        bool
-	addInstructionGlob string
-	addRemote          string
-	addProjectDirNames string
-	addPriority        int
+	addBranch             string
+	addAutoPull           bool
+	addInstructionGlob    string
+	addRemote             string
+	addProjectDirNames    string
+	addInstructionExclude string
+	addPriority           int
 )
 
 // ── Commands ──────────────────────────────────────────────────────────────────
@@ -71,6 +72,11 @@ context when this source is merged. The default "CLAUDE.md" reads only the
 root-level file. Use "**/*.md" to assemble a full domain hierarchy
 (Backend/BACKEND.md, Frontend/FRONTEND.md, etc.) in parent-before-child order.
 Managed subdirectory files (commands/, skills/, etc.) are always excluded.
+
+--instruction-exclude adds root-relative path prefixes (e.g. "java/,tickets/,
+docs/") to exclude from instruction assembly, on top of the managed dirs. Pair
+it with a broad --instruction-glob to inline only a subset of a mixed-content
+source, leaving the rest on-disk and loaded on demand.
 
 --project-dir-names controls which directories are treated as project-rule
 roots. Weft walks the entire source tree and treats any directory whose base
@@ -125,6 +131,9 @@ place the marker <!-- weft:projects --> where the list should appear.`,
 		if addProjectDirNames != "" {
 			structure.ProjectDirNames = parseSources(addProjectDirNames)
 		}
+		if addInstructionExclude != "" {
+			structure.InstructionExclude = parseSources(addInstructionExclude)
+		}
 
 		s := source.Source{
 			Name:      name,
@@ -162,6 +171,9 @@ place the marker <!-- weft:projects --> where the list should appear.`,
 		fmt.Printf("  branch:             %s\n", saved.Branch)
 		fmt.Printf("  auto-pull:          %v\n", boolWord(saved.AutoPull))
 		fmt.Printf("  instruction-glob:   %s\n", saved.Structure.InstructionGlob)
+		if len(saved.Structure.InstructionExclude) > 0 {
+			fmt.Printf("  instruction-exclude: %s\n", strings.Join(saved.Structure.InstructionExclude, ", "))
+		}
 		fmt.Printf("  project-dir-names:  %s\n", strings.Join(saved.Structure.EffectiveProjectDirNames(), ", "))
 
 		// Warn if the root path does not exist yet.
@@ -441,6 +453,7 @@ func init() {
 	sourceAddCmd.Flags().BoolVar(&addAutoPull, "auto-pull", true, "pull on 'weft source sync'")
 	sourceAddCmd.Flags().StringVar(&addInstructionGlob, "instruction-glob", source.DefaultStructure().InstructionGlob, `glob pattern for instruction files: "CLAUDE.md" (root only) or "**/*.md" (full hierarchy)`)
 	sourceAddCmd.Flags().StringVar(&addProjectDirNames, "project-dir-names", "", `comma-separated directory names to search anywhere in the source tree for project rule files (default: "projects,project-rules")`)
+	sourceAddCmd.Flags().StringVar(&addInstructionExclude, "instruction-exclude", "", `comma-separated root-relative prefixes to exclude from instruction assembly (e.g. "java/,tickets/,docs/") — lets a broad --instruction-glob inline only a subset`)
 	sourceAddCmd.Flags().IntVar(&addPriority, "priority", 0, "layering priority: higher numbers win on conflict (applied later); unset = 0 (lowest)")
 	sourcePushCmd.Flags().BoolVarP(&pushForce, "force", "f", false, "skip confirmation prompt")
 	sourcePushCmd.Flags().StringVarP(&pushMessage, "message", "m", "", "stage all changes, commit with this message, then push")
