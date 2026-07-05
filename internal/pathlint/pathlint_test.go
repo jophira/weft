@@ -3,6 +3,7 @@ package pathlint
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -71,6 +72,13 @@ func TestScanClassifies(t *testing.T) {
 }
 
 func TestHardcodedInSourceAndCrossSource(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		// This scenario embeds an OS-native absolute path in a source file. On
+		// Windows that is a C:\ drive path, which the POSIX-oriented reference
+		// matcher does not parse. The portable forms weft recommends (~/ and
+		// {{weft.root}}) are covered by the other tests and work cross-platform.
+		t.Skip("native absolute-path detection is POSIX-only")
+	}
 	work := setupSource(t, map[string]string{
 		"java/x.md": "java rules",
 	})
