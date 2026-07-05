@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/jophira/weft/internal/harness"
@@ -22,12 +21,10 @@ var doctorCmd = &cobra.Command{
 
 // runDoctor writes the health check output to w. Shared by doctorCmd and bug-report.
 func runDoctor(w io.Writer) {
-	home, _ := os.UserHomeDir()
-
 	fmt.Fprintln(w, "Jophira Health Check")
 	fmt.Fprintln(w, "────────────────────")
 
-	cfgDir := filepath.Join(home, ".config", "weft")
+	cfgDir := configDir()
 	if _, err := os.Stat(cfgDir); err == nil {
 		fmt.Fprintf(w, "  ✓ Config dir: %s\n", cfgDir)
 	} else {

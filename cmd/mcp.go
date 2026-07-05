@@ -7,7 +7,6 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
-	"github.com/jophira/weft/internal/config"
 	weftmcp "github.com/jophira/weft/internal/mcp"
 )
 
@@ -32,7 +31,7 @@ Add to Claude Code's .claude/settings.json:
     }
   }`,
 	RunE: func(_ *cobra.Command, _ []string) error {
-		cfgDir, _ := config.DefaultDir()
+		cfgDir := configDir()
 		reg, err := newRegistry()
 		if err != nil {
 			return err
