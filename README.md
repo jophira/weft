@@ -17,6 +17,25 @@ weft source add work ~/.rules/work \
 
 Excludes are root-relative path prefixes, applied on top of the always-excluded managed dirs.
 
+### Portable references — the `{{weft.root}}` anchor
+
+Rule/command/agent files reference other files with anchors instead of hardcoded paths, so a source works wherever it's cloned:
+
+- `{{weft.root}}` → this source's registered root
+- `{{weft.source:NAME}}` → another source's root
+
+`@{{weft.root}}/common/code-review.md` expands to a real absolute path on projection. Relocating a source is then just re-registering it — no file edits.
+
+`weft doctor` lints your sources for stale, hardcoded, or broken path references and heals the safe ones:
+
+```bash
+weft doctor            # report actionable path references
+weft doctor --fix      # rewrite hardcoded/stale paths to {{weft.root}} anchors
+weft doctor --all      # also list external/dead references
+```
+
+It resolves stale prefixes by a unique trailing-path match inside your sources — so a reference to a file that was moved (or lives under a different root) is rewritten to the correct anchor automatically.
+
 Per-project rules are also supported: any directory in your source tree named `projects` or `project-rules` is automatically discovered. Weft lists every `.md` file found inside (recursively) as explicit paths in the assembled CLAUDE.md, grouped by project root so the AI can load the right rules for the active project.
 
 ## Install
@@ -238,7 +257,7 @@ weft target backups claude-code                   # list all available backups
 | `target list/apply/backups/revert` | Manage AI harness targets; inspect and restore backups |
 | `hook add/list/run/remove` | Manage lifecycle hooks |
 | `status [--short]` | Show active profile and per-harness projection state (instruction path, block drift) |
-| `doctor` | Health check — shows discovered harnesses and config issues |
+| `doctor` | Health check — discovered harnesses, config issues, and path-reference lint; `--fix` heals stale/hardcoded paths to `{{weft.root}}` anchors, `--all` also lists external/dead refs |
 | `version` | Print version, commit, and build date |
 | `bug-report` | Print diagnostic bundle (version, environment, doctor, recent logs) for filing a GitHub issue |
 

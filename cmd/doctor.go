@@ -4,17 +4,32 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/jophira/weft/internal/harness"
+	"github.com/jophira/weft/internal/locate"
+	"github.com/jophira/weft/internal/pathlint"
 	"github.com/spf13/cobra"
+)
+
+var (
+	doctorFix bool
+	doctorAll bool
 )
 
 var doctorCmd = &cobra.Command{
 	Use:   "doctor",
 	Short: "Check system health and discover AI rule folders",
+	Long: `Check system health, discover AI rule folders, and lint source path
+references. Reports hardcoded, stale, broken, and dead path references in your
+sources. Pass --fix to rewrite the healable ones to the portable {{weft.root}}
+and {{weft.source:NAME}} anchors.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		runDoctor(os.Stdout)
+		if doctorFix {
+			return fixPaths(os.Stdout)
+		}
 		return nil
 	},
 }
@@ -81,8 +96,126 @@ func runDoctor(w io.Writer) {
 			}
 		}
 	}
+
+	reportPaths(w)
+}
+
+// lintSources returns the registered sources as pathlint inputs, with roots
+// expanded to absolute paths.
+func lintSources() ([]pathlint.Source, error) {
+	reg, err := newRegistry()
+	if err != nil {
+		return nil, err
+	}
+	list, err := reg.List()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]pathlint.Source, 0, len(list))
+	for _, s := range list {
+		out = append(out, pathlint.Source{Name: s.Name, Root: locate.ExpandHome(s.Root)})
+	}
+	return out, nil
+}
+
+// reportPaths scans registered sources and prints a summary of path-reference
+// findings. Healable findings show their suggested anchor rewrite.
+func reportPaths(w io.Writer) {
+	srcs, err := lintSources()
+	if err != nil || len(srcs) == 0 {
+		return
+	}
+	findings, err := pathlint.Scan(srcs)
+	if err != nil {
+		fmt.Fprintf(w, "\nPath lint: error scanning sources: %v\n", err)
+		return
+	}
+	// By default show only actionable findings (healable + unresolved anchors);
+	// --all also lists informational external/dead references.
+	var shown []pathlint.Finding
+	var fixable, hidden int
+	byKind := map[pathlint.Kind]int{}
+	for _, f := range findings {
+		if f.Fixable() {
+			fixable++
+		}
+		if doctorAll || f.Actionable() {
+			shown = append(shown, f)
+			byKind[f.Kind]++
+		} else {
+			hidden++
+		}
+	}
+
+	if len(shown) == 0 {
+		fmt.Fprintln(w, "\nPath references: ✓ nothing actionable")
+		if hidden > 0 {
+			fmt.Fprintf(w, "  (%d informational external/dead reference(s); see 'weft doctor --all')\n", hidden)
+		}
+		return
+	}
+
+	fmt.Fprintf(w, "\nPath references — %d shown, %d healable:\n", len(shown), fixable)
+	for _, k := range sortedKinds(byKind) {
+		fmt.Fprintf(w, "  %-20s %d\n", string(k)+":", byKind[k])
+	}
+	for _, f := range shown {
+		mark := "•"
+		if f.Fixable() {
+			mark = "✎"
+		}
+		fmt.Fprintf(w, "  %s [%s] %s:%d  %s\n", mark, f.Kind, f.File, f.Line, f.Ref)
+		if f.Fixable() {
+			fmt.Fprintf(w, "        → %s\n", f.Suggestion)
+		}
+	}
+	if hidden > 0 {
+		fmt.Fprintf(w, "  … %d informational external/dead reference(s) hidden; see 'weft doctor --all'\n", hidden)
+	}
+	if fixable > 0 && !doctorFix {
+		fmt.Fprintf(w, "\nRun 'weft doctor --fix' to rewrite the %d healable reference(s).\n", fixable)
+	}
+}
+
+// fixPaths applies the healable path rewrites and reports the result.
+func fixPaths(w io.Writer) error {
+	srcs, err := lintSources()
+	if err != nil {
+		return err
+	}
+	findings, err := pathlint.Scan(srcs)
+	if err != nil {
+		return err
+	}
+	changed, err := pathlint.Apply(findings)
+	if err != nil {
+		return err
+	}
+	var fixable int
+	for _, f := range findings {
+		if f.Fixable() {
+			fixable++
+		}
+	}
+	fmt.Fprintf(w, "\n✓ Healed %d reference(s) across %d file(s).\n", fixable, changed)
+	if changed > 0 {
+		fmt.Fprintln(w, "  Re-run 'weft profile use <name>' to re-project, and commit the source changes.")
+	}
+	return nil
+}
+
+// sortedKinds returns the kinds present in m in a stable, readable order.
+func sortedKinds(m map[pathlint.Kind]int) []pathlint.Kind {
+	kinds := make([]pathlint.Kind, 0, len(m))
+	for k := range m {
+		kinds = append(kinds, k)
+	}
+	slices.Sort(kinds)
+	return kinds
 }
 
 func init() {
+	doctorCmd.Flags().BoolVar(&doctorFix, "fix", false, "rewrite healable path references to weft anchors")
+	doctorCmd.Flags().BoolVar(&doctorAll, "all", false, "also list informational external/dead path references")
 	rootCmd.AddCommand(doctorCmd)
 }
