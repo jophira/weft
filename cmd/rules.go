@@ -23,6 +23,7 @@ var (
 	rulesRebuild    bool
 	rulesCachePath  string
 	rulesRecord     bool
+	rulesNoWork     bool
 
 	rulesBuildRoot   string
 	rulesBuildOutput string
@@ -93,7 +94,21 @@ Examples:
 				return err
 			}
 		} else {
-			fmt.Fprintln(out, layerBundles(ress))
+			bundle := layerBundles(ress)
+			// Append the repo's work-plane knowledge base (most-specific, last).
+			// Best-effort: a KB error must never break the rule bundle a hook
+			// consumes.
+			if !rulesNoWork {
+				if wb, wErr := workPlaneBundle(repoAbs); wErr != nil {
+					fmt.Fprintf(os.Stderr, "weft: work-plane knowledge skipped: %v\n", wErr)
+				} else if wb != "" {
+					if bundle != "" {
+						bundle += "\n\n"
+					}
+					bundle += wb
+				}
+			}
+			fmt.Fprintln(out, bundle)
 		}
 
 		// Persistence is opt-in and best-effort: it must never corrupt the
@@ -333,7 +348,8 @@ func init() {
 	rulesResolveCmd.Flags().BoolVar(&rulesNoCache, "no-cache", false, "bypass the signals.yaml cache and resolve from the tree")
 	rulesResolveCmd.Flags().BoolVar(&rulesRebuild, "rebuild-cache", false, "ignore any existing cache and regenerate it")
 	rulesResolveCmd.Flags().StringVar(&rulesCachePath, "cache", "", "cache file path (only with --rules-root; default: <rules-root>/signals.yaml)")
-	rulesResolveCmd.Flags().BoolVar(&rulesRecord, "record", false, "append a deduped audit record to <repo>/.weft/ and the global ~/.weft/audit rollup")
+	rulesResolveCmd.Flags().BoolVar(&rulesRecord, "record", false, "append a deduped audit record to <repo>/.weft/ and the global ~/.config/weft/audit rollup")
+	rulesResolveCmd.Flags().BoolVar(&rulesNoWork, "no-work", false, "do not append the repo's work-plane knowledge base (~/weft/work/projects/<repo>/kb)")
 
 	rulesBuildCmd.Flags().StringVar(&rulesBuildRoot, "rules-root", "", "path to the rules tree to index (required)")
 	rulesBuildCmd.Flags().StringVarP(&rulesBuildOutput, "output", "o", "", "cache output path (default: <rules-root>/signals.yaml)")

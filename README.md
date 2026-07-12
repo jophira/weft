@@ -327,11 +327,18 @@ The **work plane** (`~/weft/work/`) is weft-owned: `projects/<repo>/` (per-repo
 knowledge base), `tickets/<TICKET>/`, `plans/`, and `inbox/`.
 
 ```
-weft init                 # scaffold the homes (idempotent — safe to re-run)
+weft init                 # scaffold the homes + templates (idempotent — safe to re-run)
 weft migrate              # relocate a pre-existing layout into ~/weft (non-destructive)
 weft migrate --docs       # also consolidate ~/docs under ~/weft/docs
 weft docs adopt           # consolidate docs on its own
+weft ticket new DIGI-123  # scaffold a ticket folder from ~/weft/templates
+weft ticket list          # list scaffolded tickets
 ```
+
+**Project knowledge auto-loads by repo identity.** `weft rules resolve` appends
+every Markdown file under `~/weft/work/projects/<repo>/kb/` to the assembled rule
+bundle, keyed by the repository's name — so a session hook feeds project context
+into any harness with no per-harness wiring. Opt out with `--no-work`.
 
 `weft migrate` moves content (never deletes), refuses to clobber a populated
 destination, and leaves a symlink bridge at the old path so existing references

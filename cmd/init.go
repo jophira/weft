@@ -121,6 +121,20 @@ pre-migration layout is left untouched — run 'weft migrate' to relocate it.`,
 			}
 		}
 
+		// Seed work-plane templates, each written once and never overwritten so
+		// edits survive re-running init.
+		for name, body := range seedTemplates {
+			tp := filepath.Join(l.Templates, name)
+			if fileExists(tp) {
+				continue
+			}
+			if err := os.WriteFile(tp, []byte(body), 0o644); err != nil { //nolint:gosec // weft-owned home
+				return fmt.Errorf("writing template %s: %w", tp, err)
+			}
+			fmt.Fprintf(out, "  created  %s\n", tp)
+			created++
+		}
+
 		// Home README: written once, never overwritten (idempotency).
 		readme := filepath.Join(l.Home, "README.md")
 		if l.Home != "" && !fileExists(readme) {
