@@ -11,7 +11,6 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
-	"github.com/jophira/weft/internal/config"
 	"github.com/jophira/weft/internal/harness"
 	"github.com/jophira/weft/internal/manifest"
 )
@@ -58,9 +57,9 @@ to apply the current profile to a second harness, or recover from a failed apply
 			return fmt.Errorf("no active profile — run 'weft profile use <name>' first")
 		}
 
-		cfgDir, err := config.DefaultDir()
-		if err != nil {
-			return err
+		cfgDir := configDir()
+		if cfgDir == "" {
+			return fmt.Errorf("resolving config directory")
 		}
 		stagedDir := filepath.Join(cfgDir, "staged", activeName)
 		if _, err := os.Stat(stagedDir); err != nil {
@@ -95,9 +94,9 @@ var targetBackupsCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		harnessName := args[0]
-		cfgDir, err := config.DefaultDir()
-		if err != nil {
-			return err
+		cfgDir := configDir()
+		if cfgDir == "" {
+			return fmt.Errorf("resolving config directory")
 		}
 		backupsDir := filepath.Join(cfgDir, "backups", harnessName)
 		entries, err := os.ReadDir(backupsDir)
@@ -148,9 +147,9 @@ the next apply will treat them as externally owned.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		harnessName := args[0]
-		cfgDir, err := config.DefaultDir()
-		if err != nil {
-			return err
+		cfgDir := configDir()
+		if cfgDir == "" {
+			return fmt.Errorf("resolving config directory")
 		}
 
 		// Load manifest to find targetRoot.

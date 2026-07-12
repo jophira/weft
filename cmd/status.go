@@ -12,7 +12,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/jophira/weft/internal/config"
 	"github.com/jophira/weft/internal/instruction"
 	"github.com/jophira/weft/internal/locate"
 	"github.com/jophira/weft/internal/manifest"
@@ -39,9 +38,9 @@ from what weft last wrote (i.e. was edited outside weft).
 Use --short for a single-line summary suitable for a shell prompt or a harness
 status line (e.g. Claude Code's statusLine command).`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfgDir, err := config.DefaultDir()
-		if err != nil {
-			return fmt.Errorf("locating config dir: %w", err)
+		cfgDir := configDir()
+		if cfgDir == "" {
+			return fmt.Errorf("resolving config directory")
 		}
 		statuses, err := collectHarnessStatus(cfgDir)
 		if err != nil {
