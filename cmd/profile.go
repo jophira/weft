@@ -28,6 +28,7 @@ import (
 	"github.com/jophira/weft/internal/pidlock"
 	"github.com/jophira/weft/internal/profile"
 	"github.com/jophira/weft/internal/rules"
+	"github.com/jophira/weft/internal/runstate"
 	"github.com/jophira/weft/internal/source"
 	"github.com/jophira/weft/internal/validate"
 	"github.com/jophira/weft/internal/watch"
@@ -621,6 +622,38 @@ var profileListCmd = &cobra.Command{
 	},
 }
 
+var profileCurrentQuiet bool
+
+var profileCurrentCmd = &cobra.Command{
+	Use:   "current",
+	Short: "Print the active profile (no apply, no watcher)",
+	Long: `Print the name of the currently active profile, read fresh from config.yaml,
+and exit. Unlike 'weft profile list' it has no side effects and does not start a
+watcher — handy for confirming state after a hot-swap hand-off.
+
+With --quiet, print only the bare name (or nothing when none is active), suitable
+for scripting.`,
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		active, err := config.ReadActiveProfile()
+		if err != nil {
+			return err
+		}
+		if profileCurrentQuiet {
+			if active != "" {
+				fmt.Println(active)
+			}
+			return nil
+		}
+		if active == "" {
+			fmt.Println("No active profile. Activate one with: weft profile use <name>")
+			return nil
+		}
+		fmt.Println(active)
+		return nil
+	},
+}
+
 var profileUseCmd = &cobra.Command{
 	Use:   "use <name>",
 	Short: "Activate a profile: merge sources and apply to the target harness",
@@ -653,7 +686,7 @@ watcher to switch profiles.`,
 		if !profileNoWatch {
 			lock, lockErr := pidlock.Acquire(filepath.Join(cfgDir, "weft.lock"))
 			if errors.Is(lockErr, pidlock.ErrLocked) {
-				return handOffToRunningWatcher(name)
+				return handOffToRunningWatcher(cfgDir, name)
 			}
 			if lockErr != nil {
 				return lockErr
@@ -694,19 +727,43 @@ watcher to switch profiles.`,
 	},
 }
 
+// writeRunState publishes the watcher's runstate sidecar (best-effort). A write
+// failure is logged but never aborts the watcher — the sidecar is advisory.
+func writeRunState(cfgDir, profileName string) {
+	if err := runstate.Write(cfgDir, runstate.RunState{
+		PID:       os.Getpid(),
+		Profile:   profileName,
+		ConfigDir: cfgDir,
+		StartedAt: time.Now().UTC(),
+	}); err != nil {
+		slog.Warn("writing watcher runstate", slog.Any("error", err))
+	}
+}
+
 // handOffToRunningWatcher persists name as the active profile so a weft watcher
 // already running (holding the singleton lock) picks it up via its config.yaml
 // watch and hot-swaps to it. The profile is resolved first so typos fail fast
 // here rather than silently in the other process.
-func handOffToRunningWatcher(name string) error {
+func handOffToRunningWatcher(cfgDir, name string) error {
 	if _, _, _, err := resolveProfileRoots(name); err != nil {
 		return err
 	}
 	if err := config.SetActiveProfile(name); err != nil {
 		return fmt.Errorf("handing off to running watcher: %w", err)
 	}
-	fmt.Printf("✓ A weft watcher is already running — handed %q off to it; it will switch and re-apply.\n", name)
+	fmt.Printf("✓ Handed %q off to the running weft watcher%s — it will switch and re-apply.\n",
+		name, runningWatcherSuffix(cfgDir))
 	return nil
+}
+
+// runningWatcherSuffix returns a parenthetical describing the live watcher
+// (pid, current profile) for user-facing messages, or "" when none is known.
+func runningWatcherSuffix(cfgDir string) string {
+	rs, err := runstate.Read(cfgDir)
+	if err != nil || rs == nil {
+		return ""
+	}
+	return fmt.Sprintf(" (pid %d, was serving %q)", rs.PID, rs.Profile)
 }
 
 // runWatchLoop keeps weft running, re-applying on source changes and writing
@@ -743,6 +800,12 @@ func runWatchLoop(name string, p *profile.Profile, roots []string, srcs []source
 		return err
 	}
 
+	// Publish watcher runstate so other commands can report "already running"
+	// with detail and `weft status` can show it. Best-effort: a failure to
+	// write the sidecar must not stop the watcher.
+	writeRunState(cfgDir, current)
+	defer func() { _ = runstate.Clear(cfgDir) }()
+
 	for {
 		select {
 		case <-sig:
@@ -778,6 +841,7 @@ func runWatchLoop(name string, p *profile.Profile, roots []string, srcs []source
 			if stopWatchers, err = startProfileWatchers(p, roots, srcs, cfgDir); err != nil {
 				return err
 			}
+			writeRunState(cfgDir, current) // reflect the new profile in runstate
 			fmt.Printf("\n[weft] profile switched → %s\n", current)
 			if resolvedTargets := p.ResolvedTargets(); len(resolvedTargets) > 0 {
 				fmt.Printf("[weft] targets: %s\n", strings.Join(resolvedTargets, ", "))
@@ -1238,10 +1302,13 @@ func init() {
 		profileCreateCmd,
 		profileUseCmd,
 		profileListCmd,
+		profileCurrentCmd,
 		profileInspectCmd,
 		profileDiffCmd,
 		profileDeleteCmd,
 	)
+
+	profileCurrentCmd.Flags().BoolVarP(&profileCurrentQuiet, "quiet", "q", false, "print only the bare profile name")
 
 	profileCreateCmd.Flags().StringVar(&profileSources, "sources", "", "comma-separated source names (required)")
 	profileCreateCmd.Flags().StringVar(&profileOverlay, "overlay", "cascade", "cascade|merge|last-wins")
