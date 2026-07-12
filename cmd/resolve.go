@@ -8,7 +8,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/jophira/weft/internal/config"
 	"github.com/jophira/weft/internal/locate"
 	"github.com/jophira/weft/internal/manifest"
 	"github.com/jophira/weft/internal/source"
@@ -32,9 +31,9 @@ Examples:
 			return fmt.Errorf("resolving path: %w", err)
 		}
 
-		cfgDir, err := config.DefaultDir()
-		if err != nil {
-			return fmt.Errorf("locating config dir: %w", err)
+		cfgDir := configDir()
+		if cfgDir == "" {
+			return fmt.Errorf("resolving config directory")
 		}
 
 		m, rel, err := findManifest(cfgDir, targetPath)
