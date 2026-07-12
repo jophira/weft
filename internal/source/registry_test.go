@@ -161,3 +161,31 @@ func TestExpandHome_noTilde(t *testing.T) {
 		t.Errorf("ExpandHome(%q) = %q, want unchanged", path, got)
 	}
 }
+
+// ── Update ───────────────────────────────────────────────────────────────────
+
+func TestUpdate_overwritesExisting(t *testing.T) {
+	r := newReg(t)
+	if err := r.Add(fixture("work")); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	s := fixture("work")
+	s.Root = "/new/location/work"
+	if err := r.Update(s); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	got, err := r.Get("work")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if locate.ExpandHome(got.Root) != "/new/location/work" {
+		t.Errorf("Root = %q, want /new/location/work", got.Root)
+	}
+}
+
+func TestUpdate_absentReturnsError(t *testing.T) {
+	r := newReg(t)
+	if err := r.Update(fixture("ghost")); err == nil {
+		t.Fatal("Update on absent source: expected error, got nil")
+	}
+}

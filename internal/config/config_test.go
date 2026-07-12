@@ -25,9 +25,10 @@ func TestDefaultDir_containsHome(t *testing.T) {
 
 // ── Defaults ──────────────────────────────────────────────────────────────────
 
-// TestDefaults_subdirsUnderWeft verifies the ADR-0003 split: authored content
-// (sources, profiles) defaults under the workbench ~/weft; engine-room state
-// (hooks, audit) stays under ~/.config/weft.
+// TestDefaults_subdirsUnderWeft verifies the ADR-0003 split: WeftHome is the
+// workbench (~/weft) that holds source *content* and the work plane, while
+// bookkeeping (registry, profile defs, hooks, audit) stays engine-room under
+// ~/.config/weft.
 func TestDefaults_subdirsUnderWeft(t *testing.T) {
 	c, err := config.Defaults()
 	if err != nil {
@@ -38,11 +39,12 @@ func TestDefaults_subdirsUnderWeft(t *testing.T) {
 	if c.WeftHome != home {
 		t.Errorf("WeftHome = %q, want %q", c.WeftHome, home)
 	}
-	if c.SourcesDir != filepath.Join(home, "sources") {
-		t.Errorf("SourcesDir = %q, want %q", c.SourcesDir, filepath.Join(home, "sources"))
+	// Registry + profile definitions are engine-room, not workbench.
+	if c.SourcesDir != filepath.Join(dir, "sources") {
+		t.Errorf("SourcesDir = %q, want %q", c.SourcesDir, filepath.Join(dir, "sources"))
 	}
-	if c.ProfilesDir != filepath.Join(home, "profiles") {
-		t.Errorf("ProfilesDir = %q, want %q", c.ProfilesDir, filepath.Join(home, "profiles"))
+	if c.ProfilesDir != filepath.Join(dir, "profiles") {
+		t.Errorf("ProfilesDir = %q, want %q", c.ProfilesDir, filepath.Join(dir, "profiles"))
 	}
 	if c.HooksDir != filepath.Join(dir, "hooks") {
 		t.Errorf("HooksDir = %q, want %q", c.HooksDir, filepath.Join(dir, "hooks"))

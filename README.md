@@ -318,17 +318,21 @@ without recompiling.
 
 Weft splits its state into two homes (see ADR 0003):
 
-| Home | Holds | Test |
-|---|---|---|
-| `~/weft/` (workbench) | `sources/`, `profiles/`, `templates/`, `docs/`, `work/` — content you author, edit, and share | losing it loses authored work |
-| `~/.config/weft/` (engine room) | `config.yaml`, `staged/`, `hooks/`, `audit/` — regenerable machine state | re-running weft rebuilds it |
+| Home | Holds |
+|---|---|
+| `~/weft/` (workbench) | `sources/<name>/` (source **content** repos), `templates/`, `docs/`, `work/` — what you author, edit, and share |
+| `~/.config/weft/` (engine room) | `config.yaml`, `sources/*.yaml` (registry pointers), `profiles/*.yaml`, `staged/`, `hooks/`, `audit/` — bookkeeping weft manages |
 
-The **work plane** (`~/weft/work/`) is weft-owned: `projects/<repo>/` (per-repo
-knowledge base), `tickets/<TICKET>/`, `plans/`, and `inbox/`.
+A source has two parts: the **registry** (a tiny `<name>.yaml` pointer, engine-room)
+and its **content** (the repo, workbench). The **work plane** (`~/weft/work/`) is
+weft-owned: `projects/<repo>/` (per-repo knowledge base), `tickets/<TICKET>/`,
+`plans/`, and `inbox/`.
 
 ```
 weft init                 # scaffold the homes + templates (idempotent — safe to re-run)
-weft migrate              # relocate a pre-existing layout into ~/weft (non-destructive)
+weft source relocate <n>  # move a source's content into ~/weft/sources/<n> (registry repointed, bridged)
+weft source rename <o> <n># rename a source AND rewrite every profile that references it
+weft migrate              # relocate all registered sources' content into ~/weft (non-destructive)
 weft migrate --docs       # also consolidate ~/docs under ~/weft/docs
 weft docs adopt           # consolidate docs on its own
 weft ticket new DIGI-123  # scaffold a ticket folder from ~/weft/templates

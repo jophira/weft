@@ -272,9 +272,11 @@ func initConfig() {
 	viper.AutomaticEnv()
 	_ = viper.ReadInConfig()
 
-	// weft_home is the consumer-facing workbench root (ADR 0003). With --config we
-	// keep it under baseDir so a custom config fully isolates state (and the
-	// isolation tests keep passing); otherwise it defaults to ~/weft.
+	// weft_home is the consumer-facing workbench root (ADR 0003): source *content*
+	// (~/weft/sources/<name>, via 'weft source relocate'), the work plane, and
+	// docs. With --config we keep it under baseDir so a custom config fully
+	// isolates state (and the isolation tests keep passing); otherwise it defaults
+	// to ~/weft.
 	weftHomeDefault := baseDir
 	if cfgFile == "" {
 		if h, err := config.DefaultHome(); err == nil {
@@ -282,14 +284,15 @@ func initConfig() {
 		}
 	}
 	viper.SetDefault("weft_home", weftHomeDefault)
-	weftHome := viper.GetString("weft_home")
 
-	// Authored content (sources, profiles) defaults under the workbench; but if
-	// the pre-ADR-0003 location under baseDir still holds content and the new one
-	// does not, fall back to it so upgrades never lose sight of existing sources
-	// until `weft migrate` moves them.
-	viper.SetDefault("sources_dir", legacyAwareDir(filepath.Join(weftHome, "sources"), filepath.Join(baseDir, "sources")))
-	viper.SetDefault("profiles_dir", legacyAwareDir(filepath.Join(weftHome, "profiles"), filepath.Join(baseDir, "profiles")))
+	// sources_dir and profiles_dir are weft's *bookkeeping* — the source registry
+	// (tiny *.yaml pointer files) and profile definitions — not bulky authored
+	// content. They stay engine-room under baseDir. (Consumer-facing source
+	// *content* lives at weft_home/sources/<name>, reached via each registry
+	// entry's root; keeping the registry here avoids colliding the pointer files
+	// with the content dirs.)
+	viper.SetDefault("sources_dir", filepath.Join(baseDir, "sources"))
+	viper.SetDefault("profiles_dir", filepath.Join(baseDir, "profiles"))
 
 	// Engine-room state stays under baseDir. audit_dir folds in the pre-ADR-0003
 	// stray ~/.weft/audit (used for reads until migrated).

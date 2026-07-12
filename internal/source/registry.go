@@ -35,14 +35,30 @@ func (r *FileRegistry) Add(s Source) error {
 			s.Name,
 		)
 	}
+	if _, err := os.Stat(r.filePath(s.Name)); err == nil {
+		return fmt.Errorf("source %q already exists — use 'weft source remove %s' first", s.Name, s.Name)
+	}
+	return r.write(s)
+}
+
+// Update overwrites an existing source's YAML (e.g. after relocating its root).
+// Errors if the source does not already exist — use Add to create.
+func (r *FileRegistry) Update(s Source) error {
+	if _, err := os.Stat(r.filePath(s.Name)); err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("source %q not found", s.Name)
+		}
+		return fmt.Errorf("checking source %q: %w", s.Name, err)
+	}
+	return r.write(s)
+}
+
+// write normalises and persists a source YAML, creating the directory as needed.
+// Shared by Add (create) and Update (overwrite).
+func (r *FileRegistry) write(s Source) error {
 	if err := os.MkdirAll(r.dir, 0o755); err != nil {
 		return fmt.Errorf("creating sources directory: %w", err)
 	}
-	p := r.filePath(s.Name)
-	if _, err := os.Stat(p); err == nil {
-		return fmt.Errorf("source %q already exists — use 'weft source remove %s' first", s.Name, s.Name)
-	}
-
 	// Normalise root to ~/… for portability across machines.
 	s.Root = locate.Tilde(s.Root)
 	if s.Branch == "" {
@@ -51,12 +67,11 @@ func (r *FileRegistry) Add(s Source) error {
 	if s.Structure.isZero() {
 		s.Structure = DefaultStructure()
 	}
-
 	data, err := yaml.Marshal(&s)
 	if err != nil {
 		return fmt.Errorf("serialising source: %w", err)
 	}
-	return os.WriteFile(p, data, 0o644)
+	return os.WriteFile(r.filePath(s.Name), data, 0o644)
 }
 
 // Remove deletes the source YAML file.

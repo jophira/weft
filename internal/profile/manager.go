@@ -46,18 +46,35 @@ func (m *FileManager) Create(p Profile) error {
 	if err := validateWriteBack(p.WriteBack, p.Sources); err != nil {
 		return err
 	}
+	if _, err := os.Stat(m.filePath(p.Name)); err == nil {
+		return fmt.Errorf("profile %q already exists — use 'weft profile delete %s' first", p.Name, p.Name)
+	}
+	return m.write(p)
+}
+
+// Update overwrites an existing profile's YAML (e.g. after a source it
+// references is renamed). Errors if the profile does not exist — use Create.
+func (m *FileManager) Update(p Profile) error {
+	if _, err := os.Stat(m.filePath(p.Name)); err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("profile %q not found", p.Name)
+		}
+		return fmt.Errorf("checking profile %q: %w", p.Name, err)
+	}
+	return m.write(p)
+}
+
+// write persists a profile YAML, creating the directory as needed. Shared by
+// Create (create) and Update (overwrite).
+func (m *FileManager) write(p Profile) error {
 	if err := os.MkdirAll(m.dir, 0o755); err != nil {
 		return fmt.Errorf("creating profiles directory: %w", err)
-	}
-	p2 := m.filePath(p.Name)
-	if _, err := os.Stat(p2); err == nil {
-		return fmt.Errorf("profile %q already exists — use 'weft profile delete %s' first", p.Name, p.Name)
 	}
 	data, err := yaml.Marshal(&p)
 	if err != nil {
 		return fmt.Errorf("serialising profile: %w", err)
 	}
-	return os.WriteFile(p2, data, 0o644)
+	return os.WriteFile(m.filePath(p.Name), data, 0o644)
 }
 
 // Delete removes the profile YAML file.

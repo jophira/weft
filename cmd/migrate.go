@@ -9,6 +9,8 @@ import (
 
 	"github.com/jophira/weft/internal/config"
 	"github.com/jophira/weft/internal/homemove"
+	"github.com/jophira/weft/internal/locate"
+	"github.com/jophira/weft/internal/source"
 )
 
 var (
@@ -19,15 +21,17 @@ var (
 var migrateCmd = &cobra.Command{
 	Use:   "migrate",
 	Short: "Relocate weft state to the ADR-0003 home layout",
-	Long: `Consolidate weft's sprawled state into the two-home layout (ADR 0003):
+	Long: `Consolidate weft into the two-home layout (ADR 0003):
 
-  sources   -> ~/weft/sources        (out of the hidden ~/.config dotfile)
-  profiles  -> ~/weft/profiles
-  audit     -> ~/.config/weft/audit   (folds in the stray ~/.weft/audit)
+  source content  -> ~/weft/sources/<name>   (each registered source, out of
+                                               wherever its repo currently lives)
+  audit           -> ~/.config/weft/audit     (folds in the stray ~/.weft/audit)
 
 Migration is non-destructive: content is moved (never deleted), a populated
 destination is refused rather than clobbered, and a symlink bridge is left at the
 old path so existing absolute references keep resolving. Re-running is a no-op.
+The registry and profile definitions stay in the engine room (~/.config/weft) —
+only bulky content moves.
 
 Add --docs to also consolidate ~/docs under ~/weft/docs (see 'weft docs adopt').`,
 	Args: cobra.NoArgs,
@@ -38,26 +42,31 @@ Add --docs to also consolidate ~/docs under ~/weft/docs (see 'weft docs adopt').
 			return fmt.Errorf("cannot resolve weft home directory")
 		}
 
-		// Folding the machine-wide ~/.weft/audit is a global operation. Under a
-		// custom --config weft is fully isolated, so skip it — never reach into the
-		// real HOME from an isolated run.
-		auditSrc := ""
-		if cfgFile == "" {
-			auditSrc = legacyGlobalAuditDir()
+		var problems int
+
+		// Relocate each registered source's content into ~/weft/sources/<name>.
+		reg, err := newRegistry()
+		if err != nil {
+			return err
 		}
-		moves := []struct {
-			label, src, dst, configKey string
-			bridge                     bool
-		}{
-			{"sources", currentSourcesDir(), filepath.Join(home, "sources"), "sources_dir", true},
-			{"profiles", currentProfilesDir(), filepath.Join(home, "profiles"), "profiles_dir", true},
-			{"audit", auditSrc, filepath.Join(configDir(), "audit"), "", false},
+		srcs, err := reg.List()
+		if err != nil {
+			return fmt.Errorf("listing sources: %w", err)
+		}
+		for _, s := range srcs {
+			dst := filepath.Join(home, "sources", s.Name)
+			if err := migrateSource(out, reg, s.Name, locate.ExpandHome(s.Root), dst); err != nil {
+				fmt.Fprintf(out, "  ! %s: %v\n", s.Name, err)
+				problems++
+			}
 		}
 
-		var problems int
-		for _, m := range moves {
-			if err := migrateOne(out, m.label, m.src, m.dst, m.bridge, m.configKey); err != nil {
-				fmt.Fprintf(out, "  ! %s: %v\n", m.label, err)
+		// Fold the machine-wide ~/.weft/audit. This is a global operation, so skip
+		// it under a custom --config (which is fully isolated — never reach into the
+		// real HOME from an isolated run).
+		if cfgFile == "" {
+			if err := migrateAudit(out, legacyGlobalAuditDir(), filepath.Join(configDir(), "audit")); err != nil {
+				fmt.Fprintf(out, "  ! audit: %v\n", err)
 				problems++
 			}
 		}
@@ -81,42 +90,57 @@ Add --docs to also consolidate ~/docs under ~/weft/docs (see 'weft docs adopt').
 	},
 }
 
-// migrateOne relocates one item and, on a real (non-dry-run) move, repoints the
-// given config key at the destination so future runs resolve there directly.
-func migrateOne(out io.Writer, label, src, dst string, bridge bool, configKey string) error {
-	if src == "" {
-		return nil
-	}
+// migrateSource relocates one registered source's content into the workbench,
+// honouring --dry-run.
+func migrateSource(out io.Writer, reg *source.FileRegistry, name, src, dst string) error {
 	if migrateDryRun {
 		switch {
 		case src == dst:
-			fmt.Fprintf(out, "  %-9s already at %s\n", label, dst)
+			fmt.Fprintf(out, "  source %-12s already at %s\n", name, dst)
 		case dirExists(src):
-			fmt.Fprintf(out, "  %-9s would move %s -> %s\n", label, src, dst)
+			fmt.Fprintf(out, "  source %-12s would relocate %s -> %s\n", name, src, dst)
 		default:
-			fmt.Fprintf(out, "  %-9s nothing to move (%s absent)\n", label, src)
+			fmt.Fprintf(out, "  source %-12s nothing to move (%s absent)\n", name, src)
 		}
 		return nil
 	}
-
-	res, err := homemove.Move(src, dst, bridge)
+	res, err := relocateSource(reg, name, dst)
 	if err != nil {
 		return err
 	}
-	switch {
-	case res.Moved:
+	if res.Moved {
 		bridged := ""
 		if res.Bridged {
-			bridged = fmt.Sprintf(" (bridge left at %s)", src)
+			bridged = fmt.Sprintf(" (bridge at %s)", src)
 		}
-		fmt.Fprintf(out, "  %-9s moved -> %s%s\n", label, dst, bridged)
-		if configKey != "" {
-			if err := config.SetPath(configKey, dst); err != nil {
-				return fmt.Errorf("moved, but failed to persist %s: %w", configKey, err)
-			}
+		fmt.Fprintf(out, "  source %-12s relocated -> %s%s\n", name, dst, bridged)
+	} else {
+		fmt.Fprintf(out, "  source %-12s %s\n", name, res.SkipReason)
+	}
+	return nil
+}
+
+// migrateAudit folds the legacy global audit dir into the engine-room location.
+func migrateAudit(out io.Writer, src, dst string) error {
+	if migrateDryRun {
+		switch {
+		case src == dst:
+			fmt.Fprintf(out, "  audit        already at %s\n", dst)
+		case dirExists(src):
+			fmt.Fprintf(out, "  audit        would move %s -> %s\n", src, dst)
+		default:
+			fmt.Fprintf(out, "  audit        nothing to move (%s absent)\n", src)
 		}
-	default:
-		fmt.Fprintf(out, "  %-9s %s\n", label, res.SkipReason)
+		return nil
+	}
+	res, err := homemove.Move(src, dst, false)
+	if err != nil {
+		return err
+	}
+	if res.Moved {
+		fmt.Fprintf(out, "  audit        moved -> %s\n", dst)
+	} else {
+		fmt.Fprintf(out, "  audit        %s\n", res.SkipReason)
 	}
 	return nil
 }

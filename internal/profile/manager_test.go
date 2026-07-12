@@ -380,3 +380,29 @@ func TestList_ignoresNonYAMLFiles(t *testing.T) {
 		}
 	}
 }
+
+// ── Update ───────────────────────────────────────────────────────────────────
+
+func TestUpdate_overwritesExisting(t *testing.T) {
+	m := profile.NewFileManager(t.TempDir())
+	if err := m.Create(profile.Profile{Name: "p", Sources: []string{"a"}, Overlay: profile.OverlayCascade}); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := m.Update(profile.Profile{Name: "p", Sources: []string{"b"}, Overlay: profile.OverlayCascade}); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	got, err := m.Get("p")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if len(got.Sources) != 1 || got.Sources[0] != "b" {
+		t.Errorf("Sources = %v, want [b]", got.Sources)
+	}
+}
+
+func TestUpdate_absentReturnsError(t *testing.T) {
+	m := profile.NewFileManager(t.TempDir())
+	if err := m.Update(profile.Profile{Name: "ghost", Sources: []string{"a"}, Overlay: profile.OverlayCascade}); err == nil {
+		t.Fatal("Update on absent profile: expected error, got nil")
+	}
+}
