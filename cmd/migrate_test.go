@@ -8,24 +8,22 @@ import (
 
 	"github.com/spf13/viper"
 
+	"github.com/jophira/weft/internal/source"
 	"github.com/jophira/weft/internal/testenv"
 )
 
-// withRelocatableConfig sets up a config where weft_home and the sources/profiles
-// locations differ, so `weft migrate` has real work to do. Returns (base, home).
+// withRelocatableConfig sets up a config whose weft_home differs from the
+// engine-room base, so `weft migrate` has real content to relocate. HOME is
+// isolated so the global-audit lookup never touches the real ~/.weft.
+// Returns (base, home) where home == weft_home.
 func withRelocatableConfig(t *testing.T) (base, home string) {
 	t.Helper()
 	base = t.TempDir()
-	testenv.SetHome(t, base) // isolate legacyGlobalAuditDir()'s ~/.weft lookup
+	testenv.SetHome(t, base)
 	home = filepath.Join(base, "weft")
-	legacySources := filepath.Join(base, "legacy", "sources")
-	legacyProfiles := filepath.Join(base, "legacy", "profiles")
 
 	cfg := filepath.Join(base, "config.yaml")
-	body := "weft_home: " + home + "\n" +
-		"sources_dir: " + legacySources + "\n" +
-		"profiles_dir: " + legacyProfiles + "\n"
-	if err := os.WriteFile(cfg, []byte(body), 0o644); err != nil {
+	if err := os.WriteFile(cfg, []byte("weft_home: "+home+"\n"), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 
@@ -43,45 +41,48 @@ func withRelocatableConfig(t *testing.T) (base, home string) {
 	return base, home
 }
 
-func TestMigrate_movesSourcesAndBridges(t *testing.T) {
+// seedSource registers a source named `name` with content at base/external/name.
+func seedSource(t *testing.T, base, name, file, content string) string {
+	t.Helper()
+	root := filepath.Join(base, "external", name)
+	writeFileT(t, filepath.Join(root, file), content)
+	reg, err := newRegistry()
+	if err != nil {
+		t.Fatalf("registry: %v", err)
+	}
+	if err := reg.Add(source.Source{Name: name, Root: root}); err != nil {
+		t.Fatalf("add source: %v", err)
+	}
+	return root
+}
+
+func TestMigrate_relocatesRegisteredSourceContent(t *testing.T) {
 	base, home := withRelocatableConfig(t)
-	legacySources := filepath.Join(base, "legacy", "sources")
-	if err := os.MkdirAll(legacySources, 0o755); err != nil {
-		t.Fatalf("mkdir legacy: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(legacySources, "team.md"), []byte("rules"), 0o644); err != nil {
-		t.Fatalf("seed source: %v", err)
-	}
+	root := seedSource(t, base, "team", "CLAUDE.md", "rules")
 
 	runCmd(t, migrateCmd, nil)
 
-	// Content is now under the workbench, reachable via the old path's bridge.
-	newPath := filepath.Join(home, "sources", "team.md")
-	if got, _ := os.ReadFile(newPath); string(got) != "rules" {
-		t.Errorf("sources not moved to %s: %q", newPath, got)
+	// Content now under the workbench, reachable via the old path's bridge.
+	dst := filepath.Join(home, "sources", "team")
+	if got, _ := os.ReadFile(filepath.Join(dst, "CLAUDE.md")); string(got) != "rules" {
+		t.Errorf("content not relocated to %s", dst)
 	}
-	if got, _ := os.ReadFile(filepath.Join(legacySources, "team.md")); string(got) != "rules" {
-		t.Errorf("bridge symlink at old sources path does not resolve")
+	if got, _ := os.ReadFile(filepath.Join(root, "CLAUDE.md")); string(got) != "rules" {
+		t.Errorf("bridge symlink at old root does not resolve")
 	}
-
-	// Config was repointed at the new location.
-	data, _ := os.ReadFile(filepath.Join(base, "config.yaml"))
-	if !strings.Contains(string(data), filepath.Join(home, "sources")) {
-		t.Errorf("config sources_dir not repointed:\n%s", data)
+	// Registry entry repointed at the new root.
+	reg, _ := newRegistry()
+	s, _ := reg.Get("team")
+	if filepath.Clean(expandTilde(t, s.Root)) != dst {
+		t.Errorf("registry root = %q, want %q", s.Root, dst)
 	}
 }
 
 func TestMigrate_idempotentSecondRun(t *testing.T) {
 	base, _ := withRelocatableConfig(t)
-	legacySources := filepath.Join(base, "legacy", "sources")
-	if err := os.MkdirAll(legacySources, 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(legacySources, "a.md"), []byte("x"), 0o644); err != nil {
-		t.Fatalf("seed: %v", err)
-	}
+	seedSource(t, base, "team", "a.md", "x")
+
 	runCmd(t, migrateCmd, nil)
-	// Re-init so viper reflects the repointed config, then migrate again.
 	viper.Reset()
 	initConfig()
 	out := runCmd(t, migrateCmd, nil)
@@ -93,22 +94,16 @@ func TestMigrate_idempotentSecondRun(t *testing.T) {
 func TestMigrate_dryRunChangesNothing(t *testing.T) {
 	base, home := withRelocatableConfig(t)
 	migrateDryRun = true
-	legacySources := filepath.Join(base, "legacy", "sources")
-	if err := os.MkdirAll(legacySources, 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(legacySources, "a.md"), []byte("x"), 0o644); err != nil {
-		t.Fatalf("seed: %v", err)
-	}
+	root := seedSource(t, base, "team", "a.md", "x")
 
 	out := runCmd(t, migrateCmd, nil)
 	if !strings.Contains(out, "dry run complete") {
 		t.Errorf("expected dry-run summary, got:\n%s", out)
 	}
-	if dirExists(filepath.Join(home, "sources")) {
+	if dirExists(filepath.Join(home, "sources", "team")) {
 		t.Errorf("dry run created the destination")
 	}
-	if got, _ := os.ReadFile(filepath.Join(legacySources, "a.md")); string(got) != "x" {
+	if got, _ := os.ReadFile(filepath.Join(root, "a.md")); string(got) != "x" {
 		t.Errorf("dry run disturbed the source")
 	}
 }
@@ -120,13 +115,8 @@ func TestMigrate_dryRunChangesNothing(t *testing.T) {
 func TestMigrate_configIsolationLeavesGlobalAuditUntouched(t *testing.T) {
 	base, _ := withRelocatableConfig(t) // sets HOME = base, cfgFile != ""
 	globalAudit := filepath.Join(base, ".weft", "audit")
-	if err := os.MkdirAll(globalAudit, 0o755); err != nil {
-		t.Fatalf("seed global audit: %v", err)
-	}
 	roll := filepath.Join(globalAudit, "2026-07.jsonl")
-	if err := os.WriteFile(roll, []byte("{}\n"), 0o644); err != nil {
-		t.Fatalf("seed rollup: %v", err)
-	}
+	writeFileT(t, roll, "{}\n")
 
 	runCmd(t, migrateCmd, nil)
 
@@ -137,7 +127,6 @@ func TestMigrate_configIsolationLeavesGlobalAuditUntouched(t *testing.T) {
 
 func TestDocsAdopt_setsDocsDirWhenNoDocsYet(t *testing.T) {
 	base, home := withRelocatableConfig(t)
-	// docsDir() defaults to $HOME/docs (= base/docs), which does not exist here.
 	runCmd(t, docsAdoptCmd, nil)
 
 	adopted := filepath.Join(home, "docs")
@@ -148,4 +137,14 @@ func TestDocsAdopt_setsDocsDirWhenNoDocsYet(t *testing.T) {
 	if !strings.Contains(string(data), adopted) {
 		t.Errorf("docs_dir not persisted:\n%s", data)
 	}
+}
+
+// expandTilde resolves a possibly ~-prefixed registry root for comparison.
+func expandTilde(t *testing.T, p string) string {
+	t.Helper()
+	if strings.HasPrefix(p, "~/") {
+		home, _ := os.UserHomeDir()
+		return filepath.Join(home, p[2:])
+	}
+	return p
 }

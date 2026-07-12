@@ -97,7 +97,51 @@ func runDoctor(w io.Writer) {
 		}
 	}
 
+	reportProfileIntegrity(w)
 	reportPaths(w)
+}
+
+// reportProfileIntegrity flags profiles that reference a source name which is
+// not registered — the silent-orphan failure a source rename/removal causes —
+// and points at the fix. Reads only; the fix is offered, not applied.
+func reportProfileIntegrity(w io.Writer) {
+	pm, err := newProfileManager()
+	if err != nil {
+		return
+	}
+	profiles, err := pm.List()
+	if err != nil || len(profiles) == 0 {
+		return
+	}
+	reg, err := newRegistry()
+	if err != nil {
+		return
+	}
+	srcs, err := reg.List()
+	if err != nil {
+		return
+	}
+	known := make(map[string]bool, len(srcs))
+	for _, s := range srcs {
+		known[s.Name] = true
+	}
+
+	var problems []string
+	for _, p := range profiles {
+		for _, src := range p.Sources {
+			if !known[src] {
+				problems = append(problems, fmt.Sprintf("  ✗ profile %q references unregistered source %q", p.Name, src))
+			}
+		}
+	}
+	if len(problems) == 0 {
+		return
+	}
+	fmt.Fprintln(w, "\nProfile integrity:")
+	for _, p := range problems {
+		fmt.Fprintln(w, p)
+	}
+	fmt.Fprintln(w, "  fix: 'weft source rename <old> <new>' (renames + updates profiles), or edit the profile's sources list.")
 }
 
 // lintSources returns the registered sources as pathlint inputs, with roots

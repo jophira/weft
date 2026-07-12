@@ -70,10 +70,12 @@ func Defaults() (*Config, error) {
 		return nil, err
 	}
 	return &Config{
-		ActiveProfile:         "",
-		WeftHome:              home,
-		SourcesDir:            filepath.Join(home, "sources"),
-		ProfilesDir:           filepath.Join(home, "profiles"),
+		ActiveProfile: "",
+		WeftHome:      home,
+		// Registry + profile definitions are engine-room bookkeeping (see ADR
+		// 0003 refinement). Source *content* lives at WeftHome/sources/<name>.
+		SourcesDir:            filepath.Join(dir, "sources"),
+		ProfilesDir:           filepath.Join(dir, "profiles"),
 		HooksDir:              filepath.Join(dir, "hooks"),
 		DocsDir:               docs,
 		AuditDir:              filepath.Join(dir, "audit"),

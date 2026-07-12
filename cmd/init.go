@@ -7,50 +7,52 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
-
-	"github.com/jophira/weft/internal/locate"
 )
 
 // weftLayout is the resolved ADR-0003 directory layout for this machine: the
 // consumer-facing workbench (~/weft) plus the engine-room state (~/.config/weft).
 // Paths honour --config isolation and any *_dir overrides.
 type weftLayout struct {
-	Home         string // ~/weft — workbench root
-	ConfigDir    string // ~/.config/weft — engine room
-	Sources      string
-	Profiles     string
-	Hooks        string
-	Audit        string
-	Docs         string
-	Templates    string
-	Work         string
-	WorkProjects string
-	WorkTickets  string
-	WorkPlans    string
-	WorkInbox    string
+	Home      string // ~/weft — workbench root
+	ConfigDir string // ~/.config/weft — engine room
+	Sources   string // registry (engine-room *.yaml pointer files)
+	Profiles  string // profile definitions (engine-room)
+	Hooks     string
+	Audit     string
+	Docs      string
+	// ContentSources is the workbench content home ~/weft/sources, where source
+	// repos land via 'weft source relocate'. Distinct from Sources (the registry).
+	ContentSources string
+	Templates      string
+	Work           string
+	WorkProjects   string
+	WorkTickets    string
+	WorkPlans      string
+	WorkInbox      string
 }
 
-// resolveLayout reads the effective layout from viper. Sources/Profiles use the
-// *resolved* values (which may still point at the pre-migration location), so
-// `weft init` never conjures an empty ~/weft/sources that would shadow existing
-// content — that relocation is `weft migrate`'s job.
+// resolveLayout reads the effective layout from viper. Sources/Profiles are the
+// engine-room bookkeeping dirs; ContentSources/Templates/Work sit under the
+// workbench. Source content is relocated into ContentSources by
+// 'weft source relocate', not scaffolded with content here.
 func resolveLayout() weftLayout {
 	home := weftHomeDir()
 	work := filepath.Join(home, "work")
 	return weftLayout{
-		Home:         home,
-		ConfigDir:    configDir(),
-		Sources:      viper.GetString("sources_dir"),
-		Profiles:     viper.GetString("profiles_dir"),
-		Hooks:        viper.GetString("hooks_dir"),
-		Audit:        auditDir(),
-		Docs:         docsDir(),
-		Templates:    filepath.Join(home, "templates"),
-		Work:         work,
-		WorkProjects: filepath.Join(work, "projects"),
-		WorkTickets:  filepath.Join(work, "tickets"),
-		WorkPlans:    filepath.Join(work, "plans"),
-		WorkInbox:    filepath.Join(work, "inbox"),
+		Home:           home,
+		ConfigDir:      configDir(),
+		Sources:        viper.GetString("sources_dir"),
+		Profiles:       viper.GetString("profiles_dir"),
+		Hooks:          viper.GetString("hooks_dir"),
+		Audit:          auditDir(),
+		Docs:           docsDir(),
+		ContentSources: filepath.Join(home, "sources"),
+		Templates:      filepath.Join(home, "templates"),
+		Work:           work,
+		WorkProjects:   filepath.Join(work, "projects"),
+		WorkTickets:    filepath.Join(work, "tickets"),
+		WorkPlans:      filepath.Join(work, "plans"),
+		WorkInbox:      filepath.Join(work, "inbox"),
 	}
 }
 
@@ -60,8 +62,7 @@ This is your weft home (ADR 0003) — the consumer-facing root for content you
 author, edit, and share. Engine-room state weft regenerates lives separately
 under ~/.config/weft.
 
-    sources/     rule sources weft layers into your AI harnesses
-    profiles/    which sources compose your active setup
+    sources/     source repos weft layers into your harnesses (via 'weft source relocate')
     templates/   ticket / adr / estimate skeletons
     docs/        project docs (present only after 'weft docs adopt')
     work/        what you produce while working
@@ -94,13 +95,16 @@ pre-migration layout is left untouched — run 'weft migrate' to relocate it.`,
 		out := cmd.OutOrStdout()
 
 		dirs := []struct{ label, path string }{
-			{"sources", l.Sources},
-			{"profiles", l.Profiles},
+			// Workbench (~/weft): consumer-facing content.
+			{"sources (content)", l.ContentSources},
 			{"templates", l.Templates},
 			{"work/projects", l.WorkProjects},
 			{"work/tickets", l.WorkTickets},
 			{"work/plans", l.WorkPlans},
 			{"work/inbox", l.WorkInbox},
+			// Engine room (~/.config/weft): bookkeeping.
+			{"registry", l.Sources},
+			{"profiles", l.Profiles},
 			{"hooks", l.Hooks},
 			{"audit", l.Audit},
 		}
@@ -169,14 +173,6 @@ func fileExists(path string) bool {
 
 func ensureDir(path string) error {
 	return os.MkdirAll(path, 0o755)
-}
-
-// currentSourcesDir / currentProfilesDir return where sources/profiles resolve
-// *right now* (honouring overrides and the pre-migration fallback) — the source
-// side of a `weft migrate` move.
-func currentSourcesDir() string { return locate.ExpandHome(viper.GetString("sources_dir")) }
-func currentProfilesDir() string {
-	return locate.ExpandHome(viper.GetString("profiles_dir"))
 }
 
 func init() {
