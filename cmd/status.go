@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/jophira/weft/internal/instruction"
 	"github.com/jophira/weft/internal/locate"
 	"github.com/jophira/weft/internal/manifest"
+	"github.com/jophira/weft/internal/runstate"
 )
 
 var statusShort bool
@@ -45,7 +47,11 @@ status line (e.g. Claude Code's statusLine command).`,
 		if err != nil {
 			return err
 		}
-		renderStatus(os.Stdout, activeProfileName(), statuses, statusShort)
+		rs, err := runstate.Read(cfgDir)
+		if err != nil {
+			return fmt.Errorf("reading watcher runstate: %w", err)
+		}
+		renderStatus(os.Stdout, activeProfileName(), rs, statuses, statusShort)
 		return nil
 	},
 }
@@ -106,7 +112,8 @@ func instructionDrift(m *manifest.Manifest) string {
 }
 
 // renderStatus writes the status report to w. short emits a single summary line.
-func renderStatus(w io.Writer, active string, statuses []harnessStatus, short bool) {
+// rs is the live watcher's runstate, or nil when no watcher is running.
+func renderStatus(w io.Writer, active string, rs *runstate.RunState, statuses []harnessStatus, short bool) {
 	if active == "" {
 		active = "none"
 	}
@@ -118,11 +125,20 @@ func renderStatus(w io.Writer, active string, statuses []harnessStatus, short bo
 				drift++
 			}
 		}
-		fmt.Fprintf(w, "weft: %s · %d harness · drift:%d\n", active, len(statuses), drift)
+		watch := "off"
+		if rs != nil {
+			watch = "on"
+		}
+		fmt.Fprintf(w, "weft: %s · %d harness · drift:%d · watch:%s\n", active, len(statuses), drift, watch)
 		return
 	}
 
 	fmt.Fprintf(w, "Active profile: %s\n", active)
+	if rs != nil {
+		fmt.Fprintf(w, "Watcher: running (pid %d, profile %q, up %s)\n", rs.PID, rs.Profile, fmtUptime(rs.Uptime()))
+	} else {
+		fmt.Fprintln(w, "Watcher: not running")
+	}
 	if len(statuses) == 0 {
 		fmt.Fprintln(w, "No harnesses applied yet. Run 'weft profile use <name>'.")
 		return
@@ -146,6 +162,20 @@ func dashIfEmpty(s string) string {
 		return "-"
 	}
 	return s
+}
+
+// fmtUptime renders a watcher uptime compactly: "45s", "12m", "2h13m", "3d4h".
+func fmtUptime(d time.Duration) string {
+	if d < time.Minute {
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	}
+	if d < time.Hour {
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	}
+	if d < 24*time.Hour {
+		return fmt.Sprintf("%dh%dm", int(d.Hours()), int(d.Minutes())%60)
+	}
+	return fmt.Sprintf("%dd%dh", int(d.Hours())/24, int(d.Hours())%24)
 }
 
 func init() {
