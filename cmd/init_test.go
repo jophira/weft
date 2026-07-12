@@ -34,6 +34,14 @@ func withIsolatedConfig(t *testing.T) string {
 	return base
 }
 
+// newHolderCmd returns a throwaway command whose OutOrStdout is captured, so a
+// RunE under test writes into buf regardless of the real command's streams.
+func newHolderCmd() *cobra.Command {
+	c := &cobra.Command{}
+	c.SetOut(&bytes.Buffer{})
+	return c
+}
+
 func runCmd(t *testing.T, c *cobra.Command, args []string) string {
 	t.Helper()
 	buf := &bytes.Buffer{}
