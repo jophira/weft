@@ -188,6 +188,63 @@ func TestSetActiveProfile_corruptYAML(t *testing.T) {
 	})
 }
 
+// ── FilePath / ReadActiveProfile ──────────────────────────────────────────────
+
+func TestReadActiveProfile_roundtripsSetActiveProfile(t *testing.T) {
+	withHome(t, func(_ string) {
+		if err := config.SetActiveProfile("hybrid"); err != nil {
+			t.Fatalf("SetActiveProfile: %v", err)
+		}
+		got, err := config.ReadActiveProfile()
+		if err != nil {
+			t.Fatalf("ReadActiveProfile: %v", err)
+		}
+		if got != "hybrid" {
+			t.Errorf("ReadActiveProfile = %q, want %q", got, "hybrid")
+		}
+	})
+}
+
+func TestReadActiveProfile_missingFile_returnsEmpty(t *testing.T) {
+	withHome(t, func(_ string) {
+		got, err := config.ReadActiveProfile()
+		if err != nil {
+			t.Fatalf("ReadActiveProfile on missing file: unexpected error %v", err)
+		}
+		if got != "" {
+			t.Errorf("ReadActiveProfile on missing file = %q, want \"\"", got)
+		}
+	})
+}
+
+func TestReadActiveProfile_corruptYAML_returnsError(t *testing.T) {
+	withHome(t, func(home string) {
+		cfgDir := filepath.Join(home, ".config", "weft")
+		if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(cfgDir, "config.yaml"), []byte(":\tinvalid: [yaml\n"), 0o644); err != nil {
+			t.Fatalf("writing corrupt config: %v", err)
+		}
+		if _, err := config.ReadActiveProfile(); err == nil {
+			t.Fatal("ReadActiveProfile: expected error for corrupt YAML, got nil")
+		}
+	})
+}
+
+func TestFilePath_pointsAtConfigYAML(t *testing.T) {
+	withHome(t, func(home string) {
+		got, err := config.FilePath()
+		if err != nil {
+			t.Fatalf("FilePath: %v", err)
+		}
+		want := filepath.Join(home, ".config", "weft", "config.yaml")
+		if got != want {
+			t.Errorf("FilePath = %q, want %q", got, want)
+		}
+	})
+}
+
 func containsSubstr(s, sub string) bool {
 	return len(s) >= len(sub) && (s == sub || sub == "" ||
 		func() bool {

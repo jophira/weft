@@ -59,6 +59,44 @@ func SetActiveProfile(name string) error {
 	return setKey("active_profile", name)
 }
 
+// FilePath returns the absolute path to config.yaml — the same file
+// SetActiveProfile writes to. Watch this path to observe out-of-process
+// active-profile changes (e.g. a second `weft profile use` handing a profile
+// off to a running watcher).
+func FilePath() (string, error) {
+	dir, err := DefaultDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "config.yaml"), nil
+}
+
+// ReadActiveProfile reads active_profile fresh from config.yaml on disk.
+// Unlike the viper-cached value read at process start, this reflects writes
+// made by other processes since startup. Returns "" (no error) when the file
+// or key is absent.
+func ReadActiveProfile() (string, error) {
+	cfgPath, err := FilePath()
+	if err != nil {
+		return "", err
+	}
+	data, err := os.ReadFile(cfgPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", fmt.Errorf("reading config.yaml: %w", err)
+	}
+	raw := map[string]any{}
+	if err := yaml.Unmarshal(data, &raw); err != nil {
+		return "", fmt.Errorf("config.yaml is corrupt: %w", err)
+	}
+	if v, ok := raw["active_profile"].(string); ok {
+		return v, nil
+	}
+	return "", nil
+}
+
 // setKey writes a single key/value pair to config.yaml, preserving all other keys.
 func setKey(key string, value any) error {
 	dir, err := DefaultDir()

@@ -160,6 +160,103 @@ func TestDebounced_stopIsSafe(t *testing.T) {
 	stop() // idempotent — must not panic
 }
 
+// ── DebouncedFile ───────────────────────────────────────────────────────────
+
+func TestDebouncedFile_firesOnTargetFileChange(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(target, []byte("active_profile: a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ch := make(chan struct{}, 1)
+
+	stop, err := watch.DebouncedFile(target, shortDebounce, func() { ch <- struct{}{} })
+	if err != nil {
+		t.Fatalf("DebouncedFile: %v", err)
+	}
+	defer stop()
+
+	if err := os.WriteFile(target, []byte("active_profile: b\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-ch:
+	case <-time.After(waitBudget):
+		t.Fatal("DebouncedFile: timed out waiting for callback")
+	}
+}
+
+func TestDebouncedFile_ignoresSiblingChange(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(target, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ch := make(chan struct{}, 1)
+
+	stop, err := watch.DebouncedFile(target, shortDebounce, func() { ch <- struct{}{} })
+	if err != nil {
+		t.Fatalf("DebouncedFile: %v", err)
+	}
+	defer stop()
+
+	// A different file in the same directory must not trigger the callback.
+	if err := os.WriteFile(filepath.Join(dir, "other.yaml"), []byte("y"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-ch:
+		t.Error("DebouncedFile fired on a sibling file change")
+	case <-time.After(shortDebounce * 3):
+	}
+}
+
+func TestDebouncedFile_survivesAtomicRewrite(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(target, []byte("v1"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ch := make(chan struct{}, 2)
+
+	stop, err := watch.DebouncedFile(target, shortDebounce, func() { ch <- struct{}{} })
+	if err != nil {
+		t.Fatalf("DebouncedFile: %v", err)
+	}
+	defer stop()
+
+	// Simulate an atomic rewrite: write a temp file then rename over the target.
+	// A naive single-inode watch would stop seeing events after the first swap.
+	for i := range 2 {
+		tmp := filepath.Join(dir, "config.yaml.tmp")
+		if err := os.WriteFile(tmp, []byte{byte('a' + i)}, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Rename(tmp, target); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case <-ch:
+		case <-time.After(waitBudget):
+			t.Fatalf("DebouncedFile: no callback after atomic rewrite #%d", i+1)
+		}
+	}
+}
+
+func TestDebouncedFile_stopIsSafe(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(target, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stop, err := watch.DebouncedFile(target, shortDebounce, func() {})
+	if err != nil {
+		t.Fatalf("DebouncedFile: %v", err)
+	}
+	stop()
+	stop() // idempotent — must not panic
+}
+
 func TestDebouncedTarget_SubdirFileDetected(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, "commands"), 0o755); err != nil {

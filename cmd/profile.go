@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -627,7 +628,12 @@ var profileUseCmd = &cobra.Command{
 
 By default the command stays running and re-applies automatically whenever a
 file inside any source root changes. Pass --no-watch to apply once and exit
-(useful in CI or scripts).`,
+(useful in CI or scripts).
+
+If a weft watcher is already running, this command hands the requested profile
+off to it: the running watcher hot-swaps to the new profile and re-applies in
+place, and this invocation exits immediately. No need to stop and restart the
+watcher to switch profiles.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
@@ -640,9 +646,15 @@ file inside any source root changes. Pass --no-watch to apply once and exit
 			return fmt.Errorf("resolving config directory")
 		}
 
-		// 2. In watch mode, acquire the singleton lock before doing any work.
+		// 2. In watch mode, acquire the singleton watcher lock before doing any
+		//    work. If another weft watcher already holds it, hand this profile
+		//    off to that running watcher instead of failing: it watches
+		//    config.yaml and hot-swaps when active_profile changes.
 		if !profileNoWatch {
 			lock, lockErr := pidlock.Acquire(filepath.Join(cfgDir, "weft.lock"))
+			if errors.Is(lockErr, pidlock.ErrLocked) {
+				return handOffToRunningWatcher(name)
+			}
 			if lockErr != nil {
 				return lockErr
 			}
@@ -675,96 +687,192 @@ file inside any source root changes. Pass --no-watch to apply once and exit
 
 		// 6. Enter watch mode unless opted out.
 		if !profileNoWatch {
-
-			fmt.Println("\nWatching for changes... (Ctrl-C to stop)")
-			var guard watch.ApplyGuard
-
-			// Pre-warm the resolver cache once up front so the first hook
-			// resolve after `profile use` is already fast.
-			prewarmRulesCaches(roots)
-
-			// Source watcher: re-apply when source files change.
-			stopSrc, err := watch.Debounced(roots, 300*time.Millisecond, func() {
-				fmt.Printf("\n[weft] source change detected — re-applying...\n")
-				guard.Lock()
-				defer guard.Unlock()
-				if applyErr := mergeAndApply(p, roots, srcs, cfgDir, true); applyErr != nil {
-					fmt.Fprintf(os.Stderr, "[weft] error: %v\n", applyErr)
-					slog.Error("re-apply failed", slog.Any("error", applyErr))
-					return
-				}
-				fmt.Printf("[weft] applied at %s\n", time.Now().Format("15:04:05"))
-				// Keep each tree's signals.yaml current so the resolver hook
-				// never pays the rebuild. Optimization-only and best-effort.
-				prewarmRulesCaches(roots)
-			})
-			if err != nil {
-				return fmt.Errorf("starting source watcher: %w", err)
-			}
-
-			// Target watchers: watch each configured target directory for external edits.
-			var stopTargets []func()
-			for _, tgt := range resolveApplyTargets(p, true) {
-				targetRoot := harnessTargetRoot(cfgDir, tgt)
-				if targetRoot == "" {
-					continue
-				}
-				// tgt is per-iteration in Go 1.22+ (cf. Java: effectively final in lambda)
-				tgt := tgt
-				stopTgt, watchErr := watch.DebouncedTarget(
-					[]string{targetRoot}, 300*time.Millisecond, &guard,
-					func(changes []watch.TargetChange) {
-						m, loadErr := manifest.Load(cfgDir, tgt)
-						if loadErr != nil {
-							fmt.Fprintf(os.Stderr, "[weft] loading manifest: %v\n", loadErr)
-							slog.Error("loading manifest", slog.String("target", tgt), slog.Any("error", loadErr))
-							return
-						}
-						// Build srcMap once per batch — shared across all changes in this
-						// callback invocation so each write-back call does not rebuild it.
-						// cf. Java: compute a HashMap<String,Source> before the for-each loop.
-						wbSrcMap := buildSrcMap(srcs)
-						for _, c := range changes {
-							if _, owned := m.Files[c.Rel]; !owned {
-								continue // not a weft-managed file — ignore silently
-							}
-							fmt.Printf("\n[weft] target changed: %s\n", c.Rel)
-							performed, wbErr := dispatchWriteBack(m, c, p, wbSrcMap)
-							if wbErr != nil {
-								fmt.Fprintf(os.Stderr, "[weft] write-back error for %s: %v\n", c.Rel, wbErr)
-								slog.Error("write-back failed", slog.String("file", c.Rel), slog.Any("error", wbErr))
-								continue
-							}
-							if performed {
-								fmt.Printf("[weft] wrote %s back to source (source watcher will re-apply)\n", c.Rel)
-							} else {
-								fmt.Printf("[weft] %s: no owning source found — set write_back.default in profile\n", c.Rel)
-							}
-						}
-					},
-				)
-				if watchErr != nil {
-					stopSrc()
-					for _, s := range stopTargets {
-						s()
-					}
-					return fmt.Errorf("starting target watcher for %s: %w", tgt, watchErr)
-				}
-				stopTargets = append(stopTargets, stopTgt)
-			}
-
-			sig := make(chan os.Signal, 1)
-			signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
-			<-sig
-			stopSrc()
-			for _, s := range stopTargets {
-				s()
-			}
-			fmt.Println("\nWatcher stopped.")
+			return runWatchLoop(name, p, roots, srcs, cfgDir)
 		}
 
 		return nil
 	},
+}
+
+// handOffToRunningWatcher persists name as the active profile so a weft watcher
+// already running (holding the singleton lock) picks it up via its config.yaml
+// watch and hot-swaps to it. The profile is resolved first so typos fail fast
+// here rather than silently in the other process.
+func handOffToRunningWatcher(name string) error {
+	if _, _, _, err := resolveProfileRoots(name); err != nil {
+		return err
+	}
+	if err := config.SetActiveProfile(name); err != nil {
+		return fmt.Errorf("handing off to running watcher: %w", err)
+	}
+	fmt.Printf("✓ A weft watcher is already running — handed %q off to it; it will switch and re-apply.\n", name)
+	return nil
+}
+
+// runWatchLoop keeps weft running, re-applying on source changes and writing
+// back external target edits. It also watches config.yaml so that a second
+// `weft profile use <other>` (which hands off via handOffToRunningWatcher)
+// hot-swaps the active profile in place — tearing down the current watchers and
+// standing up a fresh set for the new profile — instead of requiring a restart.
+func runWatchLoop(name string, p *profile.Profile, roots []string, srcs []source.Source, cfgDir string) error {
+	fmt.Println("\nWatching for changes... (Ctrl-C to stop)")
+
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
+
+	// Signalled (coalesced) whenever config.yaml changes; the loop then reads
+	// the authoritative active_profile fresh, so a dropped signal never loses
+	// the latest value.
+	swap := make(chan struct{}, 1)
+	if cfgFile, err := config.FilePath(); err != nil {
+		fmt.Fprintf(os.Stderr, "[weft] hot-swap disabled: %v\n", err)
+	} else if stopCfg, cfgErr := watch.DebouncedFile(cfgFile, 200*time.Millisecond, func() {
+		select {
+		case swap <- struct{}{}:
+		default: // a signal is already pending — coalesce
+		}
+	}); cfgErr != nil {
+		fmt.Fprintf(os.Stderr, "[weft] hot-swap disabled: %v\n", cfgErr)
+	} else {
+		defer stopCfg()
+	}
+
+	current := name
+	stopWatchers, err := startProfileWatchers(p, roots, srcs, cfgDir)
+	if err != nil {
+		return err
+	}
+
+	for {
+		select {
+		case <-sig:
+			stopWatchers()
+			fmt.Println("\nWatcher stopped.")
+			return nil
+
+		case <-swap:
+			next, readErr := config.ReadActiveProfile()
+			if readErr != nil {
+				fmt.Fprintf(os.Stderr, "[weft] reading active profile: %v — staying on %q\n", readErr, current)
+				continue
+			}
+			if next == "" || next == current {
+				continue // no change, or our own write echoed back
+			}
+			// Resolve the new profile before tearing anything down, so a bad
+			// hand-off leaves the current watchers untouched.
+			np, nroots, nsrcs, rErr := resolveProfileRoots(next)
+			if rErr != nil {
+				fmt.Fprintf(os.Stderr, "[weft] hot-swap to %q failed: %v — staying on %q\n", next, rErr, current)
+				continue
+			}
+			stopWatchers()
+			if applyErr := mergeAndApply(np, nroots, nsrcs, cfgDir, false); applyErr != nil {
+				fmt.Fprintf(os.Stderr, "[weft] hot-swap apply for %q failed: %v — reverting to %q\n", next, applyErr, current)
+				if stopWatchers, err = startProfileWatchers(p, roots, srcs, cfgDir); err != nil {
+					return err
+				}
+				continue
+			}
+			p, roots, srcs, current = np, nroots, nsrcs, next
+			if stopWatchers, err = startProfileWatchers(p, roots, srcs, cfgDir); err != nil {
+				return err
+			}
+			fmt.Printf("\n[weft] profile switched → %s\n", current)
+			if resolvedTargets := p.ResolvedTargets(); len(resolvedTargets) > 0 {
+				fmt.Printf("[weft] targets: %s\n", strings.Join(resolvedTargets, ", "))
+			}
+		}
+	}
+}
+
+// startProfileWatchers wires up the source watcher and the per-target write-back
+// watchers for one active profile, returning a single stop function that shuts
+// all of them down. On a hot-swap the caller stops the previous set and starts a
+// fresh one for the new profile.
+func startProfileWatchers(p *profile.Profile, roots []string, srcs []source.Source, cfgDir string) (func(), error) {
+	var guard watch.ApplyGuard
+
+	// Pre-warm the resolver cache once up front so the first hook resolve after
+	// activation is already fast.
+	prewarmRulesCaches(roots)
+
+	// Source watcher: re-apply when source files change.
+	stopSrc, err := watch.Debounced(roots, 300*time.Millisecond, func() {
+		fmt.Printf("\n[weft] source change detected — re-applying...\n")
+		guard.Lock()
+		defer guard.Unlock()
+		if applyErr := mergeAndApply(p, roots, srcs, cfgDir, true); applyErr != nil {
+			fmt.Fprintf(os.Stderr, "[weft] error: %v\n", applyErr)
+			slog.Error("re-apply failed", slog.Any("error", applyErr))
+			return
+		}
+		fmt.Printf("[weft] applied at %s\n", time.Now().Format("15:04:05"))
+		// Keep each tree's signals.yaml current so the resolver hook never pays
+		// the rebuild. Optimization-only and best-effort.
+		prewarmRulesCaches(roots)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("starting source watcher: %w", err)
+	}
+
+	// Target watchers: watch each configured target directory for external edits.
+	var stopTargets []func()
+	for _, tgt := range resolveApplyTargets(p, true) {
+		targetRoot := harnessTargetRoot(cfgDir, tgt)
+		if targetRoot == "" {
+			continue
+		}
+		// tgt is per-iteration in Go 1.22+ (cf. Java: effectively final in lambda)
+		tgt := tgt
+		stopTgt, watchErr := watch.DebouncedTarget(
+			[]string{targetRoot}, 300*time.Millisecond, &guard,
+			func(changes []watch.TargetChange) {
+				m, loadErr := manifest.Load(cfgDir, tgt)
+				if loadErr != nil {
+					fmt.Fprintf(os.Stderr, "[weft] loading manifest: %v\n", loadErr)
+					slog.Error("loading manifest", slog.String("target", tgt), slog.Any("error", loadErr))
+					return
+				}
+				// Build srcMap once per batch — shared across all changes in this
+				// callback invocation so each write-back call does not rebuild it.
+				// cf. Java: compute a HashMap<String,Source> before the for-each loop.
+				wbSrcMap := buildSrcMap(srcs)
+				for _, c := range changes {
+					if _, owned := m.Files[c.Rel]; !owned {
+						continue // not a weft-managed file — ignore silently
+					}
+					fmt.Printf("\n[weft] target changed: %s\n", c.Rel)
+					performed, wbErr := dispatchWriteBack(m, c, p, wbSrcMap)
+					if wbErr != nil {
+						fmt.Fprintf(os.Stderr, "[weft] write-back error for %s: %v\n", c.Rel, wbErr)
+						slog.Error("write-back failed", slog.String("file", c.Rel), slog.Any("error", wbErr))
+						continue
+					}
+					if performed {
+						fmt.Printf("[weft] wrote %s back to source (source watcher will re-apply)\n", c.Rel)
+					} else {
+						fmt.Printf("[weft] %s: no owning source found — set write_back.default in profile\n", c.Rel)
+					}
+				}
+			},
+		)
+		if watchErr != nil {
+			stopSrc()
+			for _, s := range stopTargets {
+				s()
+			}
+			return nil, fmt.Errorf("starting target watcher for %s: %w", tgt, watchErr)
+		}
+		stopTargets = append(stopTargets, stopTgt)
+	}
+
+	return func() {
+		stopSrc()
+		for _, s := range stopTargets {
+			s()
+		}
+	}, nil
 }
 
 // prewarmRulesCaches refreshes the signals.yaml resolution cache for each source
