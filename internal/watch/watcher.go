@@ -89,6 +89,67 @@ func Debounced(roots []string, debounce time.Duration, fn func()) (stop func(), 
 	return func() { once.Do(func() { close(done) }) }, nil
 }
 
+// DebouncedFile watches a single file for changes and calls fn after debounce
+// elapses with no further events touching it. It watches the file's parent
+// directory (non-recursively) and filters events by base name, so it survives
+// atomic rewrites (write-temp + rename) that a direct single-file watch would
+// miss once the original inode is replaced.
+//
+// Returns a stop function that shuts down the watcher; fn is invoked from a
+// goroutine and must be safe for concurrent use.
+func DebouncedFile(path string, debounce time.Duration, fn func()) (stop func(), err error) {
+	dir := filepath.Dir(path)
+	base := filepath.Base(path)
+
+	w, err := fsnotify.NewWatcher()
+	if err != nil {
+		return nil, fmt.Errorf("creating file watcher: %w", err)
+	}
+	if addErr := w.Add(dir); addErr != nil {
+		_ = w.Close()
+		return nil, fmt.Errorf("watching %s: %w", dir, addErr)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		defer func() { _ = w.Close() }()
+		timer := time.NewTimer(0)
+		if !timer.Stop() {
+			<-timer.C
+		}
+		for {
+			select {
+			case <-done:
+				timer.Stop()
+				return
+			case ev, ok := <-w.Events:
+				if !ok {
+					return
+				}
+				if filepath.Base(ev.Name) != base {
+					continue // a sibling file changed — not ours
+				}
+				if !timer.Stop() {
+					select {
+					case <-timer.C:
+					default:
+					}
+				}
+				timer.Reset(debounce)
+			case _, ok := <-w.Errors:
+				if !ok {
+					return
+				}
+			case <-timer.C:
+				fn()
+			}
+		}
+	}()
+
+	var once sync.Once
+	return func() { once.Do(func() { close(done) }) }, nil
+}
+
 // TargetChange describes a file that was modified externally inside a target directory.
 type TargetChange struct {
 	Root string // absolute path of the target root
