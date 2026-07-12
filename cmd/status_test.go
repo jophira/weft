@@ -5,9 +5,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jophira/weft/internal/instruction"
 	"github.com/jophira/weft/internal/manifest"
+	"github.com/jophira/weft/internal/runstate"
 )
 
 // saveManifestForStatus writes a manifest carrying a managed instruction block
@@ -74,7 +76,7 @@ func TestInstructionDrift_noBlockIsNA(t *testing.T) {
 
 func TestRenderStatus_short(t *testing.T) {
 	var buf bytes.Buffer
-	renderStatus(&buf, "hybrid", []harnessStatus{
+	renderStatus(&buf, "hybrid", nil, []harnessStatus{
 		{Harness: "a", Drift: "ok"},
 		{Harness: "b", Drift: "drift"},
 		{Harness: "c", Drift: "n/a"},
@@ -83,13 +85,29 @@ func TestRenderStatus_short(t *testing.T) {
 	if !strings.Contains(got, "weft: hybrid") || !strings.Contains(got, "3 harness") || !strings.Contains(got, "drift:1") {
 		t.Errorf("short status = %q", got)
 	}
+	if !strings.Contains(got, "watch:off") {
+		t.Errorf("short status missing watch state: %q", got)
+	}
 }
 
 func TestRenderStatus_emptyMentionsNoHarnesses(t *testing.T) {
 	var buf bytes.Buffer
-	renderStatus(&buf, "", nil, false)
+	renderStatus(&buf, "", nil, nil, false)
 	got := buf.String()
 	if !strings.Contains(got, "Active profile: none") || !strings.Contains(got, "No harnesses applied") {
 		t.Errorf("empty status = %q", got)
+	}
+	if !strings.Contains(got, "Watcher: not running") {
+		t.Errorf("empty status missing watcher line: %q", got)
+	}
+}
+
+func TestRenderStatus_watcherRunning(t *testing.T) {
+	var buf bytes.Buffer
+	rs := &runstate.RunState{PID: 4242, Profile: "hybrid", StartedAt: time.Now().Add(-90 * time.Minute)}
+	renderStatus(&buf, "hybrid", rs, nil, false)
+	got := buf.String()
+	if !strings.Contains(got, "Watcher: running") || !strings.Contains(got, "pid 4242") || !strings.Contains(got, `profile "hybrid"`) {
+		t.Errorf("running watcher status = %q", got)
 	}
 }
