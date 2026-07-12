@@ -9,13 +9,25 @@ import (
 )
 
 type Config struct {
-	ActiveProfile         string `yaml:"active_profile"            mapstructure:"active_profile"`
-	SourcesDir            string `yaml:"sources_dir"               mapstructure:"sources_dir"`
-	ProfilesDir           string `yaml:"profiles_dir"              mapstructure:"profiles_dir"`
-	HooksDir              string `yaml:"hooks_dir"                 mapstructure:"hooks_dir"`
+	ActiveProfile string `yaml:"active_profile"            mapstructure:"active_profile"`
+	// WeftHome is the consumer-facing workbench root (default ~/weft). Sources
+	// and profiles — content the user authors and shares — live under it, out of
+	// the hidden ~/.config dotfile. See ADR 0003.
+	WeftHome    string `yaml:"weft_home"                 mapstructure:"weft_home"`
+	SourcesDir  string `yaml:"sources_dir"               mapstructure:"sources_dir"`
+	ProfilesDir string `yaml:"profiles_dir"              mapstructure:"profiles_dir"`
+	HooksDir    string `yaml:"hooks_dir"                 mapstructure:"hooks_dir"`
+	// DocsDir is where project docs live ({{weft.docs}}). Defaults to ~/docs
+	// (referenced), or ~/weft/docs after `weft docs adopt`.
+	DocsDir string `yaml:"docs_dir"                  mapstructure:"docs_dir"`
+	// AuditDir holds the machine-wide resolve rollups. Engine-room state under
+	// ~/.config/weft/audit (was the stray ~/.weft/audit before ADR 0003).
+	AuditDir              string `yaml:"audit_dir"                 mapstructure:"audit_dir"`
 	WarnInstructionSizeKB int    `yaml:"warn_instruction_size_kb"  mapstructure:"warn_instruction_size_kb"`
 }
 
+// DefaultDir returns the engine-room base — regenerable machine state weft
+// manages (config.yaml, staged/, hooks/, audit/). Hidden under ~/.config.
 func DefaultDir() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -24,22 +36,59 @@ func DefaultDir() (string, error) {
 	return filepath.Join(home, ".config", "weft"), nil
 }
 
+// DefaultHome returns the workbench root ~/weft — the consumer-facing home for
+// authored content (sources, profiles, docs, work). See ADR 0003.
+func DefaultHome() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("resolving home directory: %w", err)
+	}
+	return filepath.Join(home, "weft"), nil
+}
+
+// DefaultDocsDir returns the default docs home ~/docs. `weft docs adopt` may
+// repoint this to ~/weft/docs; until then weft references the existing location.
+func DefaultDocsDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("resolving home directory: %w", err)
+	}
+	return filepath.Join(home, "docs"), nil
+}
+
 func Defaults() (*Config, error) {
 	dir, err := DefaultDir()
 	if err != nil {
 		return nil, err
 	}
+	home, err := DefaultHome()
+	if err != nil {
+		return nil, err
+	}
+	docs, err := DefaultDocsDir()
+	if err != nil {
+		return nil, err
+	}
 	return &Config{
 		ActiveProfile:         "",
-		SourcesDir:            filepath.Join(dir, "sources"),
-		ProfilesDir:           filepath.Join(dir, "profiles"),
+		WeftHome:              home,
+		SourcesDir:            filepath.Join(home, "sources"),
+		ProfilesDir:           filepath.Join(home, "profiles"),
 		HooksDir:              filepath.Join(dir, "hooks"),
+		DocsDir:               docs,
+		AuditDir:              filepath.Join(dir, "audit"),
 		WarnInstructionSizeKB: 96,
 	}, nil
 }
 
+// EnsureDirs creates the managed directories if absent. Idempotent — safe to
+// call repeatedly (see `weft init`).
 func EnsureDirs(c *Config) error {
-	for _, d := range []string{c.SourcesDir, c.ProfilesDir, c.HooksDir} {
+	dirs := []string{c.SourcesDir, c.ProfilesDir, c.HooksDir}
+	if c.AuditDir != "" {
+		dirs = append(dirs, c.AuditDir)
+	}
+	for _, d := range dirs {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			return fmt.Errorf("creating directory %s: %w", d, err)
 		}
@@ -70,6 +119,13 @@ func SetActiveConfigFile(path string) {
 // preserving any other keys already in it.
 func SetActiveProfile(name string) error {
 	return setKey("active_profile", name)
+}
+
+// SetPath persists a directory-path config key (e.g. sources_dir, profiles_dir,
+// docs_dir, weft_home) to the active config file, preserving other keys. Used by
+// `weft migrate` / `weft docs adopt` to repoint locations after moving content.
+func SetPath(key, path string) error {
+	return setKey(key, path)
 }
 
 // FilePath returns the absolute path to the active config file — the same file

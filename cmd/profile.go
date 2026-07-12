@@ -201,8 +201,9 @@ func sourceRootMap(srcs []source.Source) map[string]string {
 // each file, keyed by the owning source root (see package anchor).
 func anchorTransform(srcs []source.Source) func(root string, data []byte) []byte {
 	byName := sourceRootMap(srcs)
+	home, docs := globalAnchors()
 	return func(root string, data []byte) []byte {
-		return anchor.Expand(data, root, byName)
+		return anchor.Expand(data, anchor.Anchors{Root: root, Home: home, Docs: docs, ByName: byName})
 	}
 }
 

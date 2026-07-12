@@ -314,11 +314,49 @@ Additional harnesses (Goose, OpenCode, Hermes, Antigravity) are supported via
 plain directory copy. New harnesses can be added to `~/.config/weft/harnesses.yaml`
 without recompiling.
 
+## Home layout
+
+Weft splits its state into two homes (see ADR 0003):
+
+| Home | Holds | Test |
+|---|---|---|
+| `~/weft/` (workbench) | `sources/`, `profiles/`, `templates/`, `docs/`, `work/` — content you author, edit, and share | losing it loses authored work |
+| `~/.config/weft/` (engine room) | `config.yaml`, `staged/`, `hooks/`, `audit/` — regenerable machine state | re-running weft rebuilds it |
+
+The **work plane** (`~/weft/work/`) is weft-owned: `projects/<repo>/` (per-repo
+knowledge base), `tickets/<TICKET>/`, `plans/`, and `inbox/`.
+
+```
+weft init                 # scaffold the homes (idempotent — safe to re-run)
+weft migrate              # relocate a pre-existing layout into ~/weft (non-destructive)
+weft migrate --docs       # also consolidate ~/docs under ~/weft/docs
+weft docs adopt           # consolidate docs on its own
+```
+
+`weft migrate` moves content (never deletes), refuses to clobber a populated
+destination, and leaves a symlink bridge at the old path so existing references
+keep resolving.
+
+### Path anchors
+
+Sources reference other files with machine-independent tokens, expanded at
+projection time:
+
+| Token | Expands to |
+|---|---|
+| `{{weft.root}}` | the current source's root |
+| `{{weft.source:NAME}}` | the root of source `NAME` |
+| `{{weft.home}}` | the workbench root (`~/weft`) |
+| `{{weft.docs}}` | the docs home (`~/docs`, or `~/weft/docs` after adopt) |
+
 ## Configuration
 
-Config file: `~/.config/weft/config.yaml`
+Config file: `~/.config/weft/config.yaml`. Keys: `weft_home`, `sources_dir`,
+`profiles_dir`, `hooks_dir`, `docs_dir`, `audit_dir`, `active_profile`,
+`warn_instruction_size_kb`.
 
-Override with `--config <path>` on any command.
+Override the config location with `--config <path>` on any command — it fully
+isolates weft's state (including `weft_home`) under that file's directory.
 
 ## License
 

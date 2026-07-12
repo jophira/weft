@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -82,17 +81,16 @@ func rulesLogPaths(args []string) ([]string, error) {
 	}
 
 	if rulesLogGlobal {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return nil, fmt.Errorf("locating home directory: %w", err)
+		ad := auditDir()
+		if ad == "" {
+			return nil, fmt.Errorf("locating audit directory")
 		}
-		auditDir := filepath.Join(home, ".weft", "audit")
 		if rulesLogMonth != "" {
-			return []string{filepath.Join(auditDir, rulesLogMonth+".jsonl")}, nil
+			return []string{filepath.Join(ad, rulesLogMonth+".jsonl")}, nil
 		}
-		matches, err := filepath.Glob(filepath.Join(auditDir, "*.jsonl"))
+		matches, err := filepath.Glob(filepath.Join(ad, "*.jsonl"))
 		if err != nil {
-			return nil, fmt.Errorf("scanning %s: %w", auditDir, err)
+			return nil, fmt.Errorf("scanning %s: %w", ad, err)
 		}
 		sort.Strings(matches) // YYYY-MM names sort chronologically
 		return matches, nil

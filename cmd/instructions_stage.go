@@ -82,9 +82,11 @@ func stageInstructions(roots []string, srcs []source.Source, p *profile.Profile,
 		}
 		content := expandProjectsInContent(string(raw), []source.Source{s})
 		content = expandSourcesInContent(content, srcs, p)
-		// Expand weft path anchors ({{weft.root}}, {{weft.source:NAME}}) so the
-		// projected/imported instruction resolves to real paths on this machine.
-		content = string(anchor.Expand([]byte(content), s.Root, byName))
+		// Expand weft path anchors ({{weft.root}}, {{weft.source:NAME}},
+		// {{weft.home}}, {{weft.docs}}) so the projected/imported instruction
+		// resolves to real paths on this machine.
+		home, docs := globalAnchors()
+		content = string(anchor.Expand([]byte(content), anchor.Anchors{Root: s.Root, Home: home, Docs: docs, ByName: byName}))
 
 		fname := fmt.Sprintf("%02d-%s.md", i, s.Name)
 		path := filepath.Join(instrDir, fname)
