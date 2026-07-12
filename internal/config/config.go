@@ -53,17 +53,33 @@ func SetWarnInstructionSizeKB(kb int) error {
 	return setKey("warn_instruction_size_kb", kb)
 }
 
-// SetActiveProfile persists active_profile to ~/.config/weft/config.yaml,
-// preserving any other keys already in the file.
+// activeConfigFile, when non-empty, overrides the file that FilePath / setKey /
+// ReadActiveProfile operate on. The CLI sets it (via SetActiveConfigFile in
+// initConfig) so a custom --config isolates active-profile state too, rather
+// than silently falling back to the global ~/.config/weft/config.yaml.
+var activeConfigFile string
+
+// SetActiveConfigFile points the active-profile read/write helpers at path.
+// An empty path restores the default (~/.config/weft/config.yaml). It exists so
+// --config fully isolates state; see initConfig.
+func SetActiveConfigFile(path string) {
+	activeConfigFile = path
+}
+
+// SetActiveProfile persists active_profile to the active config file,
+// preserving any other keys already in it.
 func SetActiveProfile(name string) error {
 	return setKey("active_profile", name)
 }
 
-// FilePath returns the absolute path to config.yaml — the same file
+// FilePath returns the absolute path to the active config file — the same file
 // SetActiveProfile writes to. Watch this path to observe out-of-process
 // active-profile changes (e.g. a second `weft profile use` handing a profile
-// off to a running watcher).
+// off to a running watcher). Honours --config via SetActiveConfigFile.
 func FilePath() (string, error) {
+	if activeConfigFile != "" {
+		return activeConfigFile, nil
+	}
 	dir, err := DefaultDir()
 	if err != nil {
 		return "", err
@@ -97,13 +113,14 @@ func ReadActiveProfile() (string, error) {
 	return "", nil
 }
 
-// setKey writes a single key/value pair to config.yaml, preserving all other keys.
+// setKey writes a single key/value pair to the active config file, preserving
+// all other keys.
 func setKey(key string, value any) error {
-	dir, err := DefaultDir()
+	cfgPath, err := FilePath()
 	if err != nil {
 		return err
 	}
-	cfgPath := filepath.Join(dir, "config.yaml")
+	dir := filepath.Dir(cfgPath)
 
 	raw := map[string]any{}
 	if data, err := os.ReadFile(cfgPath); err == nil {
