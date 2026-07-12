@@ -285,7 +285,10 @@ func classifyAnchored(ref string, self normSource, norm []normSource, base Findi
 			return base, true
 		}
 	}
-	expanded := string(anchor.Expand([]byte(ref), self.root, byName))
+	// Home/Docs are left unset: pathlint has no machine-config context, so
+	// {{weft.home}}/{{weft.docs}} stay visible and are skipped below rather than
+	// falsely flagged as broken.
+	expanded := string(anchor.Expand([]byte(ref), anchor.Anchors{Root: self.root, ByName: byName}))
 	if anchor.Has([]byte(expanded)) {
 		return Finding{}, false // still unresolved token we don't own — leave it
 	}

@@ -42,6 +42,50 @@ func configDir() string {
 	return dir
 }
 
+// auditDir returns the resolved machine-wide audit directory
+// (~/.config/weft/audit, honouring --config and any audit_dir override). Falls
+// back to config.Defaults when viper has not been initialised.
+func auditDir() string {
+	if d := viper.GetString("audit_dir"); d != "" {
+		return locate.ExpandHome(d)
+	}
+	if cfg, err := config.Defaults(); err == nil {
+		return cfg.AuditDir
+	}
+	return ""
+}
+
+// weftHomeDir returns the resolved workbench root (~/weft, honouring --config
+// isolation and any weft_home override). Falls back to config.DefaultHome when
+// viper has not been initialised (e.g. unit tests).
+func weftHomeDir() string {
+	if h := viper.GetString("weft_home"); h != "" {
+		return locate.ExpandHome(h)
+	}
+	if h, err := config.DefaultHome(); err == nil {
+		return h
+	}
+	return ""
+}
+
+// docsDir returns the resolved docs home ({{weft.docs}} target). Honours a
+// docs_dir override (set by `weft docs adopt`); defaults to ~/docs.
+func docsDir() string {
+	if d := viper.GetString("docs_dir"); d != "" {
+		return locate.ExpandHome(d)
+	}
+	if d, err := config.DefaultDocsDir(); err == nil {
+		return d
+	}
+	return ""
+}
+
+// globalAnchors returns the machine-global anchor targets ({{weft.home}},
+// {{weft.docs}}) shared by every source during projection.
+func globalAnchors() (home, docs string) {
+	return weftHomeDir(), docsDir()
+}
+
 // updateResultCh carries the async update-check outcome from PersistentPreRun to
 // PersistentPostRun. Buffered with capacity 1 so the goroutine never blocks even
 // if PostRun is skipped (e.g. the command exited early).
@@ -222,12 +266,71 @@ func initConfig() {
 		viper.SetConfigName("config")
 		viper.SetConfigType("yaml")
 	}
-	// Default the managed sub-directories relative to baseDir. An explicit key in
-	// the config file (or a *_DIR env var) still wins via viper's precedence.
-	viper.SetDefault("sources_dir", filepath.Join(baseDir, "sources"))
-	viper.SetDefault("profiles_dir", filepath.Join(baseDir, "profiles"))
-	viper.SetDefault("hooks_dir", filepath.Join(baseDir, "hooks"))
-	viper.SetDefault("warn_instruction_size_kb", validate.DefaultWarnSizeKB)
+	// Read config now so a config-file weft_home is available when we derive the
+	// workbench sub-directory defaults below. SetDefault stays lowest-priority, so
+	// explicit keys / *_DIR env vars still win via viper's precedence.
 	viper.AutomaticEnv()
 	_ = viper.ReadInConfig()
+
+	// weft_home is the consumer-facing workbench root (ADR 0003). With --config we
+	// keep it under baseDir so a custom config fully isolates state (and the
+	// isolation tests keep passing); otherwise it defaults to ~/weft.
+	weftHomeDefault := baseDir
+	if cfgFile == "" {
+		if h, err := config.DefaultHome(); err == nil {
+			weftHomeDefault = h
+		}
+	}
+	viper.SetDefault("weft_home", weftHomeDefault)
+	weftHome := viper.GetString("weft_home")
+
+	// Authored content (sources, profiles) defaults under the workbench; but if
+	// the pre-ADR-0003 location under baseDir still holds content and the new one
+	// does not, fall back to it so upgrades never lose sight of existing sources
+	// until `weft migrate` moves them.
+	viper.SetDefault("sources_dir", legacyAwareDir(filepath.Join(weftHome, "sources"), filepath.Join(baseDir, "sources")))
+	viper.SetDefault("profiles_dir", legacyAwareDir(filepath.Join(weftHome, "profiles"), filepath.Join(baseDir, "profiles")))
+
+	// Engine-room state stays under baseDir. audit_dir folds in the pre-ADR-0003
+	// stray ~/.weft/audit (used for reads until migrated).
+	viper.SetDefault("hooks_dir", filepath.Join(baseDir, "hooks"))
+	// The pre-ADR-0003 stray audit lived at the global ~/.weft/audit. Only fall
+	// back to it in the global (non --config) case, so a custom --config stays
+	// fully isolated instead of reading/writing the machine-wide audit.
+	auditLegacy := ""
+	if cfgFile == "" {
+		auditLegacy = legacyGlobalAuditDir()
+	}
+	viper.SetDefault("audit_dir", legacyAwareDir(filepath.Join(baseDir, "audit"), auditLegacy))
+	if docs, err := config.DefaultDocsDir(); err == nil {
+		viper.SetDefault("docs_dir", docs)
+	}
+	viper.SetDefault("warn_instruction_size_kb", validate.DefaultWarnSizeKB)
+}
+
+// legacyAwareDir returns preferred, unless preferred is absent and legacy still
+// exists — in which case legacy is used so a pre-migration layout keeps working.
+func legacyAwareDir(preferred, legacy string) string {
+	if preferred == legacy {
+		return preferred
+	}
+	if !dirExists(preferred) && dirExists(legacy) {
+		return legacy
+	}
+	return preferred
+}
+
+func dirExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
+}
+
+// legacyGlobalAuditDir is the pre-ADR-0003 machine-wide audit location
+// (~/.weft/audit), retained as a read fallback until `weft migrate` folds it in.
+func legacyGlobalAuditDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".weft", "audit")
 }

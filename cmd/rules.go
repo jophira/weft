@@ -116,8 +116,8 @@ func recordResolve(repoAbs, profileName string, ress []sourceResolution) error {
 		RepoLog: filepath.Join(repoAbs, ".weft", "resolve.log.jsonl"),
 		Latest:  filepath.Join(repoAbs, ".weft", "resolve.latest.json"),
 	}
-	if home, err := os.UserHomeDir(); err == nil {
-		targets.GlobalLog = filepath.Join(home, ".weft", "audit", rec.Timestamp.Format("2006-01")+".jsonl")
+	if ad := auditDir(); ad != "" {
+		targets.GlobalLog = filepath.Join(ad, rec.Timestamp.Format("2006-01")+".jsonl")
 	}
 
 	_, err := rules.PersistRecord(rec, targets)
