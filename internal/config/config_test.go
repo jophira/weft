@@ -245,6 +245,40 @@ func TestFilePath_pointsAtConfigYAML(t *testing.T) {
 	})
 }
 
+// TestSetActiveConfigFile_isolatesReadWrite verifies that --config isolation
+// routes both the write (SetActiveProfile) and the read (ReadActiveProfile) to
+// the overridden file, never touching the global ~/.config/weft/config.yaml.
+func TestSetActiveConfigFile_isolatesReadWrite(t *testing.T) {
+	withHome(t, func(home string) {
+		custom := filepath.Join(t.TempDir(), "custom.yaml")
+		config.SetActiveConfigFile(custom)
+		defer config.SetActiveConfigFile("") // reset package global for other tests
+
+		if got, _ := config.FilePath(); got != custom {
+			t.Fatalf("FilePath = %q, want override %q", got, custom)
+		}
+		if err := config.SetActiveProfile("isolated"); err != nil {
+			t.Fatalf("SetActiveProfile: %v", err)
+		}
+		// The override file carries the value...
+		if _, err := os.Stat(custom); err != nil {
+			t.Fatalf("override config not written: %v", err)
+		}
+		got, err := config.ReadActiveProfile()
+		if err != nil {
+			t.Fatalf("ReadActiveProfile: %v", err)
+		}
+		if got != "isolated" {
+			t.Errorf("ReadActiveProfile = %q, want %q", got, "isolated")
+		}
+		// ...and the global file was never created.
+		global := filepath.Join(home, ".config", "weft", "config.yaml")
+		if _, err := os.Stat(global); !os.IsNotExist(err) {
+			t.Errorf("global config.yaml was written despite --config override (stat err = %v)", err)
+		}
+	})
+}
+
 func containsSubstr(s, sub string) bool {
 	return len(s) >= len(sub) && (s == sub || sub == "" ||
 		func() bool {

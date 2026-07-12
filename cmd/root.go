@@ -203,6 +203,13 @@ func initConfig() {
 			baseDir = filepath.Dir(expanded)
 		}
 		cfgBaseDir = baseDir
+		// Route active-profile reads/writes to the same file, so --config
+		// isolates that state too (and the watcher watches the right file).
+		if abs, err := filepath.Abs(expanded); err == nil {
+			config.SetActiveConfigFile(abs)
+		} else {
+			config.SetActiveConfigFile(expanded)
+		}
 	} else {
 		dir, err := config.DefaultDir()
 		if err != nil {
