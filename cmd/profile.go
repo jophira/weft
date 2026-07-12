@@ -692,6 +692,14 @@ watcher to switch profiles.`,
 				return lockErr
 			}
 			defer func() { _ = lock.Release() }()
+		} else if rs, _ := runstate.Read(cfgDir); rs != nil {
+			// --no-watch does not take the lock, so it cannot detect a live
+			// watcher that way. Warn: this one-shot apply will race with the
+			// watcher, which will re-apply on its next trigger. Writing
+			// active_profile below also hands the new profile off to it.
+			fmt.Fprintf(os.Stderr,
+				"[weft] warning: a watcher is running (pid %d, profile %q). This --no-watch apply may be re-applied by it; run without --no-watch to hand off cleanly, or stop the watcher first.\n",
+				rs.PID, rs.Profile)
 		}
 
 		// 3. Load the profile and resolve source roots.
