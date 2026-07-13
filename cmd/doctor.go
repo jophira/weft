@@ -98,6 +98,7 @@ func runDoctor(w io.Writer) {
 	}
 
 	reportProfileIntegrity(w)
+	reportRuleHealth(w)
 	reportPaths(w)
 }
 

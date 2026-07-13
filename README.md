@@ -36,6 +36,8 @@ weft doctor --all      # also list external/dead references
 
 It resolves stale prefixes by a unique trailing-path match inside your sources — so a reference to a file that was moved (or lives under a different root) is rewritten to the correct anchor automatically.
 
+`weft doctor` also checks **rule-annotation health** so the convention-driven resolver never silently skips a source. It flags rule files missing front-matter (with a suggested `label:`/`detect:` derived from the path), sources that contribute nothing because none of their rules are annotated, duplicate labels (the resolver keeps the first and ignores the rest), and dangling `extends:` targets. Suggestions are printed for you to review and commit — documentation, project/ticket trees, and the source's own `CLAUDE.md` wrapper are never flagged.
+
 Per-project rules are also supported: any directory in your source tree named `projects` or `project-rules` is automatically discovered. Weft lists every `.md` file found inside (recursively) as explicit paths in the assembled CLAUDE.md, grouped by project root so the AI can load the right rules for the active project.
 
 ## Install
@@ -257,7 +259,7 @@ weft target backups claude-code                   # list all available backups
 | `target list/apply/backups/revert` | Manage AI harness targets; inspect and restore backups |
 | `hook add/list/run/remove` | Manage lifecycle hooks |
 | `status [--short]` | Show active profile and per-harness projection state (instruction path, block drift) |
-| `doctor` | Health check — discovered harnesses, config issues, and path-reference lint; `--fix` heals stale/hardcoded paths to `{{weft.root}}` anchors, `--all` also lists external/dead refs |
+| `doctor` | Health check — discovered harnesses, config issues, path-reference lint, and rule-annotation health (missing front-matter, duplicate labels, dangling extends, with suggested fixes); `--fix` heals stale/hardcoded paths to `{{weft.root}}` anchors, `--all` also lists external/dead refs |
 | `version` | Print version, commit, and build date |
 | `bug-report` | Print diagnostic bundle (version, environment, doctor, recent logs) for filing a GitHub issue |
 
