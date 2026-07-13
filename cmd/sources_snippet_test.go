@@ -804,3 +804,46 @@ func TestResolvePrimarySource_EmptySources(t *testing.T) {
 		t.Errorf("expected empty string for nil sources, got %q", got)
 	}
 }
+
+func TestStagedUsesSourcesSnippet_Placeholder(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "CLAUDE.md"), "# Rules\n"+sourcesPlaceholder+"\n")
+	if !stagedUsesSourcesSnippet(dir) {
+		t.Error("expected raw placeholder to be detected as in use")
+	}
+}
+
+func TestStagedUsesSourcesSnippet_ExpandedBlock(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "CLAUDE.md"), "# Rules\n"+sourcesBegin+"\nAlways read:\n"+sourcesEnd+"\n")
+	if !stagedUsesSourcesSnippet(dir) {
+		t.Error("expected an expanded begin/end block to be detected as in use")
+	}
+}
+
+func TestStagedUsesSourcesSnippet_AbsentOrMissing(t *testing.T) {
+	dir := t.TempDir()
+	// No CLAUDE.md at all.
+	if stagedUsesSourcesSnippet(dir) {
+		t.Error("missing CLAUDE.md must not count as using the snippet")
+	}
+	// CLAUDE.md without any sources marker.
+	writeFile(t, filepath.Join(dir, "CLAUDE.md"), "# Rules\nnothing to see here\n")
+	if stagedUsesSourcesSnippet(dir) {
+		t.Error("CLAUDE.md without a sources marker must not count as using the snippet")
+	}
+}
+
+// TestStagedUsesSourcesSnippet_AfterExpansion proves the realistic flow: a raw
+// placeholder becomes a block after expandSourcesPlaceholder, and the detector
+// still reports the feature as in use (via the block marker).
+func TestStagedUsesSourcesSnippet_AfterExpansion(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "CLAUDE.md"), "# Rules\n"+sourcesPlaceholder+"\n")
+	if err := expandSourcesPlaceholder(dir, nil, nil); err != nil {
+		t.Fatalf("expandSourcesPlaceholder: %v", err)
+	}
+	if !stagedUsesSourcesSnippet(dir) {
+		t.Error("after expansion the block marker should still be detected as in use")
+	}
+}

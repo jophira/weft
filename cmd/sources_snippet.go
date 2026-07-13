@@ -83,6 +83,32 @@ func replaceSourcesBlock(content, replacement string) string {
 	return replacePlaceholderBlock(content, sourcesBegin, sourcesEnd, replacement)
 }
 
+// stagedUsesSourcesSnippet reports whether the staged CLAUDE.md still relies on
+// the deprecated sources read-map — either the raw placeholder or an expanded
+// begin/end block. Called after expansion, where the raw placeholder has already
+// become a block, so the block check is what normally fires. A missing or
+// unreadable file is treated as "not used".
+func stagedUsesSourcesSnippet(stagedDir string) bool {
+	data, err := os.ReadFile(filepath.Join(stagedDir, "CLAUDE.md"))
+	if err != nil {
+		return false
+	}
+	content := string(data)
+	return strings.Contains(content, sourcesPlaceholder) || strings.Contains(content, sourcesBegin)
+}
+
+// warnSourcesSnippetDeprecated prints a migration notice for the sources
+// read-map. It is emitted only when a profile actually expands the snippet, so
+// users who don't use it are never nagged. Best-effort to stderr: the snippet
+// still works today, so this never affects the apply's success.
+func warnSourcesSnippetDeprecated() {
+	fmt.Fprintln(os.Stderr, "⚠ weft: the sources read-map ("+sourcesPlaceholder+") is deprecated;")
+	fmt.Fprintln(os.Stderr, "  the resolver injects rule bodies directly — wire `weft rules resolve`")
+	fmt.Fprintln(os.Stderr, "  into a SessionStart hook and annotate rules with front-matter")
+	fmt.Fprintln(os.Stderr, "  (detect:/extends:). The snippet still works today; it will be removed")
+	fmt.Fprintln(os.Stderr, "  in a future release.")
+}
+
 // generateSourcesSnippet builds the <!-- weft:sources:begin/end --> block for
 // all sources. Files are classified as always-load or conditionally-load based
 // on their path relative to each source root:
