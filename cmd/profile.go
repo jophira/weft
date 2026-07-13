@@ -356,6 +356,12 @@ func mergeAndApply(p *profile.Profile, roots []string, srcs []source.Source, cfg
 	if err := expandSourcesPlaceholder(stagedDir, srcs, p); err != nil {
 		return fmt.Errorf("expanding sources placeholder: %w", err)
 	}
+	// The sources read-map is deprecated in favour of the convention-driven
+	// resolver. Nudge only profiles that actually use it, and only on the initial
+	// apply (quiet is set on watch re-applies) so watch mode doesn't nag.
+	if !quiet && stagedUsesSourcesSnippet(stagedDir) {
+		warnSourcesSnippetDeprecated()
+	}
 	if !quiet {
 		fmt.Printf("  %d file(s) merged into staging\n", len(staged))
 		printQualityReport(stagedDir, p, contribs)
