@@ -3,6 +3,7 @@ package rules
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 )
@@ -44,15 +45,7 @@ func loadedLabels(res Resolution) []string {
 }
 
 func equalStrings(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
+	return slices.Equal(a, b)
 }
 
 func newEvaluator(t *testing.T) Evaluator {
@@ -205,6 +198,42 @@ func TestResolve_DependencyOnlyRulePulledByExtends(t *testing.T) {
 		}
 	}
 	t.Errorf("expected common-backend pulled via extends, got %v", loadedLabels(res))
+}
+
+// TestResolve_TreeWithNoLabelsYieldsNothing is the atomic form of the work-tech
+// gap: a tree of rule-shaped files that all lack front-matter contributes
+// nothing — no rule loads, and nothing errors.
+func TestResolve_TreeWithNoLabelsYieldsNothing(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "common.md", "# common\n\nno front-matter\n")
+	writeFile(t, root, "java/java.md", "# java\n\nno front-matter\n")
+	res, err := Resolve(root, Context{Files: []string{"pom.xml"}}, newEvaluator(t))
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if len(res.Loaded) != 0 {
+		t.Errorf("expected no rules loaded from an un-annotated tree, got %v", loadedLabels(res))
+	}
+	if res.Bundle() != "" {
+		t.Errorf("expected empty bundle, got %q", res.Bundle())
+	}
+}
+
+// TestResolve_MixedAnnotatedAndUnlabeled_OnlyAnnotatedLoads proves that adding
+// front-matter to just some files makes exactly those participate; the rest stay
+// invisible.
+func TestResolve_MixedAnnotatedAndUnlabeled_OnlyAnnotatedLoads(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "common.md", "---\nlabel: common\ndetect: \"true\"\n---\nCOMMON")
+	writeFile(t, root, "notes.md", "# just notes, no front-matter\n")
+	writeFile(t, root, "java/java.md", "# java, forgot front-matter\n")
+	res, err := Resolve(root, Context{Files: []string{"pom.xml"}}, newEvaluator(t))
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if got := loadedLabels(res); !equalStrings(got, []string{"common"}) {
+		t.Errorf("load = %v, want only [common]", got)
+	}
 }
 
 func TestResolve_DuplicateLabelSkipped(t *testing.T) {
