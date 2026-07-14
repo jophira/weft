@@ -293,6 +293,42 @@ func TestDoctorIntegration_FlagsUnannotatedSourceInProfile(t *testing.T) {
 	}
 }
 
+// TestDoctorIntegration_AuditsSourceOutsideActiveProfile proves the rule-health
+// check audits every registered source — including one that is NOT in the active
+// profile — and only tags the active ones. A registered-but-inactive source that
+// contributes nothing must still be surfaced (it may be the profile the user is
+// about to switch to), just without the "(active profile)" marker.
+func TestDoctorIntegration_AuditsSourceOutsideActiveProfile(t *testing.T) {
+	base := withIsolatedConfig(t)
+	addSource(t, base, "annotated", 10, map[string]string{
+		"common.md": rule("common", "true", "OK"),
+	})
+	// 'raw' is registered but left out of the active profile, and un-annotated.
+	addSource(t, base, "raw", 20, map[string]string{
+		"java/springboot.md": "# no front-matter\n",
+	})
+	createProfile(t, "onlyannotated", "annotated")
+	activate(t, "onlyannotated")
+
+	var sb strings.Builder
+	reportRuleHealth(&sb)
+	got := sb.String()
+
+	if !strings.Contains(got, `source "raw"`) {
+		t.Errorf("a registered-but-inactive source should still be audited:\n%s", got)
+	}
+	if strings.Contains(got, `source "raw" (active profile)`) {
+		t.Errorf("an inactive source must not be tagged as active:\n%s", got)
+	}
+	if !strings.Contains(got, "contributes nothing") {
+		t.Errorf("the inactive un-annotated source should be flagged as contributing nothing:\n%s", got)
+	}
+	// The healthy active source must not be dragged into the report.
+	if strings.Contains(got, `source "annotated"`) {
+		t.Errorf("healthy active source should not appear in the report:\n%s", got)
+	}
+}
+
 // assertOrder fails unless each needle appears in the given left-to-right order.
 func assertOrder(t *testing.T, haystack string, needles ...string) {
 	t.Helper()
