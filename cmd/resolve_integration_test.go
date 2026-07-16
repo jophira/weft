@@ -9,6 +9,7 @@ import (
 
 	"github.com/jophira/weft/internal/profile"
 	"github.com/jophira/weft/internal/source"
+	"github.com/jophira/weft/internal/testutil"
 )
 
 // These tests exercise the composition that unit tests missed: a *profile*
@@ -19,18 +20,6 @@ import (
 // layerBundles, keyed off the active profile.
 
 // ── fixtures ─────────────────────────────────────────────────────────────────
-
-// rule renders a rule file with front-matter. detect "" makes it dependency-only.
-func rule(label, detect, body string, extends ...string) string {
-	var b strings.Builder
-	b.WriteString("---\nlabel: " + label + "\n")
-	b.WriteString("detect: \"" + detect + "\"\n")
-	if len(extends) > 0 {
-		b.WriteString("extends: [" + strings.Join(extends, ", ") + "]\n")
-	}
-	b.WriteString("---\n\n" + body + "\n")
-	return b.String()
-}
 
 // addSource registers a source rooted under base/srcs/<name> with the given
 // rel-path → content files and priority.
@@ -98,12 +87,12 @@ func resolveBundle(t *testing.T, repo string) string {
 // the bundle is unambiguous.
 func twoSourceWorld(t *testing.T, base string) {
 	addSource(t, base, "pers", 10, map[string]string{
-		"common.md": rule("common", "true", "PERS_COMMON"),
-		"java.md":   rule("java", "'pom.xml' in files", "PERS_JAVA", "common"),
+		"common.md": testutil.RuleFile("common", "true", "PERS_COMMON"),
+		"java.md":   testutil.RuleFile("java", "'pom.xml' in files", "PERS_JAVA", "common"),
 	})
 	addSource(t, base, "work", 20, map[string]string{
-		"common.md": rule("common", "true", "WORK_COMMON"),
-		"java.md":   rule("java", "'pom.xml' in files", "WORK_JAVA", "common"),
+		"common.md": testutil.RuleFile("common", "true", "WORK_COMMON"),
+		"java.md":   testutil.RuleFile("java", "'pom.xml' in files", "WORK_JAVA", "common"),
 	})
 }
 
@@ -182,8 +171,8 @@ func TestResolveIntegration_ProfileSwitchChangesBundle(t *testing.T) {
 func TestResolveIntegration_UnannotatedSourceContributesNothing(t *testing.T) {
 	base := withIsolatedConfig(t)
 	addSource(t, base, "annotated", 10, map[string]string{
-		"common.md": rule("common", "true", "ANNOTATED_COMMON"),
-		"java.md":   rule("java", "'pom.xml' in files", "ANNOTATED_JAVA", "common"),
+		"common.md": testutil.RuleFile("common", "true", "ANNOTATED_COMMON"),
+		"java.md":   testutil.RuleFile("java", "'pom.xml' in files", "ANNOTATED_JAVA", "common"),
 	})
 	// 'raw' looks like a rules source but has NO front-matter — exactly work-tech
 	// before annotation.
@@ -212,7 +201,7 @@ func TestResolveIntegration_UnannotatedSourceContributesNothing(t *testing.T) {
 func TestResolveIntegration_MissingProfileSourceIsSkipped(t *testing.T) {
 	base := withIsolatedConfig(t)
 	addSource(t, base, "pers", 10, map[string]string{
-		"common.md": rule("common", "true", "PERS_COMMON"),
+		"common.md": testutil.RuleFile("common", "true", "PERS_COMMON"),
 	})
 	createProfile(t, "withghost", "pers", "ghost") // ghost never registered
 	activate(t, "withghost")
@@ -229,8 +218,8 @@ func TestResolveIntegration_MissingProfileSourceIsSkipped(t *testing.T) {
 func TestResolveIntegration_DuplicateLabelWithinSource_FirstWins(t *testing.T) {
 	base := withIsolatedConfig(t)
 	addSource(t, base, "dup", 10, map[string]string{
-		"a-first.md":  rule("shared", "true", "FIRST_BODY"),
-		"b-second.md": rule("shared", "true", "SECOND_BODY"),
+		"a-first.md":  testutil.RuleFile("shared", "true", "FIRST_BODY"),
+		"b-second.md": testutil.RuleFile("shared", "true", "SECOND_BODY"),
 	})
 	createProfile(t, "p", "dup")
 	activate(t, "p")
@@ -249,7 +238,7 @@ func TestResolveIntegration_DuplicateLabelWithinSource_FirstWins(t *testing.T) {
 func TestResolveIntegration_DanglingExtendsStillLoadsRule(t *testing.T) {
 	base := withIsolatedConfig(t)
 	addSource(t, base, "s", 10, map[string]string{
-		"java.md": rule("java", "'pom.xml' in files", "JAVA_BODY", "nonexistent-base"),
+		"java.md": testutil.RuleFile("java", "'pom.xml' in files", "JAVA_BODY", "nonexistent-base"),
 	})
 	createProfile(t, "p", "s")
 	activate(t, "p")
@@ -266,7 +255,7 @@ func TestResolveIntegration_DanglingExtendsStillLoadsRule(t *testing.T) {
 func TestDoctorIntegration_FlagsUnannotatedSourceInProfile(t *testing.T) {
 	base := withIsolatedConfig(t)
 	addSource(t, base, "annotated", 10, map[string]string{
-		"common.md": rule("common", "true", "OK"),
+		"common.md": testutil.RuleFile("common", "true", "OK"),
 	})
 	addSource(t, base, "raw", 20, map[string]string{
 		"java/springboot.md": "# no front-matter\n",
@@ -301,7 +290,7 @@ func TestDoctorIntegration_FlagsUnannotatedSourceInProfile(t *testing.T) {
 func TestDoctorIntegration_AuditsSourceOutsideActiveProfile(t *testing.T) {
 	base := withIsolatedConfig(t)
 	addSource(t, base, "annotated", 10, map[string]string{
-		"common.md": rule("common", "true", "OK"),
+		"common.md": testutil.RuleFile("common", "true", "OK"),
 	})
 	// 'raw' is registered but left out of the active profile, and un-annotated.
 	addSource(t, base, "raw", 20, map[string]string{
