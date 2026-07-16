@@ -3,25 +3,23 @@ package hook
 import (
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 
-	"gopkg.in/yaml.v3"
-
 	"github.com/jophira/weft/internal/locate"
+	"github.com/jophira/weft/internal/yamlstore"
 )
 
 var validName = regexp.MustCompile(`^[a-z][a-z0-9_-]*$`)
 
 // FileManager persists each Hook as a YAML file under a directory.
 type FileManager struct {
-	dir string // absolute path to ~/.config/weft/hooks/
+	store *yamlstore.Store[Hook]
 }
 
 func NewFileManager(dir string) *FileManager {
-	return &FileManager{dir: locate.ExpandHome(dir)}
+	return &FileManager{store: yamlstore.New[Hook](locate.ExpandHome(dir))}
 }
 
 // Add writes a new hook YAML file. Errors if the name already exists.
@@ -35,24 +33,16 @@ func (m *FileManager) Add(h Hook) error {
 	if err := validateHook(h); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(m.dir, 0o755); err != nil {
-		return fmt.Errorf("creating hooks directory: %w", err)
-	}
-	p := m.filePath(h.Name)
-	if _, err := os.Stat(p); err == nil {
+	if m.store.Exists(h.Name) {
 		return fmt.Errorf("hook %q already exists — remove it first with 'weft hook remove %s'", h.Name, h.Name)
 	}
-	data, err := yaml.Marshal(&h)
-	if err != nil {
-		return fmt.Errorf("serialising hook: %w", err)
-	}
-	return os.WriteFile(p, data, 0o644)
+	return m.store.Write(h.Name, h)
 }
 
 // Remove deletes the hook YAML file.
 func (m *FileManager) Remove(name string) error {
-	if err := os.Remove(m.filePath(name)); err != nil {
-		if errors.Is(err, os.ErrNotExist) {
+	if err := m.store.Remove(name); err != nil {
+		if errors.Is(err, yamlstore.ErrNotFound) {
 			return fmt.Errorf("hook %q not found", name)
 		}
 		return fmt.Errorf("removing hook %q: %w", name, err)
@@ -62,46 +52,19 @@ func (m *FileManager) Remove(name string) error {
 
 // Get reads and parses one hook by name.
 func (m *FileManager) Get(name string) (*Hook, error) {
-	data, err := os.ReadFile(m.filePath(name))
+	h, err := m.store.Get(name)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
+		if errors.Is(err, yamlstore.ErrNotFound) {
 			return nil, fmt.Errorf("hook %q not found", name)
 		}
 		return nil, fmt.Errorf("reading hook %q: %w", name, err)
 	}
-	var h Hook
-	if err := yaml.Unmarshal(data, &h); err != nil {
-		return nil, fmt.Errorf("parsing hook %q: %w", name, err)
-	}
-	return &h, nil
+	return h, nil
 }
 
 // List returns all registered hooks sorted by filename.
 func (m *FileManager) List() ([]Hook, error) {
-	entries, err := os.ReadDir(m.dir)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("reading hooks directory: %w", err)
-	}
-	var hooks []Hook
-	for _, e := range entries {
-		if e.IsDir() || filepath.Ext(e.Name()) != ".yaml" {
-			continue
-		}
-		name := strings.TrimSuffix(e.Name(), ".yaml")
-		h, err := m.Get(name)
-		if err != nil {
-			return nil, err
-		}
-		hooks = append(hooks, *h)
-	}
-	return hooks, nil
-}
-
-func (m *FileManager) filePath(name string) string {
-	return filepath.Join(m.dir, name+".yaml")
+	return m.store.List()
 }
 
 // validateHook checks that the trigger/action combination is coherent.
