@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/jophira/weft/internal/testutil"
 )
 
 // execWeft builds a hermetic weft command for best-effort teardown (no test
@@ -17,18 +19,6 @@ func execWeft(home string, args ...string) *exec.Cmd {
 	cmd.Env = hermeticEnv(home)
 	cmd.Stdin = strings.NewReader("")
 	return cmd
-}
-
-// fm renders a rule file with resolver front-matter. detect is wrapped in double
-// quotes so CEL predicates containing single quotes ('pom.xml' in files) survive.
-func fm(label, detect, body string, extends ...string) string {
-	var b strings.Builder
-	b.WriteString("---\nlabel: " + label + "\ndetect: \"" + detect + "\"\n")
-	if len(extends) > 0 {
-		b.WriteString("extends: [" + strings.Join(extends, ", ") + "]\n")
-	}
-	b.WriteString("---\n\n" + body + "\n")
-	return b.String()
 }
 
 // TestResolveEndToEnd drives `weft rules resolve` through the real binary against
@@ -56,12 +46,12 @@ func TestResolveEndToEnd(t *testing.T) {
 	// pers + work are fully annotated: an always-on common rule and a java rule
 	// (detects pom.xml) that extends it. Bodies differ so the bundle is unambiguous.
 	writeFile(t, filepath.Join(pers, "CLAUDE.md"), "# pers instructions")
-	writeFile(t, filepath.Join(pers, "common.md"), fm("common", "true", "PERS_COMMON"))
-	writeFile(t, filepath.Join(pers, "java.md"), fm("java", "'pom.xml' in files", "PERS_JAVA", "common"))
+	writeFile(t, filepath.Join(pers, "common.md"), testutil.RuleFile("common", "true", "PERS_COMMON"))
+	writeFile(t, filepath.Join(pers, "java.md"), testutil.RuleFile("java", "'pom.xml' in files", "PERS_JAVA", "common"))
 
 	writeFile(t, filepath.Join(work, "CLAUDE.md"), "# work instructions")
-	writeFile(t, filepath.Join(work, "common.md"), fm("common", "true", "WORK_COMMON"))
-	writeFile(t, filepath.Join(work, "java.md"), fm("java", "'pom.xml' in files", "WORK_JAVA", "common"))
+	writeFile(t, filepath.Join(work, "common.md"), testutil.RuleFile("common", "true", "WORK_COMMON"))
+	writeFile(t, filepath.Join(work, "java.md"), testutil.RuleFile("java", "'pom.xml' in files", "WORK_JAVA", "common"))
 
 	// raw looks like a rules source but carries NO front-matter — exactly work-tech
 	// before annotation. It must contribute nothing.

@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jophira/weft/internal/testutil"
 )
 
 // These tests exercise cache self-heal at the *command* level: a resolve with the
@@ -56,7 +58,7 @@ func editRule(t *testing.T, path, content string) {
 func TestResolveCache_BaselineWritesSignals(t *testing.T) {
 	base := withIsolatedConfig(t)
 	addSource(t, base, "s", 10, map[string]string{
-		"common.md": rule("common", "true", "COMMON_BODY"),
+		"common.md": testutil.RuleFile("common", "true", "COMMON_BODY"),
 	})
 	createProfile(t, "p", "s")
 	activate(t, "p")
@@ -75,7 +77,7 @@ func TestResolveCache_BaselineWritesSignals(t *testing.T) {
 func TestResolveCache_SelfHealsLabelAdded(t *testing.T) {
 	base := withIsolatedConfig(t)
 	addSource(t, base, "s", 10, map[string]string{
-		"keep.md":  rule("keep", "true", "KEEP_BODY"),
+		"keep.md":  testutil.RuleFile("keep", "true", "KEEP_BODY"),
 		"extra.md": "# not yet a rule\n\nEXTRA_BODY\n",
 	})
 	createProfile(t, "p", "s")
@@ -87,7 +89,7 @@ func TestResolveCache_SelfHealsLabelAdded(t *testing.T) {
 		t.Fatalf("baseline should have KEEP_BODY only:\n%s", before)
 	}
 
-	editRule(t, srcRulePath(base, "s", "extra.md"), rule("extra", "true", "EXTRA_BODY"))
+	editRule(t, srcRulePath(base, "s", "extra.md"), testutil.RuleFile("extra", "true", "EXTRA_BODY"))
 
 	after := resolveBundleCached(t, repo)
 	if !strings.Contains(after, "EXTRA_BODY") {
@@ -100,8 +102,8 @@ func TestResolveCache_SelfHealsLabelAdded(t *testing.T) {
 func TestResolveCache_SelfHealsLabelRemoved(t *testing.T) {
 	base := withIsolatedConfig(t)
 	addSource(t, base, "s", 10, map[string]string{
-		"keep.md": rule("keep", "true", "KEEP_BODY"),
-		"drop.md": rule("drop", "true", "DROP_BODY"),
+		"keep.md": testutil.RuleFile("keep", "true", "KEEP_BODY"),
+		"drop.md": testutil.RuleFile("drop", "true", "DROP_BODY"),
 	})
 	createProfile(t, "p", "s")
 	activate(t, "p")
@@ -128,7 +130,7 @@ func TestResolveCache_SelfHealsLabelRemoved(t *testing.T) {
 func TestResolveCache_SelfHealsDetectChanged(t *testing.T) {
 	base := withIsolatedConfig(t)
 	addSource(t, base, "s", 10, map[string]string{
-		"java.md": rule("java", "'pom.xml' in files", "JAVA_BODY"),
+		"java.md": testutil.RuleFile("java", "'pom.xml' in files", "JAVA_BODY"),
 	})
 	createProfile(t, "p", "s")
 	activate(t, "p")
@@ -140,7 +142,7 @@ func TestResolveCache_SelfHealsDetectChanged(t *testing.T) {
 	}
 
 	// Repoint detect at a signal the repo does NOT have.
-	editRule(t, srcRulePath(base, "s", "java.md"), rule("java", "'go.mod' in files", "JAVA_BODY"))
+	editRule(t, srcRulePath(base, "s", "java.md"), testutil.RuleFile("java", "'go.mod' in files", "JAVA_BODY"))
 
 	after := resolveBundleCached(t, repo)
 	if strings.Contains(after, "JAVA_BODY") {
@@ -154,9 +156,9 @@ func TestResolveCache_SelfHealsDetectChanged(t *testing.T) {
 func TestResolveCache_SelfHealsExtendsChanged(t *testing.T) {
 	base := withIsolatedConfig(t)
 	addSource(t, base, "s", 10, map[string]string{
-		"a.md":    rule("a", "false", "BODY_A"),
-		"b.md":    rule("b", "false", "BODY_B"),
-		"leaf.md": rule("leaf", "'pom.xml' in files", "LEAF_BODY", "a"),
+		"a.md":    testutil.RuleFile("a", "false", "BODY_A"),
+		"b.md":    testutil.RuleFile("b", "false", "BODY_B"),
+		"leaf.md": testutil.RuleFile("leaf", "'pom.xml' in files", "LEAF_BODY", "a"),
 	})
 	createProfile(t, "p", "s")
 	activate(t, "p")
@@ -167,7 +169,7 @@ func TestResolveCache_SelfHealsExtendsChanged(t *testing.T) {
 		t.Fatalf("baseline leaf should pull in a (not b):\n%s", before)
 	}
 
-	editRule(t, srcRulePath(base, "s", "leaf.md"), rule("leaf", "'pom.xml' in files", "LEAF_BODY", "b"))
+	editRule(t, srcRulePath(base, "s", "leaf.md"), testutil.RuleFile("leaf", "'pom.xml' in files", "LEAF_BODY", "b"))
 
 	after := resolveBundleCached(t, repo)
 	if !strings.Contains(after, "BODY_B") {
@@ -183,8 +185,8 @@ func TestResolveCache_SelfHealsExtendsChanged(t *testing.T) {
 func TestResolveCache_SelfHealsFileDeleted(t *testing.T) {
 	base := withIsolatedConfig(t)
 	addSource(t, base, "s", 10, map[string]string{
-		"keep.md": rule("keep", "true", "KEEP_BODY"),
-		"gone.md": rule("gone", "true", "GONE_BODY"),
+		"keep.md": testutil.RuleFile("keep", "true", "KEEP_BODY"),
+		"gone.md": testutil.RuleFile("gone", "true", "GONE_BODY"),
 	})
 	createProfile(t, "p", "s")
 	activate(t, "p")

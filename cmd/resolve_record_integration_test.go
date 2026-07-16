@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/jophira/weft/internal/testutil"
 )
 
 // These tests exercise the --record audit path across multiple sources under an
@@ -139,7 +141,7 @@ func TestResolveRecord_AppendsWhenSelectionChanges(t *testing.T) {
 	resolveWithRecord(t, repo)
 
 	// Change the body of work's java rule — same label, new content → new hash.
-	editRule(t, srcRulePath(base, "work", "java.md"), rule("java", "'pom.xml' in files", "WORK_JAVA_V2", "common"))
+	editRule(t, srcRulePath(base, "work", "java.md"), testutil.RuleFile("java", "'pom.xml' in files", "WORK_JAVA_V2", "common"))
 
 	resolveWithRecord(t, repo)
 
