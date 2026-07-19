@@ -4,8 +4,11 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/jophira/weft/internal/locate"
@@ -35,9 +38,13 @@ func applyOut(ctx ApplyCtx) io.Writer {
 const (
 	logUnchanged = "  · %-9s %s\n"
 	logWrote     = "  ✓ %-9s %s\n"
+	logRemoved   = "  − %-9s %s\n"
+	logKept      = "  ! %-9s %s (edited since weft wrote it — no longer managed)\n"
 
 	statusUnchanged = "unchanged"
 	statusWrote     = "wrote"
+	statusRemoved   = "removed"
+	statusKept      = "kept"
 )
 
 type conflictFile struct {
@@ -64,6 +71,10 @@ type fileEntry struct {
 //   - Owned by weft, content changed (update): write, log "✓ wrote".
 //   - Externally modified (conflict): back up, then write, log "! backed up".
 //
+// Files the previous apply staged but this one does not (e.g. after a profile
+// switch) are dropped: removed from the target when weft still owns them, or left
+// in place with a warning when the user has edited them since. See pruneDropped.
+//
 // All conflicts are backed up before any writes occur. The manifest is updated
 // with new hashes after a successful apply.
 //
@@ -76,6 +87,9 @@ func applyWithManifest(stagedRoot, targetRoot, harnessName string, ctx ApplyCtx,
 	if err != nil {
 		return fmt.Errorf("loading manifest: %w", err)
 	}
+	// Capture what the previous apply projected before any of it is overwritten
+	// below — the difference against this apply's staged set is what got dropped.
+	prevStaged := m.StagedSet()
 
 	var entries []fileEntry
 	var conflicts []conflictFile
@@ -168,15 +182,26 @@ func applyWithManifest(stagedRoot, targetRoot, harnessName string, ctx ApplyCtx,
 		fmt.Fprintf(out, logWrote, statusWrote, fe.dst)
 	}
 
+	// Remove files the previous apply staged but this one does not, so a profile
+	// switch leaves no orphans behind. Prunes Files entries for whatever it deletes;
+	// user-edited files it declines to delete keep their entry.
+	if err := pruneDropped(prevStaged, newHashes, targetRoot, m, out); err != nil {
+		return err
+	}
+
 	m.Harness = harnessName
 	m.Profile = ctx.ProfileName
 	m.TargetRoot = targetRoot
 	m.AppliedAt = time.Now()
-	// Replace (not merge) so that deleted source files are pruned from the manifest.
-	// maps.Copy would leave stale entries that cause false conflicts on subsequent applies.
-	m.Files = newHashes
-	// Rebuild SourceFiles from scratch for the same reason — only keep entries that
-	// correspond to files present in this apply's staged tree.
+	// Merge, don't replace. Files is the durable ownership record: dropping an entry
+	// because the active profile no longer stages it makes weft forget it wrote the
+	// file, so the next apply that stages it again mistakes its own output for a
+	// user edit (issue #209). pruneDropped has already removed the entries whose
+	// files are genuinely gone from disk.
+	maps.Copy(m.Files, newHashes)
+	m.Staged = slices.Sorted(maps.Keys(newHashes))
+	// Rebuild SourceFiles from scratch — only keep entries that correspond to files
+	// present in this apply's staged tree.
 	newSourceFiles := make(map[string][]string)
 	for rel, sources := range ctx.SourceAttribution {
 		if _, ok := newHashes[rel]; ok {
@@ -242,6 +267,9 @@ func trackAndWriteFile(absPath, rel, harnessName string, content []byte, ctx App
 	m.TargetRoot = filepath.Dir(absPath)
 	m.AppliedAt = time.Now()
 	m.Files[rel] = contentHash
+	// This harness projects exactly one file, so it is the whole staged set. Kept in
+	// sync with Files so pruneDropped never sees it as dropped (issue #209).
+	m.Staged = []string{rel}
 	return manifest.Save(ctx.CfgDir, m)
 }
 
@@ -258,6 +286,74 @@ func applyToHomeDir(stagedRoot, dotSubdir, harnessName string, ctx ApplyCtx, ren
 		return fmt.Errorf("ensuring ~/%s exists: %w", dotSubdir, err)
 	}
 	return applyWithManifest(stagedRoot, target, harnessName, ctx, renames, nil)
+}
+
+// pruneDropped removes target files that the previous apply staged but this one
+// does not — the residue of a profile switch or a deleted source file.
+//
+// For each dropped path, on-disk content decides what happens:
+//   - Matches the manifest hash: weft wrote it and nobody has touched it since, so
+//     it is deleted and its manifest entry pruned. Logged "− removed".
+//   - Differs: the user has edited it. Deleting it would destroy work weft has no
+//     claim over, so it is left in place and logged "! kept". Its manifest entry
+//     survives, which keeps write-back working if the file is ever staged again.
+//   - Already gone: nothing to do beyond pruning the manifest entry.
+//
+// Empty parent directories left behind are removed, so dropping a whole skill does
+// not leave a bare directory in ~/.claude/skills.
+func pruneDropped(
+	prevStaged map[string]struct{},
+	nowStaged map[string]string,
+	targetRoot string,
+	m *manifest.Manifest,
+	out io.Writer,
+) error {
+	// Sort so the log (and the tests reading it) have a stable order.
+	dropped := make([]string, 0)
+	for rel := range prevStaged {
+		if _, stillStaged := nowStaged[rel]; !stillStaged {
+			dropped = append(dropped, rel)
+		}
+	}
+	slices.Sort(dropped)
+
+	for _, rel := range dropped {
+		full := filepath.Join(targetRoot, rel)
+		existing, readErr := os.ReadFile(full) //nolint:gosec // rel comes from the manifest weft itself wrote
+		switch {
+		case os.IsNotExist(readErr):
+			delete(m.Files, rel) // already gone — just forget it
+
+		case readErr != nil:
+			return fmt.Errorf("reading dropped file %s: %w", rel, readErr)
+
+		default:
+			if knownHash, owned := m.Files[rel]; !owned || manifest.HashBytes(existing) != knownHash {
+				// Edited since weft wrote it (or never weft's) — not ours to delete.
+				fmt.Fprintf(out, logKept, statusKept, rel)
+				continue
+			}
+			if rmErr := os.Remove(full); rmErr != nil {
+				return fmt.Errorf("removing dropped file %s: %w", rel, rmErr)
+			}
+			delete(m.Files, rel)
+			fmt.Fprintf(out, logRemoved, statusRemoved, rel)
+			pruneEmptyDirs(filepath.Dir(full), targetRoot)
+		}
+	}
+	return nil
+}
+
+// pruneEmptyDirs walks up from dir removing empty directories, stopping at (and
+// never removing) root. Non-empty directories abort the walk, as os.Remove fails
+// on them — the error is the signal to stop, not a fault.
+func pruneEmptyDirs(dir, root string) {
+	for dir != root && strings.HasPrefix(dir, root) {
+		if err := os.Remove(dir); err != nil {
+			return
+		}
+		dir = filepath.Dir(dir)
+	}
 }
 
 // backupConflicts copies each conflict file into cfgDir/backups/<harness>/<timestamp>/,

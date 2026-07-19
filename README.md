@@ -230,11 +230,25 @@ every file it wrote. On startup, before applying, it checks each managed file:
 
 Files weft has never touched (e.g. `~/.claude/projects/`) are never modified.
 
+The manifest separates two things: `files` is the durable record of everything weft has
+written for that harness, and `staged` is the subset the active profile currently projects.
+Ownership therefore survives a profile switch — a file that leaves the profile and comes
+back later is still recognised as weft's own output rather than mistaken for a hand edit.
+
+When a file drops out of the active profile, weft cleans it up rather than orphaning it:
+
+- **Still matches the manifest hash** — deleted from the target (`− removed`), and any
+  directory it emptied is pruned.
+- **Edited since weft wrote it** — left exactly as-is with a warning (`! kept`). Weft will
+  not delete work it has no claim over; the file simply stops being managed.
+
 ```
-[weft] startup write-back: CLAUDE.md → ai-rules-personal-tech
+[weft] startup write-back: CLAUDE.md → pers-tech
 Applying to claude-code...
   · unchanged CLAUDE.md
   ✓ wrote     commands/backend/java.md
+  − removed   skills/old-skill/SKILL.md
+  ! kept      commands/tweaked.md (edited since weft wrote it — no longer managed)
 ```
 
 To restore a backup (last-resort cases only):
