@@ -58,6 +58,11 @@ func (f *applyFixture) exists(rel string) bool {
 	return err == nil
 }
 
+// osPath converts a slash-separated test path to the separator the apply log and
+// manifest keys actually use, which is the OS one (filepath.Rel on Windows yields
+// backslashes). Lets the assertions below stay readable as "a/b/c".
+func osPath(rel string) string { return filepath.FromSlash(rel) }
+
 // TestApply_ProfileRoundTripKeepsOwnership is the issue #209 regression: a file
 // that leaves the staged set and comes back must still be recognised as weft's
 // own output, not mistaken for a user edit and backed up.
@@ -77,7 +82,7 @@ func TestApply_ProfileRoundTripKeepsOwnership(t *testing.T) {
 	if strings.Contains(out, "externally modified") {
 		t.Errorf("re-applying profile A must not report a conflict, got: %q", out)
 	}
-	if !strings.Contains(out, "✓ wrote     skills/foo/SKILL.md") {
+	if !strings.Contains(out, "✓ wrote     "+osPath("skills/foo/SKILL.md")) {
 		t.Errorf("expected skills/foo/SKILL.md to be re-written, got: %q", out)
 	}
 	// Nothing should have been backed up — the backup dir should not even exist.
@@ -108,10 +113,10 @@ func TestApply_DroppedFileRemoved(t *testing.T) {
 	if f.exists("commands/gone.md") {
 		t.Error("dropped file should have been removed from the target")
 	}
-	if !strings.Contains(out, "− removed   commands/gone.md") {
+	if !strings.Contains(out, "− removed   "+osPath("commands/gone.md")) {
 		t.Errorf("expected a removal log line, got: %q", out)
 	}
-	if _, stillTracked := f.manifest(t).Files["commands/gone.md"]; stillTracked {
+	if _, stillTracked := f.manifest(t).Files[osPath("commands/gone.md")]; stillTracked {
 		t.Error("removed file should be pruned from the manifest")
 	}
 }
@@ -155,7 +160,7 @@ func TestApply_DroppedFileEditedByUserIsKept(t *testing.T) {
 	if got := readFile(t, edited); got != "hand-edited by the user" {
 		t.Errorf("user edit must be preserved verbatim, got %q", got)
 	}
-	if !strings.Contains(out, "! kept      commands/mine.md") {
+	if !strings.Contains(out, "! kept      "+osPath("commands/mine.md")) {
 		t.Errorf("expected a 'kept' warning, got: %q", out)
 	}
 }
@@ -203,7 +208,7 @@ func TestApply_StagedTracksCurrentProfileOnly(t *testing.T) {
 	if got := m.Staged; len(got) != 1 || got[0] != "CLAUDE.md" {
 		t.Errorf("Staged = %v, want [CLAUDE.md]", got)
 	}
-	if _, owned := m.Files["commands/keep.md"]; !owned {
+	if _, owned := m.Files[osPath("commands/keep.md")]; !owned {
 		t.Error("Files must retain ownership of the kept file so write-back still works")
 	}
 }
