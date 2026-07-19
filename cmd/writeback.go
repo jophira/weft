@@ -101,15 +101,53 @@ func stripAttributionMarkers(s string) string {
 // dispatchWriteBack attempts single-source write-back first, then falls back to
 // the merged write-back path for files with multiple contributing sources.
 // Returns (true, nil) when at least one source was updated.
+//
+// On success the manifest's hash for the file is refreshed to the bytes now on
+// disk. Callers must persist the manifest afterwards — see refreshManifestHash
+// for why skipping this produces a spurious conflict.
 func dispatchWriteBack(m *manifest.Manifest, c watch.TargetChange, p *profile.Profile, srcMap map[string]source.Source) (bool, error) {
 	performed, err := writeBackSingleSourceMap(m, c, p, srcMap)
 	if err != nil {
 		return false, err
 	}
 	if !performed && len(m.SourceFiles[c.Rel]) > 1 {
-		return writeBackMergedSourceMap(m, c, p, srcMap)
+		performed, err = writeBackMergedSourceMap(m, c, p, srcMap)
+		if err != nil {
+			return false, err
+		}
 	}
-	return performed, nil
+	if !performed {
+		return false, nil
+	}
+	if err := refreshManifestHash(m, c); err != nil {
+		// The write-back itself succeeded and the source file is safe; only the
+		// bookkeeping failed. Report it as performed so the caller does not treat
+		// the edit as lost, but surface the error so the cause is visible.
+		return true, err
+	}
+	return true, nil
+}
+
+// refreshManifestHash re-points the manifest entry for c.Rel at the bytes now on
+// disk in the target, marking the file as reconciled with its source.
+//
+// Without this the manifest still holds the pre-edit hash after a write-back. The
+// apply that follows compares the target against that stale hash, sees a
+// mismatch, and declares the file externally modified — backing up a file it just
+// reconciled and then writing back byte-identical content. The apply is supposed
+// to be a no-op at that point.
+//
+// Note this hashes the *target* bytes, not what was written to the source: apply
+// compares against the target, and normalizeForSource means the two legitimately
+// differ (placeholder collapsing, attribution markers).
+func refreshManifestHash(m *manifest.Manifest, c watch.TargetChange) error {
+	full := filepath.Join(c.Root, c.Rel)
+	hash, err := manifest.HashFile(full)
+	if err != nil {
+		return fmt.Errorf("refreshing manifest hash for %s after write-back: %w", c.Rel, err)
+	}
+	m.Files[c.Rel] = hash
+	return nil
 }
 
 // owningSource finds the source that should receive a write-back for rel.

@@ -307,3 +307,70 @@ func TestResolvedSourceName_MultiSource(t *testing.T) {
 		t.Errorf("resolvedSourceName = %q, want %q", name, "work+personal")
 	}
 }
+
+// TestStartupWriteBack_RefreshesManifestHash verifies the manifest is re-pointed
+// at the written-back content and persisted to disk.
+//
+// Without this the manifest keeps the pre-edit hash, and the apply that follows
+// compares the target against it, declares the file externally modified, and backs
+// up a file it just reconciled.
+func TestStartupWriteBack_RefreshesManifestHash(t *testing.T) {
+	stagedDir, targetRoot, cfgDir, srcRoot := setupStartupWBFixture(t)
+
+	const originalContent = "# original rules"
+	const editedContent = "# edited by claude"
+
+	writeFile(t, filepath.Join(srcRoot, "CLAUDE.md"), originalContent)
+	writeFile(t, filepath.Join(stagedDir, "CLAUDE.md"), originalContent)
+	writeFile(t, filepath.Join(targetRoot, "CLAUDE.md"), editedContent)
+
+	saveManifest(t, cfgDir, "claude-code", targetRoot,
+		map[string]string{"CLAUDE.md": manifest.HashBytes([]byte(originalContent))}, nil)
+
+	srcs := []source.Source{newSource("personal", srcRoot)}
+	p := &profile.Profile{Name: "test", Sources: []string{"personal"}, Overlay: profile.OverlayCascade}
+
+	if err := startupWriteBack(stagedDir, "claude-code", cfgDir, p, srcs); err != nil {
+		t.Fatalf("startupWriteBack: %v", err)
+	}
+
+	// Re-load from disk: an in-memory-only update would be lost before apply runs.
+	m, err := manifest.Load(cfgDir, "claude-code")
+	if err != nil {
+		t.Fatalf("loading manifest: %v", err)
+	}
+	want := manifest.HashBytes([]byte(editedContent))
+	if got := m.Files["CLAUDE.md"]; got != want {
+		t.Errorf("manifest hash = %q, want the edited content's hash %q", got, want)
+	}
+}
+
+// TestStartupWriteBack_UnchangedFileLeavesManifestAlone verifies the refresh only
+// fires on an actual write-back — a file matching its manifest hash must not be
+// touched, since that path never reads or reconciles anything.
+func TestStartupWriteBack_UnchangedFileLeavesManifestAlone(t *testing.T) {
+	stagedDir, targetRoot, cfgDir, srcRoot := setupStartupWBFixture(t)
+
+	const content = "# unchanged"
+	writeFile(t, filepath.Join(srcRoot, "CLAUDE.md"), content)
+	writeFile(t, filepath.Join(stagedDir, "CLAUDE.md"), content)
+	writeFile(t, filepath.Join(targetRoot, "CLAUDE.md"), content)
+
+	hash := manifest.HashBytes([]byte(content))
+	saveManifest(t, cfgDir, "claude-code", targetRoot, map[string]string{"CLAUDE.md": hash}, nil)
+
+	srcs := []source.Source{newSource("personal", srcRoot)}
+	p := &profile.Profile{Name: "test", Sources: []string{"personal"}, Overlay: profile.OverlayCascade}
+
+	if err := startupWriteBack(stagedDir, "claude-code", cfgDir, p, srcs); err != nil {
+		t.Fatalf("startupWriteBack: %v", err)
+	}
+
+	m, err := manifest.Load(cfgDir, "claude-code")
+	if err != nil {
+		t.Fatalf("loading manifest: %v", err)
+	}
+	if got := m.Files["CLAUDE.md"]; got != hash {
+		t.Errorf("manifest hash = %q, want it untouched at %q", got, hash)
+	}
+}

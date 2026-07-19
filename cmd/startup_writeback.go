@@ -51,7 +51,11 @@ func startupWriteBack(
 	// cf. Java: compute a HashMap<String,Source> before the Files.walk() stream.
 	wbSrcMap := buildSrcMap(srcs)
 
-	return filepath.WalkDir(stagedDir, func(path string, d fs.DirEntry, err error) error {
+	// Tracks whether any write-back refreshed a manifest hash during the walk, so
+	// the manifest is saved once at the end rather than per file.
+	dirty := false
+
+	walkErr := filepath.WalkDir(stagedDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return err
 		}
@@ -86,6 +90,7 @@ func startupWriteBack(
 		}
 
 		if performed {
+			dirty = true
 			// Identify the source name for the output message.
 			srcName := resolvedSourceName(rel, p, srcs, m)
 			fmt.Printf("[weft] startup write-back: %s → %s\n", rel, srcName)
@@ -101,6 +106,18 @@ func startupWriteBack(
 			rel, locate.Tilde(backupPath))
 		return nil
 	})
+	if walkErr != nil {
+		return walkErr
+	}
+
+	// Persist the refreshed hashes before the caller applies, so apply sees the
+	// written-back files as reconciled rather than externally modified.
+	if dirty {
+		if err := manifest.Save(cfgDir, m); err != nil {
+			return fmt.Errorf("saving manifest after startup write-back: %w", err)
+		}
+	}
+	return nil
 }
 
 // resolvedSourceName returns a human-readable source name for the write-back log.
