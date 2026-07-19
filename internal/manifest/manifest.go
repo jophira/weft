@@ -12,11 +12,19 @@ import (
 // Manifest records every file weft last wrote for a given harness.
 // It is used to distinguish weft-owned files from externally-modified ones.
 type Manifest struct {
-	Harness     string              `json:"harness"`
-	Profile     string              `json:"profile"`
-	TargetRoot  string              `json:"target_root"`
-	AppliedAt   time.Time           `json:"applied_at"`
-	Files       map[string]string   `json:"files"`                  // rel path -> "sha256:<hex>"
+	Harness    string    `json:"harness"`
+	Profile    string    `json:"profile"`
+	TargetRoot string    `json:"target_root"`
+	AppliedAt  time.Time `json:"applied_at"`
+	// Files is the durable ownership record: every path weft has written for this
+	// harness, mapped to the sha256 of the bytes it last wrote. Entries survive a
+	// file leaving the active profile so weft can still recognise its own output
+	// (and detect genuine external edits) if that file is projected again later.
+	Files map[string]string `json:"files"` // rel path -> "sha256:<hex>"
+	// Staged is the set of paths the last apply actually projected — a subset of
+	// Files. The difference between the two is what a profile switch dropped, which
+	// is how apply knows to remove files that are no longer part of the profile.
+	Staged      []string            `json:"staged,omitempty"`
 	SourceFiles map[string][]string `json:"source_files,omitempty"` // rel path -> ordered source names (AppendStrategy files only)
 	// InstructionPath is the absolute path of the harness root instruction file
 	// (CLAUDE.md, AGENTS.md, …) in which weft manages a <!-- weft:begin/end -->
@@ -51,6 +59,27 @@ func Load(cfgDir, harnessName string) (*Manifest, error) {
 		m.Files = map[string]string{}
 	}
 	return &m, nil
+}
+
+// StagedSet returns the paths the last apply projected, as a set for lookup.
+//
+// Manifests written before Staged existed have no such field. In those the Files
+// map was replaced wholesale on every apply, so its keys *are* the last staged
+// set — using them as the fallback makes the first apply after an upgrade behave
+// exactly as it did before, with no spurious deletions.
+func (m *Manifest) StagedSet() map[string]struct{} {
+	keys := m.Staged
+	if keys == nil {
+		keys = make([]string, 0, len(m.Files))
+		for rel := range m.Files {
+			keys = append(keys, rel)
+		}
+	}
+	set := make(map[string]struct{}, len(keys))
+	for _, rel := range keys {
+		set[rel] = struct{}{}
+	}
+	return set
 }
 
 // Save writes m to cfgDir/manifests/<harness>.json, creating the directory if needed.
