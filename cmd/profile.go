@@ -917,6 +917,9 @@ func startProfileWatchers(p *profile.Profile, roots []string, srcs []source.Sour
 				// callback invocation so each write-back call does not rebuild it.
 				// cf. Java: compute a HashMap<String,Source> before the for-each loop.
 				wbSrcMap := buildSrcMap(srcs)
+				// Track whether any write-back refreshed a manifest hash, so the
+				// batch is persisted once instead of per file.
+				dirty := false
 				for _, c := range changes {
 					if _, owned := m.Files[c.Rel]; !owned {
 						continue // not a weft-managed file — ignore silently
@@ -929,9 +932,18 @@ func startProfileWatchers(p *profile.Profile, roots []string, srcs []source.Sour
 						continue
 					}
 					if performed {
+						dirty = true
 						fmt.Printf("[weft] wrote %s back to source (source watcher will re-apply)\n", c.Rel)
 					} else {
 						fmt.Printf("[weft] %s: no owning source found — set write_back.default in profile\n", c.Rel)
+					}
+				}
+				// Persist the refreshed hashes so the re-apply this triggers sees the
+				// files as reconciled rather than externally modified.
+				if dirty {
+					if saveErr := manifest.Save(cfgDir, m); saveErr != nil {
+						fmt.Fprintf(os.Stderr, "[weft] saving manifest after write-back: %v\n", saveErr)
+						slog.Error("saving manifest after write-back", slog.String("target", tgt), slog.Any("error", saveErr))
 					}
 				}
 			},
