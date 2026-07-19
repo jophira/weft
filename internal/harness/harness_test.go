@@ -211,7 +211,7 @@ func TestApplyWithManifest_UnchangedFile_Skipped(t *testing.T) {
 	}
 
 	out := buf.String()
-	if !strings.Contains(out, "· skip") {
+	if !strings.Contains(out, "· unchanged") {
 		t.Errorf("expected skip log line, got: %q", out)
 	}
 	if strings.Contains(out, "✓ wrote") {
@@ -260,7 +260,7 @@ func TestApplyWithManifest_UpdatedFile_LoggedAsWrote(t *testing.T) {
 	if !strings.Contains(out, "✓ wrote") || !strings.Contains(out, "CLAUDE.md") {
 		t.Errorf("expected '✓ wrote CLAUDE.md' for owned update, got: %q", out)
 	}
-	if strings.Contains(out, "· skip") {
+	if strings.Contains(out, "· unchanged") {
 		t.Errorf("unexpected skip for changed content: %q", out)
 	}
 }
@@ -607,7 +607,7 @@ func TestWarpApply_CopiesYAMLToWorkflows(t *testing.T) {
 }
 
 // TestWarpApply_SkipUnchanged verifies the fe.skip optimisation — writing identical
-// content twice should log "· skip" on the second apply, not "✓ wrote".
+// content twice should log "· unchanged" on the second apply, not "✓ wrote".
 func TestWarpApply_SkipUnchanged(t *testing.T) {
 	staged := t.TempDir()
 	write(t, filepath.Join(staged, "commands", "build.yaml"), "name: build")
@@ -630,8 +630,8 @@ func TestWarpApply_SkipUnchanged(t *testing.T) {
 	}
 
 	out := buf.String()
-	if !strings.Contains(out, "· skip") {
-		t.Errorf("expected '· skip' on second apply of unchanged file, got: %q", out)
+	if !strings.Contains(out, "· unchanged") {
+		t.Errorf("expected '· unchanged' on second apply of unchanged file, got: %q", out)
 	}
 	if strings.Contains(out, "✓ wrote") {
 		t.Errorf("unexpected '✓ wrote' for unchanged file: %q", out)

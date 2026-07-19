@@ -223,7 +223,7 @@ Weft keeps a manifest (`~/.config/weft/manifests/<harness>.json`) recording the 
 every file it wrote. On startup, before applying, it checks each managed file:
 
 - **File not on disk** — written silently (`✓ wrote`).
-- **File unchanged** (hash matches manifest) — skipped (`· skip`).
+- **File unchanged** (hash matches manifest) — left as-is, no write needed (`· unchanged`).
 - **File externally modified** — written back to its source repo first, then apply is a no-op.
 - **Unresolvable file** (no owning source) — backed up to
   `~/.config/weft/backups/<harness>/<timestamp>/` with a warning; apply skips it.
@@ -233,8 +233,8 @@ Files weft has never touched (e.g. `~/.claude/projects/`) are never modified.
 ```
 [weft] startup write-back: CLAUDE.md → ai-rules-personal-tech
 Applying to claude-code...
-  · skip   CLAUDE.md
-  ✓ wrote  commands/backend/java.md
+  · unchanged CLAUDE.md
+  ✓ wrote     commands/backend/java.md
 ```
 
 To restore a backup (last-resort cases only):

@@ -29,6 +29,17 @@ func applyOut(ctx ApplyCtx) io.Writer {
 	return io.Discard
 }
 
+// Per-file apply log lines. Statuses are padded to a common width so the file
+// paths line up in a column regardless of which status is printed.
+// cf. Java: String.format("%-9s", status) — Go uses the same %-Ns verb.
+const (
+	logUnchanged = "  · %-9s %s\n"
+	logWrote     = "  ✓ %-9s %s\n"
+
+	statusUnchanged = "unchanged"
+	statusWrote     = "wrote"
+)
+
 type conflictFile struct {
 	rel string // path relative to targetRoot
 	abs string // absolute path on disk
@@ -49,7 +60,7 @@ type fileEntry struct {
 //
 // For each staged file:
 //   - Not on disk yet (new): write, log "✓ wrote".
-//   - Owned by weft, content unchanged (skip): no write, log "· skip".
+//   - Owned by weft, content identical (skip): no write, log "· unchanged".
 //   - Owned by weft, content changed (update): write, log "✓ wrote".
 //   - Externally modified (conflict): back up, then write, log "! backed up".
 //
@@ -144,7 +155,7 @@ func applyWithManifest(stagedRoot, targetRoot, harnessName string, ctx ApplyCtx,
 	// Write each file; skip unchanged ones.
 	for _, fe := range entries {
 		if fe.skip {
-			fmt.Fprintf(out, "  · skip   %s\n", fe.dst)
+			fmt.Fprintf(out, logUnchanged, statusUnchanged, fe.dst)
 			continue
 		}
 		fullDst := filepath.Join(targetRoot, fe.dst)
@@ -154,7 +165,7 @@ func applyWithManifest(stagedRoot, targetRoot, harnessName string, ctx ApplyCtx,
 		if wErr := os.WriteFile(fullDst, fe.data, 0o644); wErr != nil { //nolint:gosec // path derived from harness config
 			return fmt.Errorf("writing %s: %w", fe.dst, wErr)
 		}
-		fmt.Fprintf(out, "  ✓ wrote  %s\n", fe.dst)
+		fmt.Fprintf(out, logWrote, statusWrote, fe.dst)
 	}
 
 	m.Harness = harnessName
@@ -205,8 +216,8 @@ func trackAndWriteFile(absPath, rel, harnessName string, content []byte, ctx App
 		existingHash := manifest.HashBytes(existing)
 		if knownHash, owned := m.Files[rel]; owned && existingHash == knownHash {
 			if contentHash == knownHash {
-				// content identical — skip write
-				fmt.Fprintf(out, "  · skip   %s\n", rel)
+				// content identical — no write needed
+				fmt.Fprintf(out, logUnchanged, statusUnchanged, rel)
 				return nil
 			}
 			// weft-owned update — fall through to write
@@ -224,7 +235,7 @@ func trackAndWriteFile(absPath, rel, harnessName string, content []byte, ctx App
 	if err := os.WriteFile(absPath, content, 0o644); err != nil { //nolint:gosec // path is resolved from harness config, not user input
 		return fmt.Errorf("writing %s: %w", absPath, err)
 	}
-	fmt.Fprintf(out, "  ✓ wrote  %s\n", rel)
+	fmt.Fprintf(out, logWrote, statusWrote, rel)
 
 	m.Harness = harnessName
 	m.Profile = ctx.ProfileName
