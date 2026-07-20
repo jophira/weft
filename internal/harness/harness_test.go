@@ -61,7 +61,7 @@ func TestApplyWithManifest_FirstApply_NoConflict(t *testing.T) {
 	target := t.TempDir()
 	ctx := testCtx(t)
 
-	if err := applyWithManifest(staged, target, "claude-code", ctx, nil, nil); err != nil {
+	if err := applyWithManifest(staged, target, "claude-code", ctx, nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -83,13 +83,13 @@ func TestApplyWithManifest_OwnedFile_SilentOverwrite(t *testing.T) {
 	ctx := testCtx(t)
 
 	// First apply — weft takes ownership.
-	if err := applyWithManifest(staged, target, "claude-code", ctx, nil, nil); err != nil {
+	if err := applyWithManifest(staged, target, "claude-code", ctx, nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 
 	// Second apply with updated content — weft owns the file, no backup.
 	write(t, filepath.Join(staged, "CLAUDE.md"), "rules v2")
-	if err := applyWithManifest(staged, target, "claude-code", ctx, nil, nil); err != nil {
+	if err := applyWithManifest(staged, target, "claude-code", ctx, nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -110,7 +110,7 @@ func TestApplyWithManifest_ExternallyModified_BackupCreated(t *testing.T) {
 	ctx := testCtx(t)
 
 	// First apply — weft owns it.
-	if err := applyWithManifest(staged, target, "claude-code", ctx, nil, nil); err != nil {
+	if err := applyWithManifest(staged, target, "claude-code", ctx, nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -119,7 +119,7 @@ func TestApplyWithManifest_ExternallyModified_BackupCreated(t *testing.T) {
 
 	// Second apply — conflict detected, backup created.
 	write(t, filepath.Join(staged, "CLAUDE.md"), "rules v2")
-	if err := applyWithManifest(staged, target, "claude-code", ctx, nil, nil); err != nil {
+	if err := applyWithManifest(staged, target, "claude-code", ctx, nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -150,7 +150,7 @@ func TestApplyWithManifest_UnknownExistingFile_BackupCreated(t *testing.T) {
 	// Pre-existing file in target — not in manifest (weft has never run).
 	write(t, filepath.Join(target, "CLAUDE.md"), "hand-crafted rules")
 
-	if err := applyWithManifest(staged, target, "claude-code", ctx, nil, nil); err != nil {
+	if err := applyWithManifest(staged, target, "claude-code", ctx, nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -176,7 +176,7 @@ func TestApplyWithManifest_SubdirBackupPreservesPath(t *testing.T) {
 	// Pre-existing nested file — should be backed up with full relative path.
 	write(t, filepath.Join(target, "commands", "backend", "java.md"), "old java rules")
 
-	if err := applyWithManifest(staged, target, "claude-code", ctx, nil, nil); err != nil {
+	if err := applyWithManifest(staged, target, "claude-code", ctx, nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -200,13 +200,13 @@ func TestApplyWithManifest_UnchangedFile_Skipped(t *testing.T) {
 	ctx := testCtxWithOut(t, &buf)
 
 	// First apply — weft takes ownership.
-	if err := applyWithManifest(staged, target, "claude-code", ctx, nil, nil); err != nil {
+	if err := applyWithManifest(staged, target, "claude-code", ctx, nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	buf.Reset()
 
 	// Second apply with identical staged content — should be skipped, not rewritten.
-	if err := applyWithManifest(staged, target, "claude-code", ctx, nil, nil); err != nil {
+	if err := applyWithManifest(staged, target, "claude-code", ctx, nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -227,7 +227,7 @@ func TestApplyWithManifest_NewFile_LoggedAsWrote(t *testing.T) {
 	var buf bytes.Buffer
 	ctx := testCtxWithOut(t, &buf)
 
-	if err := applyWithManifest(staged, target, "claude-code", ctx, nil, nil); err != nil {
+	if err := applyWithManifest(staged, target, "claude-code", ctx, nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -245,14 +245,14 @@ func TestApplyWithManifest_UpdatedFile_LoggedAsWrote(t *testing.T) {
 	var buf bytes.Buffer
 	ctx := testCtxWithOut(t, &buf)
 
-	if err := applyWithManifest(staged, target, "claude-code", ctx, nil, nil); err != nil {
+	if err := applyWithManifest(staged, target, "claude-code", ctx, nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	buf.Reset()
 
 	// Update staged content — weft owns the file, so no backup, just a write.
 	write(t, filepath.Join(staged, "CLAUDE.md"), "rules v2")
-	if err := applyWithManifest(staged, target, "claude-code", ctx, nil, nil); err != nil {
+	if err := applyWithManifest(staged, target, "claude-code", ctx, nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -272,7 +272,7 @@ func TestApplyWithManifest_NilOut_NoOutput(t *testing.T) {
 	target := t.TempDir()
 	ctx := testCtx(t) // Out is nil
 
-	if err := applyWithManifest(staged, target, "claude-code", ctx, nil, nil); err != nil {
+	if err := applyWithManifest(staged, target, "claude-code", ctx, nil, nil, nil); err != nil {
 		t.Fatalf("nil Out should not cause error: %v", err)
 	}
 }
@@ -296,7 +296,10 @@ func TestCodexApply_WritesAgentsMD(t *testing.T) {
 	}
 }
 
-func TestCodexApply_PreservesOtherFiles(t *testing.T) {
+// Codex executes custom prompts from ~/.codex/prompts/, so staged commands are
+// relocated there. Writing them to ~/.codex/commands/ — the staged path — would
+// put them in a directory Codex never reads (ADR 0004 D1/D2).
+func TestCodexApply_RelocatesCommandsToPrompts(t *testing.T) {
 	staged := seedStaged(t, "rules")
 	home := t.TempDir()
 	testenv.SetHome(t, home)
@@ -305,8 +308,11 @@ func TestCodexApply_PreservesOtherFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := os.Stat(filepath.Join(home, ".codex", "commands", "foo.yaml")); err != nil {
-		t.Errorf("commands/foo.yaml should be present: %v", err)
+	if _, err := os.Stat(filepath.Join(home, ".codex", "prompts", "foo.yaml")); err != nil {
+		t.Errorf("commands/foo.yaml should be relocated to prompts/foo.yaml: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".codex", "commands", "foo.yaml")); err == nil {
+		t.Error("commands/ is not a directory Codex reads — nothing should be written there")
 	}
 }
 
@@ -446,7 +452,7 @@ func TestApplyWithManifest_SourceAttribution_Persisted(t *testing.T) {
 		},
 	}
 
-	if err := applyWithManifest(staged, target, "claude-code", ctx, nil, nil); err != nil {
+	if err := applyWithManifest(staged, target, "claude-code", ctx, nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -470,7 +476,7 @@ func TestApplyWithManifest_NoSourceAttribution_NoSourceFiles(t *testing.T) {
 	target := t.TempDir()
 	ctx := testCtx(t)
 
-	if err := applyWithManifest(staged, target, "claude-code", ctx, nil, nil); err != nil {
+	if err := applyWithManifest(staged, target, "claude-code", ctx, nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -497,7 +503,7 @@ func TestApplyWithManifest_RemovedFile_PrunedFromManifest(t *testing.T) {
 	ctx := testCtx(t)
 
 	// First apply — both files tracked in manifest.
-	if err := applyWithManifest(staged, target, "claude-code", ctx, nil, nil); err != nil {
+	if err := applyWithManifest(staged, target, "claude-code", ctx, nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -515,7 +521,7 @@ func TestApplyWithManifest_RemovedFile_PrunedFromManifest(t *testing.T) {
 	}
 
 	// Second apply — extra.md is not staged; it must be pruned from manifest.
-	if err := applyWithManifest(staged, target, "claude-code", ctx, nil, nil); err != nil {
+	if err := applyWithManifest(staged, target, "claude-code", ctx, nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -545,7 +551,7 @@ func TestApplyWithManifest_SourceFiles_PrunedWhenFileRemoved(t *testing.T) {
 		},
 	}
 
-	if err := applyWithManifest(staged, target, "claude-code", ctx, nil, nil); err != nil {
+	if err := applyWithManifest(staged, target, "claude-code", ctx, nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -557,7 +563,7 @@ func TestApplyWithManifest_SourceFiles_PrunedWhenFileRemoved(t *testing.T) {
 		"CLAUDE.md": {"work", "personal"},
 	}
 
-	if err := applyWithManifest(staged, target, "claude-code", ctx, nil, nil); err != nil {
+	if err := applyWithManifest(staged, target, "claude-code", ctx, nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 

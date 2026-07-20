@@ -27,9 +27,22 @@ func (a *Aider) Detect() bool {
 
 // Apply copies files from stagedRoot into ~/.aider/, renaming CLAUDE.md → CONVENTIONS.md.
 func (a *Aider) Apply(stagedRoot string, ctx ApplyCtx) error {
-	return applyToHomeDir(stagedRoot, ".aider", a.Name(), ctx, map[string]string{
+	return applyToHomeDir(stagedRoot, ".aider", a, ctx, map[string]string{
 		"CLAUDE.md": "CONVENTIONS.md",
 	})
+}
+
+// ClassSupport: aider reads one conventions file and has no commands, agents or
+// skills — everything else is advertised.
+func (a *Aider) ClassSupport(cl Class) ClassSupport {
+	switch cl {
+	case ClassInstructions:
+		return ClassSupport{Placement: PlacementInstruction}
+	case ClassCommands, ClassAgents, ClassSkills:
+		return ClassSupport{Placement: PlacementNone, Advertise: true}
+	default:
+		return ClassSupport{Placement: PlacementNone}
+	}
 }
 
 // InstructionSpec: aider reads a single conventions file, so weft inlines

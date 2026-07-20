@@ -77,5 +77,8 @@ func (w *Warp) Apply(stagedRoot string, ctx ApplyCtx) error {
 		return err
 	}
 	src := filepath.Join(stagedRoot, "commands")
-	return applyWithManifest(src, target, w.Name(), ctx, nil, warpYAMLFilter)
+	// Harness is nil deliberately: Warp re-roots the staged tree at commands/ and
+	// filters to YAML itself, so paths reaching applyWithManifest carry no class
+	// prefix to route on. Its placement decision has already been made here.
+	return applyWithManifest(src, target, w.Name(), ctx, nil, warpYAMLFilter, nil)
 }

@@ -70,5 +70,5 @@ func (g *GenericHarness) Apply(stagedRoot string, ctx ApplyCtx) error {
 	if err := os.MkdirAll(g.root, 0o755); err != nil {
 		return fmt.Errorf("ensuring %s exists: %w", g.root, err)
 	}
-	return applyWithManifest(stagedRoot, g.root, g.name, ctx, nil, nil)
+	return applyWithManifest(stagedRoot, g.root, g.name, ctx, nil, nil, g)
 }

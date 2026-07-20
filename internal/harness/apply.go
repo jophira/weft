@@ -45,6 +45,7 @@ const (
 	statusWrote     = "wrote"
 	statusRemoved   = "removed"
 	statusKept      = "kept"
+	statusSkipped   = "skipped"
 )
 
 type conflictFile struct {
@@ -80,7 +81,11 @@ type fileEntry struct {
 //
 // filter, when non-nil, is called with each file's rel path (relative to stagedRoot)
 // before processing; returning false skips the file entirely. Pass nil to accept all.
-func applyWithManifest(stagedRoot, targetRoot, harnessName string, ctx ApplyCtx, renames map[string]string, filter func(rel string) bool) error {
+//
+// h, when non-nil, supplies per-class placement. Files whose class the harness has
+// no native home for are not written at all — see routeStaged. A nil h keeps the
+// pre-class-model behaviour of copying every file at its staged path.
+func applyWithManifest(stagedRoot, targetRoot, harnessName string, ctx ApplyCtx, renames map[string]string, filter func(rel string) bool, h Harness) error {
 	out := applyOut(ctx)
 
 	m, err := manifest.Load(ctx.CfgDir, harnessName)
@@ -94,6 +99,7 @@ func applyWithManifest(stagedRoot, targetRoot, harnessName string, ctx ApplyCtx,
 	var entries []fileEntry
 	var conflicts []conflictFile
 	newHashes := map[string]string{} // dst rel → staged sha256
+	skipped := map[Class]int{}       // class → files not written (no native home)
 
 	err = filepath.WalkDir(stagedRoot, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
@@ -108,9 +114,10 @@ func applyWithManifest(stagedRoot, targetRoot, harnessName string, ctx ApplyCtx,
 		if filter != nil && !filter(rel) {
 			return nil
 		}
-		dst := rel
-		if renamed, ok := renames[rel]; ok {
-			dst = renamed
+		dst, ok := routeStaged(rel, renames, h)
+		if !ok {
+			skipped[stagedClass(rel)]++
+			return nil
 		}
 		// Read the staged file once; hash in-memory to avoid a second syscall later.
 		stagedData, rdErr := os.ReadFile(path) //nolint:gosec // path comes from WalkDir over a weft-controlled staged dir, not user input
@@ -152,6 +159,8 @@ func applyWithManifest(stagedRoot, targetRoot, harnessName string, ctx ApplyCtx,
 	if err != nil {
 		return err
 	}
+
+	reportSkipped(out, skipped, h)
 
 	// Back up all conflicts before any write so the user never sees partial state.
 	if len(conflicts) > 0 {
@@ -276,7 +285,7 @@ func trackAndWriteFile(absPath, rel, harnessName string, content []byte, ctx App
 // applyToHomeDir resolves the home directory, ensures dotSubdir exists under it,
 // then delegates to applyWithManifest. It is the common Apply body for harnesses
 // whose target is a single directory under $HOME (e.g. ~/.claude, ~/.aider).
-func applyToHomeDir(stagedRoot, dotSubdir, harnessName string, ctx ApplyCtx, renames map[string]string) error {
+func applyToHomeDir(stagedRoot, dotSubdir string, h Harness, ctx ApplyCtx, renames map[string]string) error {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("resolving home directory: %w", err)
@@ -285,7 +294,7 @@ func applyToHomeDir(stagedRoot, dotSubdir, harnessName string, ctx ApplyCtx, ren
 	if err := os.MkdirAll(target, 0o755); err != nil {
 		return fmt.Errorf("ensuring ~/%s exists: %w", dotSubdir, err)
 	}
-	return applyWithManifest(stagedRoot, target, harnessName, ctx, renames, nil)
+	return applyWithManifest(stagedRoot, target, h.Name(), ctx, renames, nil, h)
 }
 
 // pruneDropped removes target files that the previous apply staged but this one
