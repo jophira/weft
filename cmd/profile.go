@@ -676,70 +676,80 @@ place, and this invocation exits immediately. No need to stop and restart the
 watcher to switch profiles.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		name := args[0]
-
-		// 1. Resolve config dir early so we can acquire the lock before any work.
-		//    Honours --config so custom config isolates all state (staged,
-		//    manifests, profile instructions), not just the source registry.
-		cfgDir := configDir()
-		if cfgDir == "" {
-			return fmt.Errorf("resolving config directory")
-		}
-
-		// 2. In watch mode, acquire the singleton watcher lock before doing any
-		//    work. If another weft watcher already holds it, hand this profile
-		//    off to that running watcher instead of failing: it watches
-		//    config.yaml and hot-swaps when active_profile changes.
-		if !profileNoWatch {
-			lock, lockErr := pidlock.Acquire(filepath.Join(cfgDir, "weft.lock"))
-			if errors.Is(lockErr, pidlock.ErrLocked) {
-				return handOffToRunningWatcher(cfgDir, name)
-			}
-			if lockErr != nil {
-				return lockErr
-			}
-			defer func() { _ = lock.Release() }()
-		} else if rs, _ := runstate.Read(cfgDir); rs != nil {
-			// --no-watch does not take the lock, so it cannot detect a live
-			// watcher that way. Warn: this one-shot apply will race with the
-			// watcher, which will re-apply on its next trigger. Writing
-			// active_profile below also hands the new profile off to it.
-			fmt.Fprintf(os.Stderr,
-				"[weft] warning: a watcher is running (pid %d, profile %q). This --no-watch apply may be re-applied by it; run without --no-watch to hand off cleanly, or stop the watcher first.\n",
-				rs.PID, rs.Profile)
-		}
-
-		// 3. Load the profile and resolve source roots.
-		p, roots, srcs, err := resolveProfileRoots(name)
-		if err != nil {
-			return err
-		}
-
-		stagedDir := filepath.Join(cfgDir, "staged", name)
-
-		// 4. Initial merge + apply.
-		if err := mergeAndApply(p, roots, srcs, cfgDir, false); err != nil {
-			return err
-		}
-
-		// 5. Persist the active profile in config.yaml.
-		if err := config.SetActiveProfile(name); err != nil {
-			return fmt.Errorf("saving active profile: %w", err)
-		}
-
-		fmt.Printf("\n✓ Profile %q is now active\n", name)
-		if resolvedTargets := p.ResolvedTargets(); len(resolvedTargets) > 0 {
-			fmt.Printf("  targets: %s\n", strings.Join(resolvedTargets, ", "))
-		}
-		fmt.Printf("  staged: %s\n", stagedDir)
-
-		// 6. Enter watch mode unless opted out.
-		if !profileNoWatch {
-			return runWatchLoop(name, p, roots, srcs, cfgDir)
-		}
-
-		return nil
+		return runProfileUse(args[0], !profileNoWatch)
 	},
+}
+
+// runProfileUse activates profile name: merge, apply, persist active_profile,
+// and — when watch is true — hold the singleton lock and stay running.
+//
+// It is the single entry point for activation, shared by `weft profile use`
+// and by `weft autostart run` (the command the installed unit invokes). Sharing
+// it is what makes the autostarted watcher and a hand-launched one identical:
+// both take the same lock, so one always hands off to the other instead of
+// double-watching.
+func runProfileUse(name string, watchMode bool) error {
+	// 1. Resolve config dir early so we can acquire the lock before any work.
+	//    Honours --config so custom config isolates all state (staged,
+	//    manifests, profile instructions), not just the source registry.
+	cfgDir := configDir()
+	if cfgDir == "" {
+		return fmt.Errorf("resolving config directory")
+	}
+
+	// 2. In watch mode, acquire the singleton watcher lock before doing any
+	//    work. If another weft watcher already holds it, hand this profile
+	//    off to that running watcher instead of failing: it watches
+	//    config.yaml and hot-swaps when active_profile changes.
+	if watchMode {
+		lock, lockErr := pidlock.Acquire(filepath.Join(cfgDir, "weft.lock"))
+		if errors.Is(lockErr, pidlock.ErrLocked) {
+			return handOffToRunningWatcher(cfgDir, name)
+		}
+		if lockErr != nil {
+			return lockErr
+		}
+		defer func() { _ = lock.Release() }()
+	} else if rs, _ := runstate.Read(cfgDir); rs != nil {
+		// --no-watch does not take the lock, so it cannot detect a live
+		// watcher that way. Warn: this one-shot apply will race with the
+		// watcher, which will re-apply on its next trigger. Writing
+		// active_profile below also hands the new profile off to it.
+		fmt.Fprintf(os.Stderr,
+			"[weft] warning: a watcher is running (pid %d, profile %q). This --no-watch apply may be re-applied by it; run without --no-watch to hand off cleanly, or stop the watcher first.\n",
+			rs.PID, rs.Profile)
+	}
+
+	// 3. Load the profile and resolve source roots.
+	p, roots, srcs, err := resolveProfileRoots(name)
+	if err != nil {
+		return err
+	}
+
+	stagedDir := filepath.Join(cfgDir, "staged", name)
+
+	// 4. Initial merge + apply.
+	if err := mergeAndApply(p, roots, srcs, cfgDir, false); err != nil {
+		return err
+	}
+
+	// 5. Persist the active profile in config.yaml.
+	if err := config.SetActiveProfile(name); err != nil {
+		return fmt.Errorf("saving active profile: %w", err)
+	}
+
+	fmt.Printf("\n✓ Profile %q is now active\n", name)
+	if resolvedTargets := p.ResolvedTargets(); len(resolvedTargets) > 0 {
+		fmt.Printf("  targets: %s\n", strings.Join(resolvedTargets, ", "))
+	}
+	fmt.Printf("  staged: %s\n", stagedDir)
+
+	// 6. Enter watch mode unless opted out.
+	if watchMode {
+		return runWatchLoop(name, p, roots, srcs, cfgDir)
+	}
+
+	return nil
 }
 
 // writeRunState publishes the watcher's runstate sidecar (best-effort). A write
