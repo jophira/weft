@@ -178,6 +178,17 @@ func reportSkipped(out io.Writer, skipped map[Class]int, h Harness) {
 	}
 }
 
+// reportExcluded logs classes the profile's harness_sync config withheld. Kept
+// separate from reportSkipped so the user can tell "this harness cannot take it"
+// from "you told weft not to send it" — the fixes differ.
+func reportExcluded(out io.Writer, excluded map[Class]int) {
+	for _, c := range Classes() { // stable order
+		if n := excluded[c]; n > 0 {
+			fmt.Fprintf(out, "  ~ %-9s %d %s file(s) — excluded by harness_sync config\n", statusSkipped, n, c)
+		}
+	}
+}
+
 // retarget maps a staged relative path to its path inside the harness config
 // root, given that class's support. Returns ok=false when the class has no
 // native home, meaning the file must not be written.

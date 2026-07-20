@@ -429,11 +429,16 @@ func mergeAndApply(p *profile.Profile, roots []string, srcs []source.Source, cfg
 		if !quiet {
 			applyOut = os.Stdout
 		}
+		allowed, aErr := allowedClasses(p, target)
+		if aErr != nil {
+			return aErr
+		}
 		ctx := harness.ApplyCtx{
 			ProfileName:       p.Name,
 			CfgDir:            cfgDir,
 			SourceAttribution: attr,
 			Out:               applyOut,
+			AllowedClasses:    allowed,
 		}
 		if err := h.Apply(stagedDir, ctx); err != nil {
 			return fmt.Errorf("applying to %s: %w", target, err)

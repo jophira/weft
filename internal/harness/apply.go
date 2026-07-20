@@ -21,6 +21,20 @@ type ApplyCtx struct {
 	CfgDir            string
 	SourceAttribution map[string][]string // rel path -> ordered source names (merged files only)
 	Out               io.Writer           // destination for per-file apply logs; nil → io.Discard
+	// AllowedClasses restricts projection to these classes (profile harness_sync).
+	// A nil map means unrestricted: project every class the harness supports. An
+	// empty non-nil map means project nothing, so "unset" and "explicitly empty"
+	// stay distinguishable.
+	AllowedClasses map[Class]bool
+}
+
+// classAllowed reports whether the profile's harness_sync config permits this
+// class. Unrestricted (nil) is the default so existing profiles are unaffected.
+func (ctx ApplyCtx) classAllowed(c Class) bool {
+	if ctx.AllowedClasses == nil {
+		return true
+	}
+	return ctx.AllowedClasses[c]
 }
 
 // out returns the writer from ctx, defaulting to io.Discard when unset.
@@ -100,6 +114,7 @@ func applyWithManifest(stagedRoot, targetRoot, harnessName string, ctx ApplyCtx,
 	var conflicts []conflictFile
 	newHashes := map[string]string{} // dst rel → staged sha256
 	skipped := map[Class]int{}       // class → files not written (no native home)
+	excluded := map[Class]int{}      // class → files withheld by harness_sync config
 
 	err = filepath.WalkDir(stagedRoot, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
@@ -114,9 +129,14 @@ func applyWithManifest(stagedRoot, targetRoot, harnessName string, ctx ApplyCtx,
 		if filter != nil && !filter(rel) {
 			return nil
 		}
+		cls := stagedClass(rel)
+		if !ctx.classAllowed(cls) {
+			excluded[cls]++
+			return nil
+		}
 		dst, ok := routeStaged(rel, renames, h)
 		if !ok {
-			skipped[stagedClass(rel)]++
+			skipped[cls]++
 			return nil
 		}
 		// Read the staged file once; hash in-memory to avoid a second syscall later.
@@ -161,6 +181,7 @@ func applyWithManifest(stagedRoot, targetRoot, harnessName string, ctx ApplyCtx,
 	}
 
 	reportSkipped(out, skipped, h)
+	reportExcluded(out, excluded)
 
 	// Back up all conflicts before any write so the user never sees partial state.
 	if len(conflicts) > 0 {
