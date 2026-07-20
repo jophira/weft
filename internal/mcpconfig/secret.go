@@ -120,14 +120,23 @@ func (c Config) Validate() error {
 }
 
 func (s Server) validate(name string) error {
+	// The transport decides which fields carry meaning, and the dialects encode
+	// only those. Rejecting a mixed entry here keeps that from becoming silent
+	// truncation on the way to a native file.
 	switch s.Type {
 	case "", TypeStdio:
 		if s.Command == "" {
 			return fmt.Errorf("mcp server %q: stdio servers need a command", name)
 		}
+		if s.URL != "" || len(s.Headers) > 0 {
+			return fmt.Errorf("mcp server %q: stdio servers cannot set url or headers", name)
+		}
 	case TypeHTTP, TypeSSE:
 		if s.URL == "" {
 			return fmt.Errorf("mcp server %q: %s servers need a url", name, s.Type)
+		}
+		if s.Command != "" || len(s.Args) > 0 || len(s.Env) > 0 {
+			return fmt.Errorf("mcp server %q: %s servers cannot set command, args or env", name, s.Type)
 		}
 	default:
 		return fmt.Errorf("mcp server %q: unknown type %q — use %q, %q or %q", name, s.Type, TypeStdio, TypeHTTP, TypeSSE)
