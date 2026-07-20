@@ -50,7 +50,7 @@ func TestProjectInstruction_importWritesForwardSlashImports(t *testing.T) {
 		{Name: "company", CopyPath: filepath.Join("w", "30-company.md")},
 	}
 
-	if err := ProjectInstruction(h, sources, ctx); err != nil {
+	if err := ProjectInstruction(h, "", sources, ctx); err != nil {
 		t.Fatalf("ProjectInstruction: %v", err)
 	}
 
@@ -87,7 +87,7 @@ func TestProjectInstruction_inlineEmbedsAttributedContent(t *testing.T) {
 		{Name: "company", Content: "company rules"},
 	}
 
-	if err := ProjectInstruction(h, sources, projectCtx(t)); err != nil {
+	if err := ProjectInstruction(h, "", sources, projectCtx(t)); err != nil {
 		t.Fatalf("ProjectInstruction: %v", err)
 	}
 
@@ -111,7 +111,7 @@ func TestProjectInstruction_preservesOutsideAndIdempotent(t *testing.T) {
 	sources := []SourceInstruction{{Name: "s", Content: "rule"}}
 	ctx := projectCtx(t)
 
-	if err := ProjectInstruction(h, sources, ctx); err != nil {
+	if err := ProjectInstruction(h, "", sources, ctx); err != nil {
 		t.Fatal(err)
 	}
 	first := readGolden(t, path)
@@ -119,7 +119,7 @@ func TestProjectInstruction_preservesOutsideAndIdempotent(t *testing.T) {
 		t.Errorf("user content outside block was lost:\n%s", first)
 	}
 
-	if err := ProjectInstruction(h, sources, ctx); err != nil {
+	if err := ProjectInstruction(h, "", sources, ctx); err != nil {
 		t.Fatal(err)
 	}
 	if second := readGolden(t, path); second != first {
@@ -132,7 +132,7 @@ func TestProjectInstruction_seedsPreambleForNewFile(t *testing.T) {
 	h := &stubInstructed{name: "cursorish", spec: InstructionSpec{
 		Path: path, Strategy: StrategyInline, Preamble: "---\nalwaysApply: true\n---\n",
 	}}
-	if err := ProjectInstruction(h, []SourceInstruction{{Name: "s", Content: "rule"}}, projectCtx(t)); err != nil {
+	if err := ProjectInstruction(h, "", []SourceInstruction{{Name: "s", Content: "rule"}}, projectCtx(t)); err != nil {
 		t.Fatal(err)
 	}
 	if got := readGolden(t, path); !strings.HasPrefix(got, "---\nalwaysApply: true\n---\n") {
@@ -141,7 +141,7 @@ func TestProjectInstruction_seedsPreambleForNewFile(t *testing.T) {
 }
 
 func TestProjectInstruction_noInstructionFileIsNoOp(t *testing.T) {
-	if err := ProjectInstruction(plainHarness{}, []SourceInstruction{{Name: "s", Content: "x"}}, projectCtx(t)); err != nil {
+	if err := ProjectInstruction(plainHarness{}, "", []SourceInstruction{{Name: "s", Content: "x"}}, projectCtx(t)); err != nil {
 		t.Errorf("expected no-op nil for harness without an instruction file, got %v", err)
 	}
 }
