@@ -441,7 +441,7 @@ func mergeAndApply(p *profile.Profile, roots []string, srcs []source.Source, cfg
 		// Project the instruction file: a thin import block (Tier A) or inlined
 		// content within managed markers (Tier B), preserving the user's own
 		// content outside the block.
-		if err := harness.ProjectInstruction(h, sourceInstrs, ctx); err != nil {
+		if err := harness.ProjectInstruction(h, stagedDir, sourceInstrs, ctx); err != nil {
 			return fmt.Errorf("projecting instructions to %s: %w", target, err)
 		}
 	}

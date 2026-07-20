@@ -23,9 +23,22 @@ func (w *Windsurf) Detect() bool {
 // Apply copies files from stagedRoot into ~/.codeium/windsurf/,
 // renaming CLAUDE.md → global_rules.md.
 func (w *Windsurf) Apply(stagedRoot string, ctx ApplyCtx) error {
-	return applyToHomeDir(stagedRoot, filepath.Join(".codeium", "windsurf"), w.Name(), ctx, map[string]string{
+	return applyToHomeDir(stagedRoot, filepath.Join(".codeium", "windsurf"), w, ctx, map[string]string{
 		"CLAUDE.md": "global_rules.md",
 	})
+}
+
+// ClassSupport: Windsurf consumes exactly one global rules file and has no
+// commands, agents or skills of its own — everything else is advertised.
+func (w *Windsurf) ClassSupport(cl Class) ClassSupport {
+	switch cl {
+	case ClassInstructions:
+		return ClassSupport{Placement: PlacementInstruction}
+	case ClassCommands, ClassAgents, ClassSkills:
+		return ClassSupport{Placement: PlacementNone, Advertise: true}
+	default:
+		return ClassSupport{Placement: PlacementNone}
+	}
 }
 
 // InstructionSpec: Windsurf reads a single global_rules.md, so weft inlines

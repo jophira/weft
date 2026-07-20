@@ -46,6 +46,20 @@ func (c *Cursor) Apply(stagedRoot string, ctx ApplyCtx) error {
 	return trackAndWriteFile(dst, "weft.mdc", c.Name(), content, ctx)
 }
 
+// ClassSupport: Cursor consumes only .mdc rule files. Apply already skips
+// everything but CLAUDE.md by hand; declaring it here makes that policy explicit
+// and lets the prose classes be advertised instead of silently dropped.
+func (c *Cursor) ClassSupport(cl Class) ClassSupport {
+	switch cl {
+	case ClassInstructions:
+		return ClassSupport{Placement: PlacementInstruction}
+	case ClassCommands, ClassAgents, ClassSkills:
+		return ClassSupport{Placement: PlacementNone, Advertise: true}
+	default:
+		return ClassSupport{Placement: PlacementNone}
+	}
+}
+
 // InstructionSpec: Cursor reads .mdc rule files (no include directive), so weft
 // inlines content (Tier B) into ~/.cursor/rules/weft.mdc, seeding the
 // always-apply frontmatter as the preamble when the file is first created.

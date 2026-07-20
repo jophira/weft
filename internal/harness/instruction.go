@@ -59,7 +59,10 @@ type SourceInstruction struct {
 //
 // It records the block-body hash (not the whole file) in the manifest so the
 // write-back path can later detect external edits to the block alone.
-func ProjectInstruction(h Harness, sources []SourceInstruction, ctx ApplyCtx) error {
+// stagedRoot is weft's staged tree for the active profile; it is scanned for
+// classes the harness cannot execute natively but can still read on demand, which
+// are appended to the block as an index (ADR 0004 D9). Pass "" to skip that scan.
+func ProjectInstruction(h Harness, stagedRoot string, sources []SourceInstruction, ctx ApplyCtx) error {
 	ic, ok := h.(InstructionConsumer)
 	if !ok {
 		return nil // harness consumes no root instruction file
@@ -70,6 +73,14 @@ func ProjectInstruction(h Harness, sources []SourceInstruction, ctx ApplyCtx) er
 	}
 
 	body := buildBody(spec, sources)
+
+	if stagedRoot != "" {
+		entries, sErr := scanAdvertised(stagedRoot, h)
+		if sErr != nil {
+			return sErr
+		}
+		body += advertiseBody(entries)
+	}
 
 	existing, err := os.ReadFile(spec.Path)
 	switch {
