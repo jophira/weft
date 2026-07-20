@@ -273,6 +273,7 @@ weft target backups claude-code                   # list all available backups
 | `target list/apply/backups/revert` | Manage AI harness targets; inspect and restore backups |
 | `hook add/list/run/remove` | Manage lifecycle hooks |
 | `status [--short]` | Show active profile and per-harness projection state (instruction path, block drift) |
+| `autostart enable/disable/status` | Opt in to running the watcher at login (systemd user unit, LaunchAgent, or Task Scheduler); `--profile` pins a profile, `--linger` keeps it alive without a login session |
 | `doctor` | Health check — discovered harnesses, config issues, path-reference lint, and rule-annotation health (missing front-matter, duplicate labels, dangling extends, with suggested fixes); `--fix` heals stale/hardcoded paths to `{{weft.root}}` anchors, `--all` also lists external/dead refs |
 | `version` | Print version, commit, and build date |
 | `bug-report` | Print diagnostic bundle (version, environment, doctor, recent logs) for filing a GitHub issue |
@@ -313,6 +314,74 @@ letting any MCP-aware agent (Claude Code, Cursor, Codex, …) introspect and con
 | `weft://harness/{name}/current` | What weft last wrote to a harness on disk |
 
 Resources can be included in an agent's context at session start so it knows exactly which rules govern it. See the [MCP guide](https://github.com/jophira/weft/wiki) for end-to-end workflow examples.
+
+## Autostart — keep the watcher running across reboots
+
+`weft profile use` stays in the foreground and dies with the terminal that
+started it, so after a reboot weft is silently not running and sources drift
+from targets. `weft autostart` installs a per-user service that starts the
+watcher at login.
+
+It is strictly opt-in — no other command installs a background service.
+
+```bash
+weft autostart enable                  # follow the active profile
+weft autostart enable --profile work   # pin one profile regardless of last use
+weft autostart status                  # installed? running? which binary/profile?
+weft autostart disable                 # stop and remove — leaves no orphan unit
+```
+
+| OS | Mechanism | Installed at |
+|---|---|---|
+| Linux | systemd **user** unit, `Restart=on-failure` | `~/.config/systemd/user/weft.service` |
+| macOS | LaunchAgent, `KeepAlive` on unclean exit | `~/Library/LaunchAgents/com.jophira.weft.plist` |
+| Windows | Task Scheduler task at logon, hidden | task named `weft` |
+
+**Profile selection.** By default the unit resolves `active_profile` from
+`config.yaml` each time it starts, so the machine comes back up on whatever
+profile was last switched to. `--profile <name>` pins it instead, for machines
+that should always boot into a known state.
+
+**Switching profiles needs nothing extra.** `weft profile use <other>` detects
+the autostarted watcher's singleton lock and hands the profile off — the running
+watcher hot-swaps in place. There is never a second watcher, and the UX is
+identical whether the watcher was autostarted or launched by hand.
+
+**Linux and logout.** Without `loginctl enable-linger`, systemd stops user
+services when your last session ends. Pass `--linger` to opt into that (it
+changes machine-wide policy for your user, so weft never enables it silently).
+
+**Re-pointing after an upgrade.** The unit hardcodes a binary path. If that
+binary moves, `weft autostart status` reports it as stale; re-running
+`weft autostart enable` overwrites the unit with the current path.
+
+### Surfacing "is weft running?" in your prompt
+
+`weft status --short` prints one line in ~16 ms and exits 0 even with no config
+at all, which makes it a good fit for a shell prompt or a harness status line:
+
+```
+weft: hybrid · 3 harness · drift:0 · watch:on
+```
+
+Wire it into Claude Code (`~/.claude/settings.json`):
+
+```json
+{
+  "statusLine": { "type": "command", "command": "weft status --short" }
+}
+```
+
+Or into a shell prompt:
+
+```bash
+PS1='$(weft status --short) \w $ '   # bash
+```
+
+`watch:off` is the signal that the watcher is not running. This is deliberately
+*not* a session-start hook that prints a warning: hook stdout is injected into
+the model's context on every session, so a banner would cost tokens forever to
+report a condition that is usually fine.
 
 ## Supported harnesses
 
