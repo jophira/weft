@@ -4,6 +4,12 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+    inputs:
+      full_matrix:
+        description: Run the full cross-OS matrix (including macOS)
+        type: boolean
+        default: true
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref == 'refs/heads/main' && github.ref || github.event.pull_request.head.sha || github.sha }}
@@ -33,14 +39,24 @@ jobs:
     # `make test-integration` target — GitHub's macOS/Windows runners have no
     # Linux-container Docker. All projection/write-back e2e tests are untagged
     # and run here on every OS.
+    #
+    # macOS is omitted from pull-request runs to stay inside the free Actions
+    # allowance. On a private repo GitHub bills macOS at 10x and Windows at 2x, so
+    # the three-OS matrix costs 13 billable minutes per wall-clock minute and a
+    # normal PR day exhausts the 2,000-minute monthly grant.
+    #
+    # Windows is kept on every PR deliberately: it is where this codebase's
+    # portability bugs actually surface (HOME/USERPROFILE resolution and
+    # "/"-separator assumptions — see #120, #138). macOS has never caught a
+    # failure Windows did not, so it gates merges to main rather than every push.
+    # Force it early on a risky branch with: gh workflow run ci.yml --ref <branch>
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: ${{ github.event_name == 'pull_request'
+                && fromJSON('["ubuntu-latest", "windows-latest"]')
+                || fromJSON('["ubuntu-latest", "macos-latest", "windows-latest"]') }}
     runs-on: ${{ matrix.os }}
-    # All three OSes are blocking. The Windows portability debt (HOME/USERPROFILE
-    # resolution, "/"-separator assumptions in tests and a few production paths,
-    # Unix abs-path test fixtures) was cleared in #138.
     steps:
       - uses: actions/checkout@v7
 
