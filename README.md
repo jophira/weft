@@ -259,6 +259,39 @@ weft target revert claude-code --backup 20260605-143022  # restore a specific on
 weft target backups claude-code                   # list all available backups
 ```
 
+## Adoption — bringing harness-native files under weft
+
+Write-back only fires for files a source already owns. A file you author directly inside a
+harness — a new `~/.claude/agents/reviewer.md` — belongs to no source, so it never reaches
+any other harness. `weft adopt` closes that gap.
+
+```bash
+weft adopt --scan                                          # list files no source owns
+weft adopt claude-code agents/reviewer.md --into pers-tech # copy it into a source
+```
+
+`--scan` walks every harness weft projects to and lists the files no manifest owns, grouped
+by harness and class. Only `commands`, `agents` and `skills` are adoptable, and only
+markdown — harness runtime state (`projects/`, `todos/`, caches, `.git`) is never offered.
+
+Adoption is **explicit and one-way**. Once a source owns the file, weft overwrites it in
+every harness on each apply, so nothing is adopted implicitly and never on a watcher tick.
+The guards:
+
+- **Confirmation.** The plan (every source → destination pair) is printed and confirmed
+  before anything is written. `--yes` skips the prompt for scripted use.
+- **No ambiguity.** With more than one source in the profile, `--into` is required; weft
+  lists the candidates rather than guessing which repo the file belongs in.
+- **No clobbering.** A destination that already exists in the source is refused by name;
+  `--force` overrides.
+- **No secrets.** A file carrying what looks like a literal credential (`sk-ant-`, `ghp_`,
+  `AKIA`, a long high-entropy token, …) is refused outright. Sources are ordinary git repos
+  that get pushed, so this guard is not bypassable by `--force` — externalise the value as
+  `${env:NAME}` and adopt again.
+
+Adopting also records weft's ownership of the harness copy in the manifest, so the next
+apply reports `· unchanged` rather than treating the file as an external edit.
+
 ## Commands
 
 | Command | Description |
@@ -271,6 +304,8 @@ weft target backups claude-code                   # list all available backups
 | `profile create/list/use/diff/inspect/delete` | Manage named profiles; `--overlay`, `--target`, and `--sources` are validated on create |
 | `profile use <name>` | Activate profile: merge sources, apply to all targets, and watch for changes (use `--no-watch` to apply once and exit) |
 | `target list/apply/backups/revert` | Manage AI harness targets; inspect and restore backups |
+| `adopt --scan` | List commands/agents/skills authored inside a harness that no source owns |
+| `adopt <harness> <path>... --into <source>` | Copy those files into a source so weft can fan them out; confirms first, refuses to clobber (`--force`) or to carry literal credentials |
 | `hook add/list/run/remove` | Manage lifecycle hooks |
 | `status [--short]` | Show active profile and per-harness projection state (instruction path, block drift) |
 | `autostart enable/disable/status` | Opt in to running the watcher at login (systemd user unit, LaunchAgent, or Task Scheduler); `--profile` pins a profile, `--linger` keeps it alive without a login session |
