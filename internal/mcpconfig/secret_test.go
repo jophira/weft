@@ -107,7 +107,7 @@ func TestValidate(t *testing.T) {
 			config: cfg(Server{
 				Name: "github", Type: TypeStdio, Command: "npx",
 				Args: []string{"-y", "@modelcontextprotocol/server-github"},
-				Env:  map[string]string{"GITHUB_TOKEN": "${env:GITHUB_TOKEN}"},
+				Env:  map[string]string{"GITHUB_TOKEN": "${env:GITHUB_TOKEN}"}, //nolint:gosec // G101 false positive: indirection form, not a literal
 			}),
 		},
 		{

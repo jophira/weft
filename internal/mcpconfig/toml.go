@@ -31,7 +31,7 @@ func (d *tomlDialect) Path() (string, error) { return homePath(d.rel...) }
 // rules out. The document is still parsed first, so a malformed file is
 // reported instead of being spliced blindly.
 func (d *tomlDialect) ToNative(c Config, existing []byte) ([]byte, error) {
-	if err := d.parseDoc(existing, new(map[string]any)); err != nil {
+	if _, err := d.parseDoc(existing); err != nil {
 		return nil, err
 	}
 	kept := stripTOMLTable(existing, tomlServersKey)
@@ -54,8 +54,8 @@ func (d *tomlDialect) ToNative(c Config, existing []byte) ([]byte, error) {
 }
 
 func (d *tomlDialect) ToCanonical(native []byte) (Config, error) {
-	var doc map[string]any
-	if err := d.parseDoc(native, &doc); err != nil {
+	doc, err := d.parseDoc(native)
+	if err != nil {
 		return Config{}, err
 	}
 	entry, ok := doc[tomlServersKey]
@@ -69,19 +69,20 @@ func (d *tomlDialect) ToCanonical(native []byte) (Config, error) {
 	return decodeServers(raw, d.codec)
 }
 
-// parseDoc decodes into dst, treating blank input as an empty document.
-func (d *tomlDialect) parseDoc(data []byte, dst *map[string]any) error {
-	*dst = map[string]any{}
+// parseDoc decodes a TOML document, treating blank input as an empty one.
+// Always returns a usable map so callers never nil-check the result.
+func (d *tomlDialect) parseDoc(data []byte) (map[string]any, error) {
+	doc := map[string]any{}
 	if len(bytes.TrimSpace(data)) == 0 {
-		return nil
+		return doc, nil
 	}
-	if err := toml.Unmarshal(data, dst); err != nil {
-		return fmt.Errorf("parsing %s mcp config: %w", d.harness, err)
+	if err := toml.Unmarshal(data, &doc); err != nil {
+		return nil, fmt.Errorf("parsing %s mcp config: %w", d.harness, err)
 	}
-	if *dst == nil {
-		*dst = map[string]any{}
+	if doc == nil {
+		doc = map[string]any{}
 	}
-	return nil
+	return doc, nil
 }
 
 // tomlTableHeader matches a table or array-of-tables header line and captures
