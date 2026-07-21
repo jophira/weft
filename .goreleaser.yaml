@@ -81,7 +81,7 @@ homebrew_casks:
       email: bot@goreleaser.com
     commit_msg_template: "chore: update weft to {{ .Tag }}"
     homepage: "https://github.com/jophira/weft-releases"
-    description: "weft — a tool for managing git source sync and hooks"
+    description: "Composable AI rules manager for coding agents and harnesses"
 
 release:
   github:

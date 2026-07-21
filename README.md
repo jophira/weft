@@ -1,5 +1,9 @@
 # weft
 
+[![ci](https://github.com/jophira/weft/actions/workflows/ci.yml/badge.svg)](https://github.com/jophira/weft/actions/workflows/ci.yml)
+[![go](https://img.shields.io/github/go-mod/go-version/jophira/weft)](go.mod)
+[![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 Composable AI rules manager — manage, layer, and sync AI rule sources across teams and harnesses.
 
 Maintain separate rule repositories (personal, team, company) and compose them into a single layered profile applied to whichever AI coding tool you're using. Weft normalises across harnesses automatically — the same source writes `CLAUDE.md` for Claude Code, `AGENTS.md` for Codex, `GEMINI.md` for Gemini CLI, and a `.mdc` rule for Cursor.
@@ -456,4 +460,4 @@ isolates weft's state (including `weft_home`) under that file's directory.
 
 ## License
 
-MIT
+MIT. See [LICENSE](LICENSE).
