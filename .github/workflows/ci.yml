@@ -61,7 +61,15 @@ jobs:
         # unit run, but exercised on every OS because it depends on home/config
         # dir resolution — the exact thing the cross-OS matrix guards.
         shell: bash
-        run: go test -tags e2e ./test/e2e/...
+        # -count=1 defeats the test cache, and is load-bearing here rather than
+        # belt-and-braces. These tests build the weft binary and drive it via
+        # exec, so Go's cache key covers the test sources and their imports but
+        # cannot see through the subprocess. A change to internal/ leaves those
+        # direct inputs untouched, so a restored cache reports a stale `ok` for
+        # the exact class of change this suite exists to catch. Observed for real
+        # on the #219 Windows job, which reported `ok (cached)` for a package
+        # that had failed on the previous commit.
+        run: go test -tags e2e -count=1 ./test/e2e/...
 
       - name: Upload coverage report
         if: always()
