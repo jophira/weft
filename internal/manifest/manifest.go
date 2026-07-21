@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -61,6 +62,24 @@ func Load(cfgDir, harnessName string) (*Manifest, error) {
 	return &m, nil
 }
 
+// IsSidecarKey reports whether key is a sentinel Files key for a file weft tracks
+// outside the harness target root, rather than a path relative to it.
+//
+// Sidecar keys carry a "<class>:" prefix and embed an absolute path — see
+// harness.mcpManifestKey, which keys ~/.claude.json as "mcp:/home/you/.claude.json"
+// because that file is a sibling of the target root, not a child of it. A staged
+// key is always a slash-separated path *relative* to the target root and so can
+// never contain a colon, which makes the colon an unambiguous discriminator on
+// every OS (a Windows drive letter only appears in the absolute path a sidecar
+// key embeds, never in a staged key).
+//
+// Callers that resolve keys to real paths must skip these: joining one onto the
+// target root yields a nonsense path that merely fails to exist on Unix but is
+// outright invalid on Windows.
+func IsSidecarKey(key string) bool {
+	return strings.ContainsRune(key, ':')
+}
+
 // StagedSet returns the paths the last apply projected, as a set for lookup.
 //
 // Manifests written before Staged existed have no such field. In those the Files
@@ -72,6 +91,12 @@ func (m *Manifest) StagedSet() map[string]struct{} {
 	if keys == nil {
 		keys = make([]string, 0, len(m.Files))
 		for rel := range m.Files {
+			// Sidecar entries were never staged, so the fallback must not
+			// reintroduce them: apply would then see one as dropped and try to
+			// resolve the sentinel as a path under the target root.
+			if IsSidecarKey(rel) {
+				continue
+			}
 			keys = append(keys, rel)
 		}
 	}
