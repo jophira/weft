@@ -90,10 +90,15 @@ type ClassAware interface {
 func stagedClass(rel string) Class {
 	slash := filepath.ToSlash(rel)
 	if !strings.Contains(slash, "/") {
-		// Root-level file. CLAUDE.md is the instruction file; anything else
+		// Root-level file. CLAUDE.md is the instruction file and mcp.yaml is the
+		// canonical MCP document; both are projected out-of-band rather than
+		// copied, so they must not fall through to ClassOther. Anything else
 		// (README.md, stray dotfiles) is unclassified.
-		if strings.EqualFold(slash, instructionFileName) {
+		switch {
+		case strings.EqualFold(slash, instructionFileName):
 			return ClassInstructions
+		case strings.EqualFold(slash, mcpFileName):
+			return ClassMCP
 		}
 		return ClassOther
 	}
@@ -112,6 +117,11 @@ func stagedClass(rel string) Class {
 // instructionFileName is the staged name of the root instruction file. Harnesses
 // rename it on projection (AGENTS.md for Codex, weft.mdc for Cursor).
 const instructionFileName = "CLAUDE.md"
+
+// mcpFileName is the staged name of the canonical MCP document. Like the
+// instruction file it is never copied verbatim — each harness's dialect renders
+// it into that tool's own format and location.
+const mcpFileName = "mcp.yaml"
 
 // classSupportOf resolves a harness's support for a class, applying the
 // permissive default for harnesses that predate the class model.

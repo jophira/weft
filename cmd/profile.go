@@ -407,6 +407,13 @@ func mergeAndApply(p *profile.Profile, roots []string, srcs []source.Source, cfg
 		return fmt.Errorf("removing merged instruction file from staging: %w", rmErr)
 	}
 
+	// Same treatment for the canonical MCP document: it is rendered per harness
+	// dialect below, so it must not survive in the staged tree as a literal file.
+	mcpCfg, err := stageMCPConfig(stagedDir)
+	if err != nil {
+		return err
+	}
+
 	for _, target := range targets {
 		h, ok := hReg.Get(target)
 		if !ok {
@@ -448,6 +455,12 @@ func mergeAndApply(p *profile.Profile, roots []string, srcs []source.Source, cfg
 		// content outside the block.
 		if err := harness.ProjectInstruction(h, stagedDir, sourceInstrs, ctx); err != nil {
 			return fmt.Errorf("projecting instructions to %s: %w", target, err)
+		}
+		// Render the canonical MCP document into the harness's own format. Like
+		// the instruction file this merges into a document the tool owns rather
+		// than writing a file of weft's own.
+		if err := harness.ProjectMCP(h, mcpCfg, ctx); err != nil {
+			return fmt.Errorf("projecting mcp config to %s: %w", target, err)
 		}
 	}
 	return nil

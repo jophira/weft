@@ -341,6 +341,13 @@ func pruneDropped(
 	// Sort so the log (and the tests reading it) have a stable order.
 	dropped := make([]string, 0)
 	for rel := range prevStaged {
+		// Sidecar keys name a file outside targetRoot and cannot be resolved by
+		// joining. StagedSet already filters them, but pruning by path is the one
+		// place where letting one through corrupts state rather than erroring
+		// cleanly, so refuse them here too.
+		if manifest.IsSidecarKey(rel) {
+			continue
+		}
 		if _, stillStaged := nowStaged[rel]; !stillStaged {
 			dropped = append(dropped, rel)
 		}
