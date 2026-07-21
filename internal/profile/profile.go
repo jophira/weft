@@ -20,14 +20,45 @@ type WriteBack struct {
 	Overrides map[string]string `yaml:"overrides" mapstructure:"overrides"`
 }
 
+// HarnessSync restricts which file classes weft projects to a given harness,
+// keyed by harness name:
+//
+//	harness_sync:
+//	  codex:  [instructions, commands]
+//	  cursor: []
+//
+// A harness with no entry projects every class it natively supports, which is
+// weft's behaviour without this config. An explicit empty list means "project
+// nothing", so silence and emptiness are deliberately different: omitting a key
+// must not be a way to accidentally disable a harness.
+//
+// Class names are validated where the harness package is available; this package
+// stores them as plain strings to stay independent of it.
+type HarnessSync map[string][]string
+
+// ClassesFor returns the configured class list for a harness and whether one was
+// configured at all. The second return distinguishes an absent key (use the
+// harness default) from an explicit empty list (project nothing).
+//
+// cf. Java: Optional<List<String>> — Go's comma-ok idiom carries the same
+// "present but empty" vs "absent" distinction.
+func (h HarnessSync) ClassesFor(harness string) ([]string, bool) {
+	if h == nil {
+		return nil, false
+	}
+	classes, ok := h[harness]
+	return classes, ok
+}
+
 // Profile is a named combination of sources with a merge strategy.
 type Profile struct {
-	Name         string    `yaml:"name"          mapstructure:"name"`
-	Sources      []string  `yaml:"sources"       mapstructure:"sources"`
-	Overlay      Overlay   `yaml:"overlay"       mapstructure:"overlay"`
-	ActiveTarget string    `yaml:"active_target,omitempty" mapstructure:"active_target"`
-	Targets      []string  `yaml:"targets,omitempty"      mapstructure:"targets"`
-	WriteBack    WriteBack `yaml:"write_back"    mapstructure:"write_back"`
+	Name         string      `yaml:"name"          mapstructure:"name"`
+	Sources      []string    `yaml:"sources"       mapstructure:"sources"`
+	Overlay      Overlay     `yaml:"overlay"       mapstructure:"overlay"`
+	ActiveTarget string      `yaml:"active_target,omitempty" mapstructure:"active_target"`
+	Targets      []string    `yaml:"targets,omitempty"      mapstructure:"targets"`
+	WriteBack    WriteBack   `yaml:"write_back"    mapstructure:"write_back"`
+	HarnessSync  HarnessSync `yaml:"harness_sync,omitempty" mapstructure:"harness_sync"`
 }
 
 // ResolvedTargets returns the effective target list for the profile.

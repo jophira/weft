@@ -67,6 +67,9 @@ func ProjectInstruction(h Harness, stagedRoot string, sources []SourceInstructio
 	if !ok {
 		return nil // harness consumes no root instruction file
 	}
+	if !ctx.classAllowed(ClassInstructions) {
+		return nil // profile harness_sync withholds instructions from this harness
+	}
 	spec, err := ic.InstructionSpec()
 	if err != nil {
 		return fmt.Errorf("resolving instruction spec for %s: %w", h.Name(), err)
@@ -79,7 +82,15 @@ func ProjectInstruction(h Harness, stagedRoot string, sources []SourceInstructio
 		if sErr != nil {
 			return sErr
 		}
-		body += advertiseBody(entries)
+		// A class the user excluded must not reappear as an index entry — that
+		// would route around the very config meant to withhold it.
+		kept := entries[:0]
+		for _, e := range entries {
+			if ctx.classAllowed(e.Class) {
+				kept = append(kept, e)
+			}
+		}
+		body += advertiseBody(kept)
 	}
 
 	existing, err := os.ReadFile(spec.Path)
