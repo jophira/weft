@@ -496,6 +496,31 @@ func harnessTargetRoot(cfgDir, harnessName string) string {
 	return m.TargetRoot
 }
 
+// targetWatchScope builds the write-back watch scope for a harness: its target
+// root plus only the directories that hold files weft manages there.
+//
+// The scope matters because a target root is a live harness home. ~/.claude
+// carries hundreds of directories of session state, plugin caches and history
+// that weft neither writes nor cares about; watching it whole overran the
+// watcher's directory ceiling and aborted `weft watch` outright.
+//
+// Returns ok=false when the harness has no manifest yet — nothing has been
+// projected, so there is nothing to watch for external edits.
+func targetWatchScope(cfgDir, harnessName string) (watch.TargetScope, bool) {
+	m, err := manifest.Load(cfgDir, harnessName)
+	if err != nil || m.TargetRoot == "" {
+		return watch.TargetScope{}, false
+	}
+	rels := make([]string, 0, len(m.Files))
+	for rel := range m.Files {
+		if manifest.IsSidecarKey(rel) {
+			continue // tracked outside the target root — not a path under it
+		}
+		rels = append(rels, rel)
+	}
+	return watch.ScopeForFiles(m.TargetRoot, rels), true
+}
+
 // ── Commands ──────────────────────────────────────────────────────────────────
 
 var profileCmd = &cobra.Command{
@@ -926,14 +951,14 @@ func startProfileWatchers(p *profile.Profile, roots []string, srcs []source.Sour
 	// Target watchers: watch each configured target directory for external edits.
 	var stopTargets []func()
 	for _, tgt := range resolveApplyTargets(p, true) {
-		targetRoot := harnessTargetRoot(cfgDir, tgt)
-		if targetRoot == "" {
+		scope, ok := targetWatchScope(cfgDir, tgt)
+		if !ok {
 			continue
 		}
 		// tgt is per-iteration in Go 1.22+ (cf. Java: effectively final in lambda)
 		tgt := tgt
 		stopTgt, watchErr := watch.DebouncedTarget(
-			[]string{targetRoot}, 300*time.Millisecond, &guard,
+			[]watch.TargetScope{scope}, 300*time.Millisecond, &guard,
 			func(changes []watch.TargetChange) {
 				m, loadErr := manifest.Load(cfgDir, tgt)
 				if loadErr != nil {

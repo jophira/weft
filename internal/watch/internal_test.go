@@ -67,9 +67,20 @@ func TestTargetRoot_subdir(t *testing.T) {
 	}
 }
 
-// ── addRecursive ──────────────────────────────────────────────────────────────
+// ── watchSet ──────────────────────────────────────────────────────────────────
 
-func TestAddRecursive_countsDirectories(t *testing.T) {
+// newTestWatchSet returns a source-kind set whose watcher is closed on cleanup.
+func newTestWatchSet(t *testing.T) *watchSet {
+	t.Helper()
+	w, err := fsnotify.NewWatcher()
+	if err != nil {
+		t.Fatalf("NewWatcher: %v", err)
+	}
+	t.Cleanup(func() { _ = w.Close() })
+	return newWatchSet(w, "source", sourceHint)
+}
+
+func TestWatchSetAddTree_countsDirectories(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, "sub1", "nested"), 0o755); err != nil {
 		t.Fatal(err)
@@ -78,23 +89,17 @@ func TestAddRecursive_countsDirectories(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	w, err := fsnotify.NewWatcher()
-	if err != nil {
-		t.Fatalf("NewWatcher: %v", err)
-	}
-	defer func() { _ = w.Close() }()
-
-	count, err := addRecursive(w, dir, maxWatchDirs)
-	if err != nil {
-		t.Fatalf("addRecursive: %v", err)
+	set := newTestWatchSet(t)
+	if err := set.addTree(dir); err != nil {
+		t.Fatalf("addTree: %v", err)
 	}
 	// expect 4: root, sub1, sub1/nested, sub2
-	if count != 4 {
-		t.Errorf("addRecursive count = %d, want 4", count)
+	if set.len() != 4 {
+		t.Errorf("watched = %d, want 4", set.len())
 	}
 }
 
-func TestAddRecursive_skipsHiddenDirs(t *testing.T) {
+func TestWatchSetAddTree_skipsHiddenDirs(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, ".hidden", "sub"), 0o755); err != nil {
 		t.Fatal(err)
@@ -103,23 +108,35 @@ func TestAddRecursive_skipsHiddenDirs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	w, err := fsnotify.NewWatcher()
-	if err != nil {
-		t.Fatalf("NewWatcher: %v", err)
-	}
-	defer func() { _ = w.Close() }()
-
-	count, err := addRecursive(w, dir, maxWatchDirs)
-	if err != nil {
-		t.Fatalf("addRecursive: %v", err)
+	set := newTestWatchSet(t)
+	if err := set.addTree(dir); err != nil {
+		t.Fatalf("addTree: %v", err)
 	}
 	// root + visible = 2; .hidden and its sub are skipped
-	if count != 2 {
-		t.Errorf("addRecursive count = %d, want 2 (hidden dirs skipped)", count)
+	if set.len() != 2 {
+		t.Errorf("watched = %d, want 2 (hidden dirs skipped)", set.len())
 	}
 }
 
-func TestAddRecursive_limitExceeded(t *testing.T) {
+func TestWatchSetAddTree_deduplicatesAcrossCalls(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	set := newTestWatchSet(t)
+	for range 3 {
+		if err := set.addTree(dir); err != nil {
+			t.Fatalf("addTree: %v", err)
+		}
+	}
+	// Re-adding must not consume ceiling budget for directories already watched.
+	if set.len() != 2 {
+		t.Errorf("watched = %d, want 2 after repeated addTree", set.len())
+	}
+}
+
+func TestWatchSetAddTree_limitExceeded(t *testing.T) {
 	dir := t.TempDir()
 	for _, sub := range []string{"a", "b", "c"} {
 		if err := os.MkdirAll(filepath.Join(dir, sub), 0o755); err != nil {
@@ -127,33 +144,75 @@ func TestAddRecursive_limitExceeded(t *testing.T) {
 		}
 	}
 
-	w, err := fsnotify.NewWatcher()
-	if err != nil {
-		t.Fatalf("NewWatcher: %v", err)
-	}
-	defer func() { _ = w.Close() }()
-
-	// Limit=2 but root+a+b+c = 4 dirs; should error.
-	_, err = addRecursive(w, dir, 2)
-	if err == nil {
-		t.Error("addRecursive with limit exceeded: expected error, got nil")
+	set := newTestWatchSet(t)
+	set.limit = 2 // root+a+b+c = 4 dirs; should error
+	if err := set.addTree(dir); err == nil {
+		t.Error("addTree past the ceiling: expected error, got nil")
 	}
 }
 
-func TestAddRecursive_nonexistentRoot(t *testing.T) {
-	w, err := fsnotify.NewWatcher()
-	if err != nil {
-		t.Fatalf("NewWatcher: %v", err)
-	}
-	defer func() { _ = w.Close() }()
+func TestWatchSetAddTree_nonexistentRoot(t *testing.T) {
+	set := newTestWatchSet(t)
 
-	// Non-existent root — WalkDir returns an error for the root itself,
-	// but addRecursive silently skips unreadable paths so count=0, err=nil.
-	count, err := addRecursive(w, "/definitely/does/not/exist", maxWatchDirs)
-	if err != nil {
-		t.Fatalf("addRecursive nonexistent root: unexpected error: %v", err)
+	// Non-existent root — WalkDir reports an error for the root itself, but
+	// addTree silently skips unreadable paths, so nothing is watched and no
+	// error surfaces.
+	if err := set.addTree(filepath.FromSlash("/definitely/does/not/exist")); err != nil {
+		t.Fatalf("addTree nonexistent root: unexpected error: %v", err)
 	}
-	if count != 0 {
-		t.Errorf("addRecursive nonexistent root count = %d, want 0", count)
+	if set.len() != 0 {
+		t.Errorf("watched = %d, want 0", set.len())
+	}
+}
+
+// ── expandTargetScope ─────────────────────────────────────────────────────────
+
+func TestExpandTargetScope_followsSubdirOfManagedDir(t *testing.T) {
+	root := t.TempDir()
+	skills := filepath.Join(root, "skills")
+	fresh := filepath.Join(skills, "newskill")
+	if err := os.MkdirAll(fresh, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	set := newTestWatchSet(t)
+	set.add(root)
+	set.add(skills)
+
+	expandTargetScope(set, []string{root}, fresh)
+	if !set.has(fresh) {
+		t.Errorf("expected %q to be watched after expansion", fresh)
+	}
+}
+
+func TestExpandTargetScope_refusesDirectChildOfRoot(t *testing.T) {
+	root := t.TempDir()
+	state := filepath.Join(root, "projects")
+	if err := os.MkdirAll(state, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	set := newTestWatchSet(t)
+	set.add(root)
+
+	expandTargetScope(set, []string{root}, state)
+	if set.has(state) {
+		t.Errorf("expanded into %q, a harness state directory under the root", state)
+	}
+}
+
+func TestExpandTargetScope_ignoresDirsOutsideScope(t *testing.T) {
+	root := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "elsewhere")
+	if err := os.MkdirAll(outside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	set := newTestWatchSet(t)
+	set.add(root)
+
+	expandTargetScope(set, []string{root}, outside)
+	if set.has(outside) {
+		t.Errorf("expanded into %q, which is outside every scope", outside)
 	}
 }
