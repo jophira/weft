@@ -47,6 +47,30 @@ func waitForChange(t *testing.T, ch <-chan []watch.TargetChange) []watch.TargetC
 	}
 }
 
+// waitForRel drains change batches until one reports rel, or the budget expires.
+//
+// A single receive is not enough when the test creates a directory before
+// writing into it: platforms differ on how that surfaces. Linux reports the new
+// directory as a Create, which the watcher consumes to expand its scope, but
+// Windows also reports the parent directory as modified, and that lands in a
+// batch of its own before the file write is ever seen.
+func waitForRel(t *testing.T, ch <-chan []watch.TargetChange, rel string) {
+	t.Helper()
+	var seen []watch.TargetChange
+	deadline := time.After(waitBudget)
+	for {
+		select {
+		case changes := <-ch:
+			seen = append(seen, changes...)
+			if slices.ContainsFunc(changes, func(c watch.TargetChange) bool { return c.Rel == rel }) {
+				return
+			}
+		case <-deadline:
+			t.Fatalf("timed out waiting for %s in changes; saw %+v", rel, seen)
+		}
+	}
+}
+
 func TestDebouncedTarget_DetectsFileWrite(t *testing.T) {
 	dir := t.TempDir()
 	ch := make(chan []watch.TargetChange, 1)
@@ -245,7 +269,9 @@ func TestDebouncedTarget_ExpandsIntoNewManagedSubdir(t *testing.T) {
 	if err := os.MkdirAll(skills, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	ch := make(chan []watch.TargetChange, 1)
+	// Buffered for several batches: creating the directory can produce one of
+	// its own, and a blocked send would stall the watcher goroutine.
+	ch := make(chan []watch.TargetChange, 8)
 	var guard watch.ApplyGuard
 
 	scope := watch.ScopeForFiles(root, []string{filepath.Join("skills", "proposal", "SKILL.md")})
@@ -268,11 +294,7 @@ func TestDebouncedTarget_ExpandsIntoNewManagedSubdir(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	changes := waitForChange(t, ch)
-	want := filepath.Join("skills", "newskill", "SKILL.md")
-	if !slices.ContainsFunc(changes, func(c watch.TargetChange) bool { return c.Rel == want }) {
-		t.Errorf("expected %s in changes, got %+v", want, changes)
-	}
+	waitForRel(t, ch, filepath.Join("skills", "newskill", "SKILL.md"))
 }
 
 // The mirror image: a directory created directly under the target root is
