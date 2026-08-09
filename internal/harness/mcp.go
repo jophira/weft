@@ -64,6 +64,13 @@ func mcpManifestKey(path string) string {
 	return "mcp:" + filepath.ToSlash(path)
 }
 
+// wiringManifestKey is the manifest key for a harness's own config file, which
+// weft edits only to point the tool at what it wrote. Same sentinel shape as
+// mcpManifestKey, and same reason: the file sits outside the target root.
+func wiringManifestKey(path string) string {
+	return "wiring:" + filepath.ToSlash(path)
+}
+
 // writeTrackedSidecar writes a file weft owns a key inside, recording its hash in
 // the manifest without disturbing the staged set.
 //
