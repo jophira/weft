@@ -438,6 +438,18 @@ Additional harnesses (Goose, OpenCode, Hermes, Antigravity) are supported via
 plain directory copy. New harnesses can be added to `~/.config/weft/harnesses.yaml`
 without recompiling.
 
+### Aider
+
+Aider has no default conventions path, so writing the file is not enough on its
+own. Weft adds a `read` entry pointing at it to `~/.aider.conf.yml`, merging into
+that file and leaving every other key, and your comments, untouched.
+
+Aider looks for `.aider.conf.yml` in the git root, then the working directory,
+then your home directory, and uses the first one it finds rather than merging
+them. A repo with its own `.aider.conf.yml` therefore does not see the entry weft
+writes. Add a `read` entry to the project config too when you want the profile
+loaded there.
+
 ## Home layout
 
 Weft splits its state into two homes (see ADR 0003):

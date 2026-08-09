@@ -462,6 +462,12 @@ func mergeAndApply(p *profile.Profile, roots []string, srcs []source.Source, cfg
 		if err := harness.ProjectMCP(h, mcpCfg, ctx); err != nil {
 			return fmt.Errorf("projecting mcp config to %s: %w", target, err)
 		}
+		// Point the tool at what was just written, for harnesses that load no
+		// well-known path. Runs last: it records a manifest key of its own, and
+		// the steps above rewrite the manifest wholesale.
+		if err := harness.ProjectWiring(h, ctx); err != nil {
+			return fmt.Errorf("wiring %s: %w", target, err)
+		}
 	}
 	return nil
 }
