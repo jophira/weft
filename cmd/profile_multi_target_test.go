@@ -56,6 +56,7 @@ func TestResolveApplyTargets_AutoDetect_ClaudeCode(t *testing.T) {
 func TestResolveApplyTargets_NoneDetected(t *testing.T) {
 	home := t.TempDir() // empty home — no harnesses installed
 	testenv.SetHome(t, home)
+	testenv.ClearPath(t) // and none on PATH either
 	p := &profile.Profile{}
 	got := resolveApplyTargets(p, true)
 	if len(got) != 0 {

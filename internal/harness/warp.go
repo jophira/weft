@@ -37,25 +37,25 @@ func warpYAMLFilter(rel string) bool {
 }
 
 // Warp adapts Weft to Warp terminal's workflow layout.
-type Warp struct {
-	configRoot string // resolved by Detect
-}
+type Warp struct{ detection }
 
 func (w *Warp) Name() string { return "warp" }
 
-func (w *Warp) Detect() bool {
-	p, ok := locate.First(warpLocations)
-	if ok {
-		w.configRoot = p
-	}
-	return ok
+// detectSignals declares no binary deliberately. Warp is a GUI terminal whose
+// executable name differs per platform and is not reliably on PATH (it is
+// warp-terminal on Linux, an .app bundle on macOS), so a lookup would produce
+// false negatives that read as bugs. The config root is the honest signal.
+func (w *Warp) detectSignals() detectSpec {
+	return detectSpec{candidates: warpLocations}
 }
+
+func (w *Warp) Detect() bool { return w.run(w.detectSignals()) }
 
 // ConfigPath implements ConfigPather: returns the resolved root when detected,
 // or all OS-matching candidates joined by "  or  " otherwise.
 func (w *Warp) ConfigPath() string {
-	if w.configRoot != "" {
-		return locate.Tilde(w.configRoot)
+	if root := w.detectedRoot(); root != "" {
+		return locate.Tilde(root)
 	}
 	return locate.Display(warpLocations)
 }
@@ -66,13 +66,15 @@ func (w *Warp) ConfigPath() string {
 //   - unchanged files are skipped via the fe.skip optimisation;
 //   - the walk is performed exactly once.
 func (w *Warp) Apply(stagedRoot string, ctx ApplyCtx) error {
-	if w.configRoot == "" {
-		if !w.Detect() {
+	root := w.detectedRoot()
+	if root == "" {
+		w.Detect()
+		if root = w.detectedRoot(); root == "" {
 			// Not yet installed; default to the platform-primary location.
-			w.configRoot = locate.All(warpLocations)[0]
+			root = locate.All(warpLocations)[0]
 		}
 	}
-	target := filepath.Join(w.configRoot, "workflows")
+	target := filepath.Join(root, "workflows")
 	if err := os.MkdirAll(target, 0o755); err != nil {
 		return err
 	}

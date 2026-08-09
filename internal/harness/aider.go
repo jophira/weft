@@ -1,29 +1,37 @@
 package harness
 
 import (
-	"os"
-	"os/exec"
-	"path/filepath"
+	"github.com/jophira/weft/internal/locate"
 )
 
 // Aider adapts Weft to aider's conventions file.
-// Aider has no standard global conventions path; this writes to ~/.aider/CONVENTIONS.md.
-// Point aider at it with: conventions-file: ~/.aider/CONVENTIONS.md in ~/.aider.conf.yml.
-type Aider struct{}
+//
+// Aider has no standard global conventions path, so weft writes
+// ~/.aider/CONVENTIONS.md — ~/.aider is aider's own state directory (analytics,
+// install records, caches), not one weft invents.
+//
+// Aider does not read that file on its own. It has no "conventions" option; the
+// mechanism is the general read-only file flag, so wiring it up means adding
+// `read: ~/.aider/CONVENTIONS.md` to ~/.aider.conf.yml. Weft does not yet write
+// that entry, so an applied profile is inert until the user adds it by hand.
+type Aider struct{ detection }
 
 func (a *Aider) Name() string { return "aider" }
 
-func (a *Aider) Detect() bool {
-	if _, err := exec.LookPath("aider"); err == nil {
-		return true
+// detectSignals probes aider's state directory and its optional config file, as
+// well as the binary. ~/.aider.conf.yml is not created by default, so the
+// directory is the signal that actually fires on a stock install.
+func (a *Aider) detectSignals() detectSpec {
+	return detectSpec{
+		binary: "aider",
+		candidates: []locate.Candidate{
+			locate.HomeRel(".aider"),
+			locate.HomeRel(".aider.conf.yml"),
+		},
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return false
-	}
-	_, err = os.Stat(filepath.Join(home, ".aider.conf.yml"))
-	return err == nil
 }
+
+func (a *Aider) Detect() bool { return a.run(a.detectSignals()) }
 
 // Apply copies files from stagedRoot into ~/.aider/, renaming CLAUDE.md → CONVENTIONS.md.
 func (a *Aider) Apply(stagedRoot string, ctx ApplyCtx) error {

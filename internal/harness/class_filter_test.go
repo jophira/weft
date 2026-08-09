@@ -24,7 +24,7 @@ func applyWithClasses(t *testing.T, allowed map[Class]bool) (target, log string)
 		Out:            buf,
 		AllowedClasses: allowed,
 	}
-	h := &GenericHarness{name: "test-harness", root: root}
+	h := &GenericHarness{detection: resolved(root), name: "test-harness"}
 	if err := applyWithManifest(staged, root, h.name, ctx, nil, nil, h); err != nil {
 		t.Fatal(err)
 	}

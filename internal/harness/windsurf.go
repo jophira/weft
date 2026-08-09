@@ -1,24 +1,25 @@
 package harness
 
 import (
-	"os"
 	"path/filepath"
+
+	"github.com/jophira/weft/internal/locate"
 )
 
 // Windsurf adapts Weft to Windsurf's global rules layout.
 // Global rules live at ~/.codeium/windsurf/global_rules.md.
-type Windsurf struct{}
+type Windsurf struct{ detection }
 
 func (w *Windsurf) Name() string { return "windsurf" }
 
-func (w *Windsurf) Detect() bool {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return false
+func (w *Windsurf) detectSignals() detectSpec {
+	return detectSpec{
+		binary:     "windsurf",
+		candidates: []locate.Candidate{locate.HomeRel(".codeium", "windsurf")},
 	}
-	_, err = os.Stat(filepath.Join(home, ".codeium", "windsurf"))
-	return err == nil
 }
+
+func (w *Windsurf) Detect() bool { return w.run(w.detectSignals()) }
 
 // Apply copies files from stagedRoot into ~/.codeium/windsurf/,
 // renaming CLAUDE.md → global_rules.md.

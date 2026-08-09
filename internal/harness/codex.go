@@ -1,28 +1,20 @@
 package harness
 
 import (
-	"os"
-	"os/exec"
-	"path/filepath"
+	"github.com/jophira/weft/internal/locate"
 )
 
 // Codex adapts Weft to OpenAI Codex's ~/.codex layout.
 // Codex reads AGENTS.md rather than CLAUDE.md.
-type Codex struct{}
+type Codex struct{ detection }
 
 func (c *Codex) Name() string { return "codex" }
 
-func (c *Codex) Detect() bool {
-	if _, err := exec.LookPath("codex"); err == nil {
-		return true
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return false
-	}
-	_, err = os.Stat(filepath.Join(home, ".codex"))
-	return err == nil
+func (c *Codex) detectSignals() detectSpec {
+	return detectSpec{binary: "codex", candidates: []locate.Candidate{locate.HomeRel(".codex")}}
 }
+
+func (c *Codex) Detect() bool { return c.run(c.detectSignals()) }
 
 // Apply copies files from stagedRoot into ~/.codex/, renaming CLAUDE.md → AGENTS.md.
 func (c *Codex) Apply(stagedRoot string, ctx ApplyCtx) error {

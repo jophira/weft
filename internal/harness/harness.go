@@ -19,6 +19,29 @@ type ConfigPather interface {
 	ConfigPath() string
 }
 
+// DetectReporter is an optional extension of Harness that reports which signal
+// satisfied the last Detect call. Adapters get it for free by embedding
+// detection; the CLI uses it to name the evidence it actually matched instead
+// of printing a config path it never checked.
+type DetectReporter interface {
+	DetectedVia() (DetectVia, string)
+}
+
+// signaller is implemented by adapters that declare their detection signals,
+// letting the CLI describe what it looked for when nothing was found.
+type signaller interface {
+	detectSignals() detectSpec
+}
+
+// DetectSignals renders the signals a harness is identified by (config roots and
+// binary), for adapters that declare them. Returns "" for any that do not.
+func DetectSignals(h Harness) string {
+	if s, ok := h.(signaller); ok {
+		return describeSignals(s.detectSignals())
+	}
+	return ""
+}
+
 // Registry holds all known harness adapters.
 type Registry struct {
 	harnesses []Harness
