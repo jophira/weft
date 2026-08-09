@@ -46,19 +46,7 @@ func runDoctor(w io.Writer) {
 		fmt.Fprintf(w, "  ✗ Config dir missing: %s\n", cfgDir)
 	}
 
-	fmt.Fprintln(w, "\nScanning for AI rule folders:")
-	for _, k := range harness.All() {
-		detected := k.H.Detect()
-		displayPath := k.ConfigPath
-		if cp, ok := k.H.(harness.ConfigPather); ok {
-			displayPath = cp.ConfigPath()
-		}
-		if detected {
-			fmt.Fprintf(w, "  ✓ Found: %s\n", displayPath)
-		} else {
-			fmt.Fprintf(w, "  – Not found: %s\n", displayPath)
-		}
-	}
+	scanHarnesses(w)
 
 	active := activeProfileName()
 	if active != "" {
@@ -257,6 +245,45 @@ func sortedKinds(m map[pathlint.Kind]int) []pathlint.Kind {
 	}
 	slices.Sort(kinds)
 	return kinds
+}
+
+// scanHarnesses lists every known harness with the evidence that identified it.
+//
+// It reports the signal that actually matched rather than the harness's config
+// path: detection succeeds on a binary found on PATH just as often as on a
+// config directory, and naming the directory in that case points users at a
+// path that need not exist.
+func scanHarnesses(w io.Writer) {
+	fmt.Fprintln(w, "\nScanning for AI harnesses:")
+	for _, k := range harness.All() {
+		detected := k.H.Detect()
+		displayPath := k.ConfigPath
+		if cp, ok := k.H.(harness.ConfigPather); ok {
+			displayPath = cp.ConfigPath()
+		}
+
+		if !detected {
+			looked := harness.DetectSignals(k.H)
+			if looked == "" {
+				looked = displayPath
+			}
+			fmt.Fprintf(w, "  – %-13s not found (looked for %s)\n", k.H.Name(), looked)
+			continue
+		}
+
+		evidence := displayPath
+		if r, ok := k.H.(harness.DetectReporter); ok {
+			switch via, detail := r.DetectedVia(); via {
+			case harness.DetectConfigDir:
+				evidence = detail
+			case harness.DetectBinary:
+				evidence = detail + " (on PATH)"
+			case harness.DetectNone:
+				// Detect said yes but reported no signal; fall back to the path.
+			}
+		}
+		fmt.Fprintf(w, "  ✓ %-13s %s\n", k.H.Name(), evidence)
+	}
 }
 
 func init() {

@@ -4,22 +4,25 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/jophira/weft/internal/locate"
 )
 
 // Cursor adapts Weft to Cursor's global rules layout.
 // Global rules live in ~/.cursor/rules/ as .mdc files with YAML frontmatter.
-type Cursor struct{}
+//
+// Detection probes ~/.cursor, the root Cursor creates, rather than the
+// rules/ subdirectory weft writes into — the latter may not exist until the
+// first apply.
+type Cursor struct{ detection }
 
 func (c *Cursor) Name() string { return "cursor" }
 
-func (c *Cursor) Detect() bool {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return false
-	}
-	_, err = os.Stat(filepath.Join(home, ".cursor"))
-	return err == nil
+func (c *Cursor) detectSignals() detectSpec {
+	return detectSpec{binary: "cursor", candidates: []locate.Candidate{locate.HomeRel(".cursor")}}
 }
+
+func (c *Cursor) Detect() bool { return c.run(c.detectSignals()) }
 
 const cursorMDCHeader = "---\nalwaysApply: true\n---\n"
 

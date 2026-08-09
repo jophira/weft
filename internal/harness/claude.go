@@ -1,23 +1,19 @@
 package harness
 
 import (
-	"os"
-	"path/filepath"
+	"github.com/jophira/weft/internal/locate"
 )
 
 // ClaudeCode adapts Weft to Claude Code's ~/.claude layout.
-type ClaudeCode struct{}
+type ClaudeCode struct{ detection }
 
 func (c *ClaudeCode) Name() string { return "claude-code" }
 
-func (c *ClaudeCode) Detect() bool {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return false
-	}
-	_, err = os.Stat(filepath.Join(home, ".claude"))
-	return err == nil
+func (c *ClaudeCode) detectSignals() detectSpec {
+	return detectSpec{binary: "claude", candidates: []locate.Candidate{locate.HomeRel(".claude")}}
 }
+
+func (c *ClaudeCode) Detect() bool { return c.run(c.detectSignals()) }
 
 // Apply copies every file from stagedRoot into ~/.claude/, creating
 // subdirectories as needed. Existing files owned by weft are overwritten

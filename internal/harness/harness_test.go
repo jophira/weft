@@ -591,7 +591,7 @@ func TestWarpApply_CopiesYAMLToWorkflows(t *testing.T) {
 	write(t, filepath.Join(staged, "CLAUDE.md"), "should be ignored too")
 
 	configRoot := t.TempDir()
-	w := &Warp{configRoot: configRoot}
+	w := &Warp{detection: resolved(configRoot)}
 
 	if err := w.Apply(staged, testCtx(t)); err != nil {
 		t.Fatal(err)
@@ -619,7 +619,7 @@ func TestWarpApply_SkipUnchanged(t *testing.T) {
 	write(t, filepath.Join(staged, "commands", "build.yaml"), "name: build")
 
 	configRoot := t.TempDir()
-	w := &Warp{configRoot: configRoot}
+	w := &Warp{detection: resolved(configRoot)}
 
 	var buf bytes.Buffer
 	ctx := testCtxWithOut(t, &buf)
@@ -651,7 +651,7 @@ func TestWarpApply_ConflictWrittenToCtxOut(t *testing.T) {
 	write(t, filepath.Join(staged, "commands", "build.yaml"), "name: build v1")
 
 	configRoot := t.TempDir()
-	w := &Warp{configRoot: configRoot}
+	w := &Warp{detection: resolved(configRoot)}
 
 	ctx := testCtx(t)
 

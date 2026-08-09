@@ -1,28 +1,20 @@
 package harness
 
 import (
-	"os"
-	"os/exec"
-	"path/filepath"
+	"github.com/jophira/weft/internal/locate"
 )
 
 // GeminiCLI adapts Weft to Gemini CLI's ~/.gemini layout.
 // Gemini CLI reads GEMINI.md rather than CLAUDE.md.
-type GeminiCLI struct{}
+type GeminiCLI struct{ detection }
 
 func (g *GeminiCLI) Name() string { return "gemini-cli" }
 
-func (g *GeminiCLI) Detect() bool {
-	if _, err := exec.LookPath("gemini"); err == nil {
-		return true
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return false
-	}
-	_, err = os.Stat(filepath.Join(home, ".gemini"))
-	return err == nil
+func (g *GeminiCLI) detectSignals() detectSpec {
+	return detectSpec{binary: "gemini", candidates: []locate.Candidate{locate.HomeRel(".gemini")}}
 }
+
+func (g *GeminiCLI) Detect() bool { return g.run(g.detectSignals()) }
 
 // Apply copies files from stagedRoot into ~/.gemini/, renaming CLAUDE.md → GEMINI.md.
 func (g *GeminiCLI) Apply(stagedRoot string, ctx ApplyCtx) error {

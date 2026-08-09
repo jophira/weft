@@ -27,7 +27,7 @@ func TestRunDoctor_containsConfigDirSection(t *testing.T) {
 func TestRunDoctor_containsHarnessScan(t *testing.T) {
 	var buf bytes.Buffer
 	runDoctor(&buf)
-	if !strings.Contains(buf.String(), "Scanning for AI rule folders") {
+	if !strings.Contains(buf.String(), "Scanning for AI harnesses") {
 		t.Errorf("runDoctor: missing harness scan section\ngot:\n%s", buf.String())
 	}
 }

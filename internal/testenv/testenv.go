@@ -15,3 +15,15 @@ func SetHome(t *testing.T, dir string) {
 	t.Setenv("HOME", dir)
 	t.Setenv("USERPROFILE", dir)
 }
+
+// ClearPath points $PATH at an empty directory for the duration of the test.
+//
+// Harness detection falls back to looking for a tool's binary on PATH, so a test
+// that isolates only HOME still sees whatever the developer happens to have
+// installed — "no harnesses" then means something different on a laptop than in
+// CI. An empty directory is used rather than an empty string because Go's
+// exec.LookPath reads an empty PATH entry as the current directory.
+func ClearPath(t *testing.T) {
+	t.Helper()
+	t.Setenv("PATH", t.TempDir())
+}

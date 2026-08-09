@@ -37,7 +37,7 @@ func (f *applyFixture) apply(t *testing.T, files map[string]string) string {
 		write(t, filepath.Join(staged, rel), content)
 	}
 	f.buf.Reset()
-	h := &GenericHarness{name: "test-harness", root: f.target}
+	h := &GenericHarness{detection: resolved(f.target), name: "test-harness"}
 	if err := h.Apply(staged, f.ctx); err != nil {
 		t.Fatalf("apply: %v", err)
 	}

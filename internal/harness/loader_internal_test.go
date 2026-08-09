@@ -126,7 +126,7 @@ func TestGenericHarness_ConfigPath_noRoot(t *testing.T) {
 }
 
 func TestGenericHarness_ConfigPath_withRoot(t *testing.T) {
-	g := &GenericHarness{name: "mytool", root: "/home/user/.mytool"}
+	g := &GenericHarness{detection: resolved("/home/user/.mytool"), name: "mytool"}
 	got := g.ConfigPath()
 	if got == "" {
 		t.Error("ConfigPath with root set returned empty string")

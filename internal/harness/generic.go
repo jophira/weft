@@ -3,7 +3,6 @@ package harness
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 
 	"github.com/jophira/weft/internal/locate"
@@ -13,38 +12,25 @@ import (
 // Most AI coding tools fall into this category — detect a config root or binary,
 // then copy the staged output into the resolved directory.
 type GenericHarness struct {
+	detection
 	name         string
 	detectBinary string             // binary looked up via PATH; empty = skip
 	candidates   []locate.Candidate // config root candidates; probed in order
-	root         string             // resolved by Detect; used by Apply
 }
 
 func (g *GenericHarness) Name() string { return g.name }
 
-func (g *GenericHarness) Detect() bool {
-	// Prefer an existing config directory — it pinpoints the exact root to write.
-	if p, ok := locate.First(g.candidates); ok {
-		g.root = p
-		return true
-	}
-	// Fall back to binary detection; prime root with the first candidate path
-	// so Apply knows where to create the directory.
-	if g.detectBinary != "" {
-		if _, err := exec.LookPath(g.detectBinary); err == nil {
-			if paths := locate.All(g.candidates); len(paths) > 0 {
-				g.root = paths[0]
-			}
-			return true
-		}
-	}
-	return false
+func (g *GenericHarness) detectSignals() detectSpec {
+	return detectSpec{binary: g.detectBinary, candidates: g.candidates}
 }
+
+func (g *GenericHarness) Detect() bool { return g.run(g.detectSignals()) }
 
 // ConfigPath implements ConfigPather: returns the resolved root when detected,
 // or the full candidate display string otherwise.
 func (g *GenericHarness) ConfigPath() string {
-	if g.root != "" {
-		return locate.Tilde(g.root)
+	if root := g.detectedRoot(); root != "" {
+		return locate.Tilde(root)
 	}
 	return locate.Display(g.candidates)
 }
@@ -53,22 +39,32 @@ func (g *GenericHarness) ConfigPath() string {
 // weft inlines content (Tier B) into <root>/CLAUDE.md. The default for any
 // unknown or user-defined harness — the safe, fool-proof fallback.
 func (g *GenericHarness) InstructionSpec() (InstructionSpec, error) {
-	if g.root == "" {
-		if !g.Detect() {
-			return InstructionSpec{}, fmt.Errorf("%s not detected — install it or create its config directory", g.name)
-		}
+	root, err := g.requireRoot()
+	if err != nil {
+		return InstructionSpec{}, err
 	}
-	return InstructionSpec{Path: filepath.Join(g.root, "CLAUDE.md"), Strategy: StrategyInline}, nil
+	return InstructionSpec{Path: filepath.Join(root, "CLAUDE.md"), Strategy: StrategyInline}, nil
 }
 
 func (g *GenericHarness) Apply(stagedRoot string, ctx ApplyCtx) error {
-	if g.root == "" {
-		if !g.Detect() {
-			return fmt.Errorf("%s not detected — install it or create its config directory", g.name)
-		}
+	root, err := g.requireRoot()
+	if err != nil {
+		return err
 	}
-	if err := os.MkdirAll(g.root, 0o755); err != nil {
-		return fmt.Errorf("ensuring %s exists: %w", g.root, err)
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		return fmt.Errorf("ensuring %s exists: %w", root, err)
 	}
-	return applyWithManifest(stagedRoot, g.root, g.name, ctx, nil, nil, g)
+	return applyWithManifest(stagedRoot, root, g.name, ctx, nil, nil, g)
+}
+
+// requireRoot returns the resolved config root, probing once if Detect has not
+// run yet.
+func (g *GenericHarness) requireRoot() (string, error) {
+	if root := g.detectedRoot(); root != "" {
+		return root, nil
+	}
+	if g.Detect() {
+		return g.detectedRoot(), nil
+	}
+	return "", fmt.Errorf("%s not detected — install it or create its config directory", g.name)
 }
