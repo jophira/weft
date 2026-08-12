@@ -106,7 +106,7 @@ func TestDialects_RoundTripIsIdentity(t *testing.T) {
 // native output must not carry Claude's shape — that would be a file Gemini
 // silently ignores, the exact bug class ADR 0004 addresses.
 func TestGeminiDialect_UsesHTTPURLKey(t *testing.T) {
-	d, ok := DialectFor(HarnessGemini)
+	d, ok := DialectFor(HarnessGeminiCLI)
 	if !ok {
 		t.Fatal("gemini dialect not registered")
 	}
@@ -140,7 +140,7 @@ func TestJSONDialects_PreserveUnrelatedKeys(t *testing.T) {
 		"fresh": {Type: TypeStdio, Command: "new"},
 	}}.Normalize()
 
-	for _, name := range []string{HarnessClaudeCode, HarnessCursor, HarnessGemini} {
+	for _, name := range []string{HarnessClaudeCode, HarnessCursor, HarnessGeminiCLI} {
 		t.Run(name, func(t *testing.T) {
 			d, ok := DialectFor(name)
 			if !ok {

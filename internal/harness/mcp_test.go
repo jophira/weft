@@ -158,6 +158,70 @@ func TestProjectMCP_DoesNotJoinStagedSet(t *testing.T) {
 	}
 }
 
+// Every harness that is meant to receive MCP must resolve a dialect through the
+// path production uses: Harness.Name() into mcpconfig.DialectFor.
+//
+// The mcpconfig tests ask for each dialect by its own constant, so a dialect
+// registered under a name no harness answers to still passes there. Gemini CLI
+// was registered as "gemini" while GeminiCLI.Name() returned "gemini-cli", and
+// ProjectMCP's miss is indistinguishable from a harness with no MCP support, so
+// it went quiet for the whole life of the feature (#233).
+func TestDialectResolvesForEveryBuiltinHarness(t *testing.T) {
+	// Listed explicitly rather than derived: a new harness gaining or losing MCP
+	// should have to say so here, not inherit an answer from the registry it is
+	// supposed to be checked against.
+	wantDialect := map[string]bool{
+		"claude-code": true,
+		"codex":       true,
+		"cursor":      true,
+		"gemini-cli":  true,
+		"windsurf":    false,
+		"warp":        false,
+		"aider":       false,
+		"antigravity": false,
+		"opencode":    false,
+		"hermes":      false,
+		"goose":       false,
+	}
+
+	for _, k := range builtins() {
+		name := k.H.Name()
+		want, listed := wantDialect[name]
+		if !listed {
+			t.Errorf("harness %q is not in wantDialect — say whether it supports MCP", name)
+			continue
+		}
+		if _, got := mcpconfig.DialectFor(name); got != want {
+			t.Errorf("DialectFor(%q) = %v, want %v", name, got, want)
+		}
+	}
+}
+
+// Gemini CLI keeps MCP servers in ~/.gemini/settings.json, a document it owns,
+// so the projection is a keyed merge like Claude Code's.
+func TestProjectMCP_WritesGeminiSettings(t *testing.T) {
+	home := t.TempDir()
+	testenv.SetHome(t, home)
+	ctx := ApplyCtx{ProfileName: "p", CfgDir: t.TempDir()}
+
+	if err := ProjectMCP(&GeminiCLI{}, sampleMCP(), ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(home, ".gemini", "settings.json"))
+	if err != nil {
+		t.Fatalf("gemini settings.json not written: %v", err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("not valid JSON: %v", err)
+	}
+	servers, _ := doc["mcpServers"].(map[string]any)
+	if _, ok := servers["github"]; !ok {
+		t.Errorf("github server missing from %s", data)
+	}
+}
+
 // mcp.yaml is projected through a dialect, so it must never be copied verbatim
 // into a target the way an unclassified root file would be.
 func TestStagedClass_MCPDocument(t *testing.T) {
