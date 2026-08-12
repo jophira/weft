@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"syscall"
 	"text/tabwriter"
 	"time"
@@ -931,6 +932,10 @@ func runWatchLoop(name string, p *profile.Profile, roots []string, srcs []source
 func startProfileWatchers(p *profile.Profile, roots []string, srcs []source.Source, cfgDir string) (func(), error) {
 	var guard watch.ApplyGuard
 
+	// Declared before the source watcher because its callback rebuilds the set
+	// after every apply.
+	targets := &targetWatcherSet{}
+
 	// Pre-warm the resolver cache once up front so the first hook resolve after
 	// activation is already fast.
 	prewarmRulesCaches(roots)
@@ -946,6 +951,15 @@ func startProfileWatchers(p *profile.Profile, roots []string, srcs []source.Sour
 			return
 		}
 		fmt.Printf("[weft] applied at %s\n", time.Now().Format("15:04:05"))
+		// The apply may have projected the first file into a directory that did
+		// not exist when the watchers were built, which leaves that directory
+		// unwatched until the scope is recomputed (#230). Rebuilding here is
+		// cheap: it only tears a watcher down when its directory set actually
+		// changed, which is rare.
+		if rebuildErr := targets.rebuild(p, srcs, cfgDir, &guard); rebuildErr != nil {
+			fmt.Fprintf(os.Stderr, "[weft] error: %v\n", rebuildErr)
+			slog.Error("rebuilding target watchers after apply", slog.Any("error", rebuildErr))
+		}
 		// Keep each tree's signals.yaml current so the resolver hook never pays
 		// the rebuild. Optimization-only and best-effort.
 		prewarmRulesCaches(roots)
@@ -955,74 +969,161 @@ func startProfileWatchers(p *profile.Profile, roots []string, srcs []source.Sour
 	}
 
 	// Target watchers: watch each configured target directory for external edits.
-	var stopTargets []func()
-	for _, tgt := range resolveApplyTargets(p, true) {
-		scope, ok := targetWatchScope(cfgDir, tgt)
-		if !ok {
-			continue
-		}
-		// tgt is per-iteration in Go 1.22+ (cf. Java: effectively final in lambda)
-		tgt := tgt
-		stopTgt, watchErr := watch.DebouncedTarget(
-			[]watch.TargetScope{scope}, 300*time.Millisecond, &guard,
-			func(changes []watch.TargetChange) {
-				m, loadErr := manifest.Load(cfgDir, tgt)
-				if loadErr != nil {
-					fmt.Fprintf(os.Stderr, "[weft] loading manifest: %v\n", loadErr)
-					slog.Error("loading manifest", slog.String("target", tgt), slog.Any("error", loadErr))
-					return
-				}
-				// Build srcMap once per batch — shared across all changes in this
-				// callback invocation so each write-back call does not rebuild it.
-				// cf. Java: compute a HashMap<String,Source> before the for-each loop.
-				wbSrcMap := buildSrcMap(srcs)
-				// Track whether any write-back refreshed a manifest hash, so the
-				// batch is persisted once instead of per file.
-				dirty := false
-				for _, c := range changes {
-					if _, owned := m.Files[c.Rel]; !owned {
-						continue // not a weft-managed file — ignore silently
-					}
-					fmt.Printf("\n[weft] target changed: %s\n", c.Rel)
-					performed, wbErr := dispatchWriteBack(m, c, p, wbSrcMap)
-					if wbErr != nil {
-						fmt.Fprintf(os.Stderr, "[weft] write-back error for %s: %v\n", c.Rel, wbErr)
-						slog.Error("write-back failed", slog.String("file", c.Rel), slog.Any("error", wbErr))
-						continue
-					}
-					if performed {
-						dirty = true
-						fmt.Printf("[weft] wrote %s back to source (source watcher will re-apply)\n", c.Rel)
-					} else {
-						fmt.Printf("[weft] %s: no owning source found — set write_back.default in profile\n", c.Rel)
-					}
-				}
-				// Persist the refreshed hashes so the re-apply this triggers sees the
-				// files as reconciled rather than externally modified.
-				if dirty {
-					if saveErr := manifest.Save(cfgDir, m); saveErr != nil {
-						fmt.Fprintf(os.Stderr, "[weft] saving manifest after write-back: %v\n", saveErr)
-						slog.Error("saving manifest after write-back", slog.String("target", tgt), slog.Any("error", saveErr))
-					}
-				}
-			},
-		)
-		if watchErr != nil {
-			stopSrc()
-			for _, s := range stopTargets {
-				s()
-			}
-			return nil, fmt.Errorf("starting target watcher for %s: %w", tgt, watchErr)
-		}
-		stopTargets = append(stopTargets, stopTgt)
+	if watchErr := targets.rebuild(p, srcs, cfgDir, &guard); watchErr != nil {
+		stopSrc()
+		return nil, watchErr
 	}
 
 	return func() {
 		stopSrc()
-		for _, s := range stopTargets {
-			s()
-		}
+		targets.stopAll()
 	}, nil
+}
+
+// targetWatcherSet owns the per-target write-back watchers and the scope each
+// was built from, so a scope that goes stale can be rebuilt in place.
+//
+// The scope is fixed when a watcher starts: targetWatchScope reads the manifest
+// and watches the target root plus the directories holding managed files. An
+// apply that projects the first file into a new top-level directory therefore
+// leaves that directory unwatched, and external edits inside it are missed until
+// the watchers are rebuilt. expandTargetScope covers directories created inside
+// a subtree weft already manages, but deliberately refuses a new direct child of
+// the target root, because following those is what exhausts the watch budget on
+// a live harness home (#230).
+//
+// cf. Java: a small class holding a Map<String, Runnable> of teardown handles
+// behind a lock. Go has no synchronized methods, so the mutex is explicit.
+type targetWatcherSet struct {
+	mu    sync.Mutex
+	stops map[string]func()   // target name -> teardown
+	dirs  map[string][]string // target name -> scope dirs the watcher was built from
+}
+
+// rebuild starts a watcher for every target whose scope is absent or has
+// changed, and stops watchers for targets that no longer resolve a scope.
+//
+// Only the affected targets are torn down. A profile applying to several
+// harnesses usually gains a directory in one of them, and restarting the rest
+// would drop events during the gap for no reason.
+func (ts *targetWatcherSet) rebuild(p *profile.Profile, srcs []source.Source, cfgDir string, guard *watch.ApplyGuard) error {
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+
+	if ts.stops == nil {
+		ts.stops = map[string]func(){}
+		ts.dirs = map[string][]string{}
+	}
+
+	live := map[string]bool{}
+	for _, tgt := range resolveApplyTargets(p, true) {
+		scope, ok := targetWatchScope(cfgDir, tgt)
+		if !ok {
+			continue // nothing projected yet — nothing to watch
+		}
+		live[tgt] = true
+		if slices.Equal(ts.dirs[tgt], scope.Dirs) {
+			continue // scope unchanged — leave the running watcher alone
+		}
+		if stop, running := ts.stops[tgt]; running {
+			stop()
+			delete(ts.stops, tgt)
+			fmt.Printf("[weft] %s: watch scope changed — rebuilding target watcher\n", tgt)
+			slog.Info("rebuilding target watcher after scope change",
+				slog.String("target", tgt), slog.Int("dirs", len(scope.Dirs)))
+		}
+		stopTgt, watchErr := startTargetWatcher(tgt, scope, p, srcs, cfgDir, guard)
+		if watchErr != nil {
+			ts.stopAllLocked()
+			return watchErr
+		}
+		ts.stops[tgt] = stopTgt
+		ts.dirs[tgt] = scope.Dirs
+	}
+
+	// A target that no longer resolves a scope has had its manifest removed, so
+	// its watcher is watching a tree weft no longer owns.
+	for tgt, stop := range ts.stops {
+		if !live[tgt] {
+			stop()
+			delete(ts.stops, tgt)
+			delete(ts.dirs, tgt)
+		}
+	}
+	return nil
+}
+
+func (ts *targetWatcherSet) stopAll() {
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+	ts.stopAllLocked()
+}
+
+func (ts *targetWatcherSet) stopAllLocked() {
+	for tgt, stop := range ts.stops {
+		stop()
+		delete(ts.stops, tgt)
+		delete(ts.dirs, tgt)
+	}
+}
+
+// startTargetWatcher wires the write-back callback for one target.
+func startTargetWatcher(
+	tgt string,
+	scope watch.TargetScope,
+	p *profile.Profile,
+	srcs []source.Source,
+	cfgDir string,
+	guard *watch.ApplyGuard,
+) (func(), error) {
+	stopTgt, watchErr := watch.DebouncedTarget(
+		[]watch.TargetScope{scope}, 300*time.Millisecond, guard,
+		func(changes []watch.TargetChange) {
+			m, loadErr := manifest.Load(cfgDir, tgt)
+			if loadErr != nil {
+				fmt.Fprintf(os.Stderr, "[weft] loading manifest: %v\n", loadErr)
+				slog.Error("loading manifest", slog.String("target", tgt), slog.Any("error", loadErr))
+				return
+			}
+			// Build srcMap once per batch — shared across all changes in this
+			// callback invocation so each write-back call does not rebuild it.
+			// cf. Java: compute a HashMap<String,Source> before the for-each loop.
+			wbSrcMap := buildSrcMap(srcs)
+			// Track whether any write-back refreshed a manifest hash, so the
+			// batch is persisted once instead of per file.
+			dirty := false
+			for _, c := range changes {
+				if _, owned := m.Files[c.Rel]; !owned {
+					continue // not a weft-managed file — ignore silently
+				}
+				fmt.Printf("\n[weft] target changed: %s\n", c.Rel)
+				performed, wbErr := dispatchWriteBack(m, c, p, wbSrcMap)
+				if wbErr != nil {
+					fmt.Fprintf(os.Stderr, "[weft] write-back error for %s: %v\n", c.Rel, wbErr)
+					slog.Error("write-back failed", slog.String("file", c.Rel), slog.Any("error", wbErr))
+					continue
+				}
+				if performed {
+					dirty = true
+					fmt.Printf("[weft] wrote %s back to source (source watcher will re-apply)\n", c.Rel)
+				} else {
+					fmt.Printf("[weft] %s: no owning source found — set write_back.default in profile\n", c.Rel)
+				}
+			}
+			// Persist the refreshed hashes so the re-apply this triggers sees the
+			// files as reconciled rather than externally modified.
+			if dirty {
+				if saveErr := manifest.Save(cfgDir, m); saveErr != nil {
+					fmt.Fprintf(os.Stderr, "[weft] saving manifest after write-back: %v\n", saveErr)
+					slog.Error("saving manifest after write-back", slog.String("target", tgt), slog.Any("error", saveErr))
+				}
+			}
+		},
+	)
+	if watchErr != nil {
+		return nil, fmt.Errorf("starting target watcher for %s: %w", tgt, watchErr)
+	}
+	return stopTgt, nil
 }
 
 // prewarmRulesCaches refreshes the signals.yaml resolution cache for each source
