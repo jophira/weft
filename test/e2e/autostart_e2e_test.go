@@ -3,10 +3,15 @@
 package e2e
 
 import (
+	"bytes"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -83,9 +88,14 @@ func TestAutostartRun_should_hand_off_to_a_manual_profile_use(t *testing.T) {
 	runWeft(t, home, "profile", "create", "beta", "--sources", "s1", "--target", "claude-code")
 	runWeft(t, home, "profile", "use", "alpha", "--no-watch")
 
+	// The watcher's own output is the first thing worth having when it fails to
+	// come up, so it is captured rather than discarded.
+	watcherOut := &lockedBuffer{}
 	watcher := exec.Command(weftBin, "autostart", "run")
 	watcher.Env = hermeticEnv(home)
 	watcher.Stdin = strings.NewReader("")
+	watcher.Stdout = watcherOut
+	watcher.Stderr = watcherOut
 	if err := watcher.Start(); err != nil {
 		t.Fatalf("starting autostart run: %v", err)
 	}
@@ -94,7 +104,7 @@ func TestAutostartRun_should_hand_off_to_a_manual_profile_use(t *testing.T) {
 		_, _ = watcher.Process.Wait()
 	})
 
-	waitForWatcher(t, home)
+	waitForWatcher(t, home, watcher, watcherOut)
 
 	out := runWeft(t, home, "profile", "use", "beta")
 
@@ -102,17 +112,144 @@ func TestAutostartRun_should_hand_off_to_a_manual_profile_use(t *testing.T) {
 	mustNotContain(t, "profile use during autostart", out, "Watching for changes")
 }
 
+// watcherDeadline is how long the autostarted watcher gets to report itself live.
+//
+// It is deliberately still a fixed 20s. The one observed failure (#224, on
+// windows-latest) hit this deadline, and 20s is generous for a process spawn
+// even on a cold runner, so raising it would hide the next occurrence rather
+// than explain it. The dump below is what decides whether a slow start or a
+// watcher that never comes up is the real cause; the deadline is worth revisiting
+// once a failure has been read rather than guessed at.
+const watcherDeadline = 20 * time.Second
+
 // waitForWatcher blocks until `weft status --short` reports a live watcher.
-func waitForWatcher(t *testing.T, home string) {
+//
+// On timeout it dumps everything needed to tell a slow start from a watcher that
+// never started: whether the process is still running, what it printed, the
+// watcher log, and the full status output. The original bare t.Fatal proved only
+// that the watcher did not report live within the deadline, which is the one
+// thing the timeout already told you (#224).
+func waitForWatcher(t *testing.T, home string, watcher *exec.Cmd, watcherOut *lockedBuffer) {
 	t.Helper()
-	deadline := time.Now().Add(20 * time.Second)
-	for time.Now().Before(deadline) {
-		if strings.Contains(runWeft(t, home, "status", "--short"), "watch:on") {
+
+	start := time.Now()
+	deadline := start.Add(watcherDeadline)
+	var polls int
+	var lastStatus string
+	// Poll before testing the deadline, so the dump always carries a real status
+	// reading. A deadline-first loop can report a timeout having never asked, and
+	// "no output" from a poll that never happened is the same unreadable failure
+	// this change exists to remove.
+	for {
+		lastStatus = runWeft(t, home, "status", "--short")
+		polls++
+		if strings.Contains(lastStatus, "watch:on") {
 			return
+		}
+		if !time.Now().Before(deadline) {
+			break
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	t.Fatal("autostarted watcher never became live")
+
+	t.Fatalf("autostarted watcher never became live after %s (%d polls)\n"+
+		"  process:  %s\n"+
+		"── weft status --short (last poll) ──\n%s\n"+
+		"── watcher stdout+stderr ──\n%s\n"+
+		"── %s ──\n%s\n"+
+		"── weft status (full) ──\n%s",
+		time.Since(start).Round(time.Millisecond), polls,
+		watcherState(watcher),
+		indent(lastStatus),
+		indent(watcherOut.String()),
+		watcherLogPath(home), indent(readWatcherLog(home)),
+		indent(weftOutput(home, "status")))
+}
+
+// watcherState reports whether the watcher process is still running, and how it
+// exited if not. A process that has already exited is a product bug; one that is
+// still running and simply has not reported live is a timing problem. The bare
+// message could not tell these apart, which is what made #224 undiagnosable.
+func watcherState(watcher *exec.Cmd) string {
+	if watcher.ProcessState == nil {
+		// Signal 0 probes liveness without delivering anything. Unsupported on
+		// Windows, where a nil ProcessState is the only signal available.
+		if runtime.GOOS != "windows" && watcher.Process != nil {
+			if err := watcher.Process.Signal(syscall.Signal(0)); err != nil {
+				return fmt.Sprintf("pid %d not signalable: %v", watcher.Process.Pid, err)
+			}
+		}
+		return fmt.Sprintf("still running (pid %d)", watcher.Process.Pid)
+	}
+	return fmt.Sprintf("already exited: %s", watcher.ProcessState)
+}
+
+// watcherLogPath mirrors internal/logger's default location. It is duplicated
+// rather than imported because this package drives the binary as a black box and
+// must not depend on weft's internals.
+func watcherLogPath(home string) string {
+	if xdg := os.Getenv("XDG_DATA_HOME"); xdg != "" {
+		return filepath.Join(xdg, "weft", "weft.log")
+	}
+	return filepath.Join(home, ".local", "share", "weft", "weft.log")
+}
+
+func readWatcherLog(home string) string {
+	data, err := os.ReadFile(watcherLogPath(home))
+	if err != nil {
+		return fmt.Sprintf("(unreadable: %v)", err)
+	}
+	if len(data) == 0 {
+		return "(empty)"
+	}
+	return string(data)
+}
+
+// weftOutput runs the binary for diagnostics only, returning whatever came back
+// rather than failing the test. runWeft is no use on a failure path: it calls
+// t.Fatalf on a non-zero exit, which would replace the dump being assembled.
+func weftOutput(home string, args ...string) string {
+	cmd := exec.Command(weftBin, args...)
+	cmd.Env = hermeticEnv(home)
+	cmd.Stdin = strings.NewReader("")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Sprintf("%s\n(exit: %v)", out, err)
+	}
+	return string(out)
+}
+
+// indent keeps each dumped section visibly nested under its heading, since Go
+// test output already indents the first line of a Fatalf and nothing else.
+func indent(s string) string {
+	s = strings.TrimRight(s, "\n")
+	if s == "" {
+		return "    (no output)"
+	}
+	return "    " + strings.ReplaceAll(s, "\n", "\n    ")
+}
+
+// lockedBuffer collects a child process's output for later inspection. os/exec
+// writes from a goroutine of its own, so the test goroutine cannot read a plain
+// bytes.Buffer without racing it.
+//
+// cf. Java: a StringBuffer, where the synchronisation is part of the type rather
+// than something the caller adds.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }
 
 func TestAutostartEnable_should_reject_an_unknown_pinned_profile(t *testing.T) {
