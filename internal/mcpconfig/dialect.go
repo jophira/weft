@@ -8,12 +8,14 @@ import (
 	"slices"
 )
 
-// Harness names, matching the names used elsewhere in weft.
+// Harness names. These must match Harness.Name() exactly: DialectFor is called
+// with a harness's own name, and a miss is indistinguishable from a harness with
+// no MCP support, so a typo here goes quiet rather than failing (#233).
 const (
 	HarnessClaudeCode = "claude-code"
 	HarnessCodex      = "codex"
 	HarnessCursor     = "cursor"
-	HarnessGemini     = "gemini"
+	HarnessGeminiCLI  = "gemini-cli"
 )
 
 // Keys the MCP server table lives under in each native format.
@@ -54,7 +56,7 @@ func Dialects() []Dialect {
 		&jsonDialect{harness: HarnessClaudeCode, rel: []string{".claude.json"}, codec: typedCodec{}},
 		&tomlDialect{harness: HarnessCodex, rel: []string{".codex", "config.toml"}, codec: typedCodec{}},
 		&jsonDialect{harness: HarnessCursor, rel: []string{".cursor", "mcp.json"}, codec: typedCodec{}},
-		&jsonDialect{harness: HarnessGemini, rel: []string{".gemini", "settings.json"}, codec: geminiCodec{}},
+		&jsonDialect{harness: HarnessGeminiCLI, rel: []string{".gemini", "settings.json"}, codec: geminiCodec{}},
 	}
 }
 

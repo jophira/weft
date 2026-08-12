@@ -222,6 +222,16 @@ func TestManagedFilter_managed_subdir_filtered(t *testing.T) {
 	}
 }
 
+// mcp.yaml is the canonical MCP document. It has to reach staging for
+// stageMCPConfig to find it, so excluding it from the managed set stopped MCP
+// reaching every harness, not just the one that named its dialect wrongly (#233).
+func TestManagedFilter_mcp_yaml_filtered(t *testing.T) {
+	f := managedFilter(nil)
+	if !f("mcp.yaml") {
+		t.Error("managedFilter: mcp.yaml should be filtered (managed)")
+	}
+}
+
 func TestManagedFilter_unmanaged_not_filtered(t *testing.T) {
 	f := managedFilter(nil)
 	if f("custom/notes.md") {

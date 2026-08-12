@@ -51,8 +51,8 @@ func newProfileManager() (*profile.FileManager, error) {
 // managed paths across all sources: CLAUDE.md + each Structure subdirectory.
 func managedFilter(sources []source.Source) merge.Filter {
 	// Build the set of managed root-relative prefixes.
-	prefixes := []string{"CLAUDE.md"}
-	seen := map[string]bool{"CLAUDE.md": true}
+	prefixes := []string{"CLAUDE.md", harness.MCPFileName}
+	seen := map[string]bool{"CLAUDE.md": true, harness.MCPFileName: true}
 	for _, s := range sources {
 		for _, d := range s.Structure.ManagedDirs() {
 			if !seen[d] {
