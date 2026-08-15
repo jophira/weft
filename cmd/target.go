@@ -2,10 +2,12 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
@@ -13,6 +15,7 @@ import (
 
 	"github.com/jophira/weft/internal/harness"
 	"github.com/jophira/weft/internal/manifest"
+	"github.com/jophira/weft/internal/profile"
 )
 
 var targetCmd = &cobra.Command{
@@ -41,6 +44,126 @@ var targetListCmd = &cobra.Command{
 		}
 		return w.Flush()
 	},
+}
+
+var targetDetectAdd bool
+
+var targetDetectCmd = &cobra.Command{
+	Use:   "detect",
+	Short: "Report installed harnesses and, with --add, target them",
+	Long: `Run harness detection and show what the active profile targets.
+
+    weft target detect          # report only
+    weft target detect --add    # append newly detected harnesses to the profile
+
+Nothing is written without --add, following 'weft adopt': every change to what
+weft writes to is explicit. --add never removes a target either. A harness that
+stops detecting is reported and kept, because an uninstall on one machine must
+not silently stop projection on another.
+
+A profile still carrying the legacy 'active_target' is migrated to the 'targets'
+list, keeping the existing value first.`,
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		out := cmd.OutOrStdout()
+		activeName := activeProfileName()
+		if activeName == "" {
+			return fmt.Errorf("no active profile — run 'weft profile use <name>' first")
+		}
+		pm, err := newProfileManager()
+		if err != nil {
+			return err
+		}
+		p, err := pm.Get(activeName)
+		if err != nil {
+			return err
+		}
+
+		rows := profile.TargetReport(p, detectHarnesses())
+		if err := printDetectReport(out, activeName, rows); err != nil {
+			return err
+		}
+		if !targetDetectAdd {
+			printDetectHint(out, rows)
+			return nil
+		}
+
+		added, changed := profile.AddDetected(p, rows)
+		if !changed {
+			fmt.Fprintf(out, "\nProfile %q already targets every detected harness.\n", activeName)
+			return nil
+		}
+		if err := pm.Update(*p); err != nil {
+			return fmt.Errorf("updating profile %q: %w", activeName, err)
+		}
+		fmt.Fprintln(out)
+		for _, name := range added {
+			fmt.Fprintf(out, "  + %s\n", name)
+		}
+		fmt.Fprintf(out, "✓ profile %q now targets: %s\n", activeName, strings.Join(p.Targets, ", "))
+		fmt.Fprintf(out, "  run 'weft profile use %s' to apply to them\n", activeName)
+		return nil
+	},
+}
+
+// detectHarnesses runs detection over every known harness and records the
+// signal each one matched, in registry order so the report is stable.
+func detectHarnesses() []profile.Detection {
+	all := harness.All()
+	out := make([]profile.Detection, 0, len(all))
+	for _, k := range all {
+		found := k.H.Detect()
+		d := profile.Detection{Name: k.H.Name(), Found: found}
+		if found {
+			d.Signal = harness.DetectedSignal(k.H)
+		}
+		out = append(out, d)
+	}
+	return out
+}
+
+func printDetectReport(out io.Writer, profileName string, rows []profile.TargetStatus) error {
+	fmt.Fprintf(out, "Active profile: %s\n\n", profileName)
+	w := tabwriter.NewWriter(out, 0, 0, 3, ' ', 0)
+	fmt.Fprintln(w, "NAME\tDETECTED\tSIGNAL\tTARGETED")
+	for _, r := range rows {
+		detected, targeted := "✗", "✗"
+		if r.Found {
+			detected = "✓"
+		}
+		if r.Targeted {
+			targeted = "✓"
+		}
+		note := r.Signal
+		if r.Untraced {
+			note = "not detected here — kept"
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", r.Name, detected, note, targeted)
+	}
+	return w.Flush()
+}
+
+// untargetedNames lists the detected harnesses the profile does not target yet,
+// the set '--add' would append.
+func untargetedNames(rows []profile.TargetStatus) []string {
+	var pending []string
+	for _, r := range rows {
+		if r.New {
+			pending = append(pending, r.Name)
+		}
+	}
+	return pending
+}
+
+// printDetectHint names the command that would act on the report, shown only
+// when there is something for it to do.
+func printDetectHint(out io.Writer, rows []profile.TargetStatus) {
+	pending := untargetedNames(rows)
+	if len(pending) == 0 {
+		return
+	}
+	fmt.Fprintf(out, "\n%d detected harness(es) not targeted: %s\n", len(pending), strings.Join(pending, ", "))
+	fmt.Fprintln(out, "  run 'weft target detect --add' to target them")
 }
 
 var targetApplyCmd = &cobra.Command{
@@ -260,7 +383,8 @@ func countFiles(root string) int {
 
 func init() {
 	rootCmd.AddCommand(targetCmd)
-	targetCmd.AddCommand(targetListCmd, targetApplyCmd, targetBackupsCmd, targetRevertCmd)
+	targetCmd.AddCommand(targetListCmd, targetDetectCmd, targetApplyCmd, targetBackupsCmd, targetRevertCmd)
 
+	targetDetectCmd.Flags().BoolVar(&targetDetectAdd, "add", false, "append newly detected harnesses to the active profile's targets")
 	targetRevertCmd.Flags().StringVar(&revertBackup, "backup", "", "timestamp of a specific backup to restore (e.g. 20260605-143022)")
 }

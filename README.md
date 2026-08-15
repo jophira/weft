@@ -119,6 +119,10 @@ weft profile use hybrid --no-watch
 # Apply to a specific harness
 weft target apply claude-code
 
+# See which harnesses are installed, and target the ones the profile misses
+weft target detect
+weft target detect --add
+
 # Verify everything is configured correctly
 weft doctor
 ```
@@ -308,6 +312,7 @@ apply reports `· unchanged` rather than treating the file as an external edit.
 | `profile create/list/use/diff/inspect/delete` | Manage named profiles; `--overlay`, `--target`, and `--sources` are validated on create |
 | `profile use <name>` | Activate profile: merge sources, apply to all targets, and watch for changes (use `--no-watch` to apply once and exit) |
 | `target list/apply/backups/revert` | Manage AI harness targets; inspect and restore backups |
+| `target detect [--add]` | Report which harnesses are installed, the signal each was found by, and whether the active profile targets them; `--add` appends the new ones to the profile (never removes) |
 | `adopt --scan` | List commands/agents/skills authored inside a harness that no source owns |
 | `adopt <harness> <path>... --into <source>` | Copy those files into a source so weft can fan them out; confirms first, refuses to clobber (`--force`) or to carry literal credentials |
 | `hook add/list/run/remove` | Manage lifecycle hooks |
