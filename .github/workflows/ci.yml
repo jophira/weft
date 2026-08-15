@@ -69,7 +69,14 @@ jobs:
         # the exact class of change this suite exists to catch. Observed for real
         # on the #219 Windows job, which reported `ok (cached)` for a package
         # that had failed on the previous commit.
-        run: go test -tags e2e -count=1 ./test/e2e/...
+        #
+        # -v records a per-test duration on every run. Without it the only number
+        # in the log is the package total, which on windows-latest has been seen
+        # anywhere between 5.9s and 34.0s, and a package total cannot say whether
+        # the spread lands on the watcher hand-off or on the build ahead of it.
+        # That distinction is what #224 needs, and ten tests is little enough
+        # output to be worth carrying permanently.
+        run: go test -tags e2e -count=1 -v ./test/e2e/...
 
       - name: Upload coverage report
         if: always()
