@@ -19,7 +19,7 @@ type Cursor struct{ detection }
 func (c *Cursor) Name() string { return "cursor" }
 
 func (c *Cursor) detectSignals() detectSpec {
-	return detectSpec{binary: "cursor", candidates: []locate.Candidate{locate.HomeRel(".cursor")}}
+	return detectSpec{binaries: []string{"cursor"}, candidates: []locate.Candidate{locate.HomeRel(".cursor")}}
 }
 
 func (c *Cursor) Detect() bool { return c.run(c.detectSignals()) }

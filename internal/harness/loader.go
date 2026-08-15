@@ -12,10 +12,39 @@ import (
 )
 
 type harnessEntry struct {
-	Name         string `yaml:"name"`
-	DetectPath   string `yaml:"detect_path"`
-	DetectBinary string `yaml:"detect_binary"`
-	ConfigDir    string `yaml:"config_dir"`
+	Name         string     `yaml:"name"`
+	DetectPath   string     `yaml:"detect_path"`
+	DetectBinary stringList `yaml:"detect_binary"`
+	ConfigDir    string     `yaml:"config_dir"`
+}
+
+// stringList accepts either a scalar or a sequence in YAML, so detect_binary can
+// name one binary or several without a second key. Every harnesses.yaml written
+// before the field was widened still parses.
+//
+// cf. Java: a Jackson deserialiser accepting both String and List<String> for
+// one property.
+type stringList []string
+
+func (s *stringList) UnmarshalYAML(n *yaml.Node) error {
+	if n.Kind == yaml.ScalarNode {
+		var one string
+		if err := n.Decode(&one); err != nil {
+			return err
+		}
+		if one == "" {
+			*s = nil
+			return nil
+		}
+		*s = stringList{one}
+		return nil
+	}
+	var many []string
+	if err := n.Decode(&many); err != nil {
+		return err
+	}
+	*s = many
+	return nil
 }
 
 type harnessesFile struct {
@@ -32,6 +61,7 @@ type harnessesFile struct {
 //	    detect_path: .my-tool       # relative to $HOME
 //	    config_dir: .my-tool        # relative to $HOME
 //	    detect_binary: my-tool      # optional: also check PATH
+//	                                # a list is accepted too: [my-tool, mytool]
 func loadConfigHarnesses() ([]Known, error) {
 	dir, err := config.DefaultDir()
 	if err != nil {
@@ -53,9 +83,9 @@ func loadConfigHarnesses() ([]Known, error) {
 		candidates := entryCandidates(e)
 		out = append(out, Known{
 			H: &GenericHarness{
-				name:         e.Name,
-				detectBinary: e.DetectBinary,
-				candidates:   candidates,
+				name:           e.Name,
+				detectBinaries: e.DetectBinary,
+				candidates:     candidates,
 			},
 			ConfigPath: "", // resolved at runtime via ConfigPather
 		})

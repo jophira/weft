@@ -92,6 +92,55 @@ func TestLoadConfigHarnesses_withEntries(t *testing.T) {
 	}
 }
 
+// TestLoadConfigHarnesses_detectBinaryForms covers both spellings of
+// detect_binary. The scalar form is what every harnesses.yaml written before the
+// field was widened uses, and it must keep parsing unchanged.
+func TestLoadConfigHarnesses_detectBinaryForms(t *testing.T) {
+	tests := []struct {
+		name  string
+		field string
+		want  []string
+	}{
+		{"scalar", "detect_binary: mytool", []string{"mytool"}},
+		{"sequence", "detect_binary: [mytool, othername]", []string{"mytool", "othername"}},
+		{"absent", "", nil},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tmp := t.TempDir()
+			testenv.SetHome(t, tmp)
+			cfgDir := filepath.Join(tmp, ".config", "weft")
+			if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			doc := "harnesses:\n  - name: mytool\n    config_dir: .mytool\n"
+			if tc.field != "" {
+				doc += "    " + tc.field + "\n"
+			}
+			if err := os.WriteFile(filepath.Join(cfgDir, "harnesses.yaml"), []byte(doc), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			result, err := loadConfigHarnesses()
+			if err != nil {
+				t.Fatalf("loadConfigHarnesses: %v", err)
+			}
+			if len(result) != 1 {
+				t.Fatalf("loadConfigHarnesses: len=%d, want 1", len(result))
+			}
+			got := result[0].H.(*GenericHarness).detectBinaries
+			if len(got) != len(tc.want) {
+				t.Fatalf("detectBinaries = %v, want %v", got, tc.want)
+			}
+			for i := range tc.want {
+				if got[i] != tc.want[i] {
+					t.Errorf("detectBinaries[%d] = %q, want %q", i, got[i], tc.want[i])
+				}
+			}
+		})
+	}
+}
+
 func TestLoadConfigHarnesses_corruptYAML(t *testing.T) {
 	tmp := t.TempDir()
 	testenv.SetHome(t, tmp)

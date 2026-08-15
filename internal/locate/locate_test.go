@@ -38,6 +38,30 @@ func TestXDGRel_path(t *testing.T) {
 	}
 }
 
+func TestXDGDataRel_fallsBackToHome(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", "")
+	home := t.TempDir()
+	c := locate.XDGDataRel("opencode")
+	got := c.Path(home, filepath.Join(home, ".config"))
+	want := filepath.Join(home, ".local", "share", "opencode")
+	if got != want {
+		t.Errorf("XDGDataRel.Path = %q, want %q", got, want)
+	}
+}
+
+// TestXDGDataRel_honoursEnv pins that the data root is read from $XDG_DATA_HOME
+// rather than derived from the config root, which is a different variable.
+func TestXDGDataRel_honoursEnv(t *testing.T) {
+	dataRoot := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", dataRoot)
+	c := locate.XDGDataRel("opencode")
+	got := c.Path(t.TempDir(), "/xdg/config")
+	want := filepath.Join(dataRoot, "opencode")
+	if got != want {
+		t.Errorf("XDGDataRel.Path = %q, want %q", got, want)
+	}
+}
+
 // ── Tilde ─────────────────────────────────────────────────────────────────────
 
 func TestTilde_replacesHome(t *testing.T) {
