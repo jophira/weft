@@ -29,12 +29,18 @@ import (
 // After write-back the source files contain the target edits, so the subsequent
 // h.Apply() call will re-merge them and produce a file identical to what is on
 // disk — no backup, no overwrite.
+//
+// held names target-relative paths another harness has also changed since the
+// last apply. Writing one of those back would push one harness's edit into the
+// source and, on the next apply, over the other harness's edit — the silent loss
+// conflict detection exists to prevent, so they are skipped and reported.
 func startupWriteBack(
 	stagedDir string,
 	target string,
 	cfgDir string,
 	p *profile.Profile,
 	srcs []source.Source,
+	held map[string]bool,
 ) error {
 	targetRoot := harnessTargetRoot(cfgDir, target)
 	if targetRoot == "" {
@@ -78,6 +84,11 @@ func startupWriteBack(
 		knownHash, owned := m.Files[rel]
 		if !owned || existingHash == knownHash {
 			// Either weft doesn't own it or it hasn't changed since the last apply.
+			return nil
+		}
+
+		if held[rel] {
+			fmt.Printf("[weft] %s: held — resolve the conflict before it can be written back\n", rel)
 			return nil
 		}
 

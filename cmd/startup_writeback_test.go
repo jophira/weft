@@ -77,7 +77,7 @@ func TestStartupWriteBack_SingleSource_WrittenBack(t *testing.T) {
 		Overlay: profile.OverlayCascade,
 	}
 
-	if err := startupWriteBack(stagedDir, "claude-code", cfgDir, p, srcs); err != nil {
+	if err := startupWriteBack(stagedDir, "claude-code", cfgDir, p, srcs, nil); err != nil {
 		t.Fatalf("startupWriteBack: %v", err)
 	}
 
@@ -102,7 +102,7 @@ func TestStartupWriteBack_NoManifest_Noop(t *testing.T) {
 	srcs := []source.Source{newSource("personal", srcRoot)}
 	p := &profile.Profile{Name: "test", Sources: []string{"personal"}}
 
-	if err := startupWriteBack(stagedDir, "claude-code", cfgDir, p, srcs); err != nil {
+	if err := startupWriteBack(stagedDir, "claude-code", cfgDir, p, srcs, nil); err != nil {
 		t.Fatalf("startupWriteBack: %v", err)
 	}
 	// No writes should have occurred (source doesn't have CLAUDE.md).
@@ -135,7 +135,7 @@ func TestStartupWriteBack_UnchangedFile_Noop(t *testing.T) {
 	}
 	mtime := srcStat.ModTime()
 
-	if err := startupWriteBack(stagedDir, "claude-code", cfgDir, p, srcs); err != nil {
+	if err := startupWriteBack(stagedDir, "claude-code", cfgDir, p, srcs, nil); err != nil {
 		t.Fatalf("startupWriteBack: %v", err)
 	}
 
@@ -170,7 +170,7 @@ func TestStartupWriteBack_Unresolvable_BackupAndWarn(t *testing.T) {
 		Overlay: profile.OverlayCascade,
 	}
 
-	if err := startupWriteBack(stagedDir, "claude-code", cfgDir, p, srcs); err != nil {
+	if err := startupWriteBack(stagedDir, "claude-code", cfgDir, p, srcs, nil); err != nil {
 		t.Fatalf("startupWriteBack returned error for unresolvable file: %v", err)
 	}
 
@@ -232,7 +232,7 @@ func TestStartupWriteBack_MultiSource_WrittenBack(t *testing.T) {
 		Overlay: profile.OverlayMerge,
 	}
 
-	if err := startupWriteBack(stagedDir, "claude-code", cfgDir, p, srcs); err != nil {
+	if err := startupWriteBack(stagedDir, "claude-code", cfgDir, p, srcs, nil); err != nil {
 		t.Fatalf("startupWriteBack: %v", err)
 	}
 
@@ -267,7 +267,7 @@ func TestStartupWriteBack_FileNotOnDisk_Noop(t *testing.T) {
 	srcs := []source.Source{newSource("personal", srcRoot)}
 	p := &profile.Profile{Name: "test", Sources: []string{"personal"}}
 
-	if err := startupWriteBack(stagedDir, "claude-code", cfgDir, p, srcs); err != nil {
+	if err := startupWriteBack(stagedDir, "claude-code", cfgDir, p, srcs, nil); err != nil {
 		t.Fatalf("startupWriteBack: %v", err)
 	}
 	// Source should not have new-file.md.
@@ -330,7 +330,7 @@ func TestStartupWriteBack_RefreshesManifestHash(t *testing.T) {
 	srcs := []source.Source{newSource("personal", srcRoot)}
 	p := &profile.Profile{Name: "test", Sources: []string{"personal"}, Overlay: profile.OverlayCascade}
 
-	if err := startupWriteBack(stagedDir, "claude-code", cfgDir, p, srcs); err != nil {
+	if err := startupWriteBack(stagedDir, "claude-code", cfgDir, p, srcs, nil); err != nil {
 		t.Fatalf("startupWriteBack: %v", err)
 	}
 
@@ -362,7 +362,7 @@ func TestStartupWriteBack_UnchangedFileLeavesManifestAlone(t *testing.T) {
 	srcs := []source.Source{newSource("personal", srcRoot)}
 	p := &profile.Profile{Name: "test", Sources: []string{"personal"}, Overlay: profile.OverlayCascade}
 
-	if err := startupWriteBack(stagedDir, "claude-code", cfgDir, p, srcs); err != nil {
+	if err := startupWriteBack(stagedDir, "claude-code", cfgDir, p, srcs, nil); err != nil {
 		t.Fatalf("startupWriteBack: %v", err)
 	}
 
@@ -372,5 +372,41 @@ func TestStartupWriteBack_UnchangedFileLeavesManifestAlone(t *testing.T) {
 	}
 	if got := m.Files["CLAUDE.md"]; got != hash {
 		t.Errorf("manifest hash = %q, want it untouched at %q", got, hash)
+	}
+}
+
+// A held file is one another harness has also changed since the last apply.
+// Writing it back would push this harness's edit into the source and, on the
+// next apply, over the other harness's edit — the loss conflict detection
+// exists to prevent.
+func TestStartupWriteBack_HeldFileIsNotWrittenBack(t *testing.T) {
+	stagedDir, targetRoot, cfgDir, srcRoot := setupStartupWBFixture(t)
+
+	const originalContent = "# original rules"
+	const editedContent = "# edited by claude"
+
+	writeFile(t, filepath.Join(srcRoot, "CLAUDE.md"), originalContent)
+	writeFile(t, filepath.Join(stagedDir, "CLAUDE.md"), originalContent)
+	writeFile(t, filepath.Join(targetRoot, "CLAUDE.md"), editedContent)
+
+	hash := manifest.HashBytes([]byte(originalContent))
+	saveManifest(t, cfgDir, "claude-code", targetRoot, map[string]string{"CLAUDE.md": hash}, nil)
+
+	srcs := []source.Source{newSource("personal", srcRoot)}
+	p := &profile.Profile{Name: "test", Sources: []string{"personal"}, Overlay: profile.OverlayCascade}
+
+	held := map[string]bool{"CLAUDE.md": true}
+	if err := startupWriteBack(stagedDir, "claude-code", cfgDir, p, srcs, held); err != nil {
+		t.Fatalf("startupWriteBack: %v", err)
+	}
+
+	if got := readFile(t, filepath.Join(srcRoot, "CLAUDE.md")); got != originalContent {
+		t.Errorf("source CLAUDE.md = %q, want it untouched at %q", got, originalContent)
+	}
+	if got := readFile(t, filepath.Join(targetRoot, "CLAUDE.md")); got != editedContent {
+		t.Errorf("target CLAUDE.md = %q, want the user's edit left in place", got)
+	}
+	if _, err := os.Stat(filepath.Join(cfgDir, "backups")); err == nil {
+		t.Error("a held file must not be backed up — both copies stay where they are")
 	}
 }

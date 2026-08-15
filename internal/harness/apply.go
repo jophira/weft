@@ -26,6 +26,12 @@ type ApplyCtx struct {
 	// empty non-nil map means project nothing, so "unset" and "explicitly empty"
 	// stay distinguishable.
 	AllowedClasses map[Class]bool
+	// Held lists target-relative paths a detected conflict has frozen. Apply
+	// leaves each of them exactly as it found it: no write, no backup, no manifest
+	// change. See conflict.go — overwriting either side is the data loss the
+	// detection exists to prevent, and backing one up first still moves the user's
+	// file somewhere they did not put it.
+	Held map[string]bool
 }
 
 // classAllowed reports whether the profile's harness_sync config permits this
@@ -54,12 +60,14 @@ const (
 	logWrote     = "  ✓ %-9s %s\n"
 	logRemoved   = "  − %-9s %s\n"
 	logKept      = "  ! %-9s %s (edited since weft wrote it — no longer managed)\n"
+	logHeld      = "  ! %-9s %s (conflict — both copies left as they are)\n"
 
 	statusUnchanged = "unchanged"
 	statusWrote     = "wrote"
 	statusRemoved   = "removed"
 	statusKept      = "kept"
 	statusSkipped   = "skipped"
+	statusHeld      = "held"
 )
 
 type conflictFile struct {
@@ -115,6 +123,7 @@ func applyWithManifest(stagedRoot, targetRoot, harnessName string, ctx ApplyCtx,
 	newHashes := map[string]string{} // dst rel → staged sha256
 	skipped := map[Class]int{}       // class → files not written (no native home)
 	excluded := map[Class]int{}      // class → files withheld by harness_sync config
+	var held []string                // dst paths frozen by an unresolved conflict
 
 	err = filepath.WalkDir(stagedRoot, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
@@ -137,6 +146,18 @@ func applyWithManifest(stagedRoot, targetRoot, harnessName string, ctx ApplyCtx,
 		dst, ok := routeStaged(rel, renames, h)
 		if !ok {
 			skipped[cls]++
+			return nil
+		}
+		if ctx.Held[dst] {
+			// Keep the recorded hash rather than the one on disk: the manifest is
+			// weft's record of what it last wrote, and adopting the user's bytes here
+			// would silently claim their edit and make the conflict vanish. Keeping
+			// the path in newHashes keeps it in the staged set, so pruneDropped does
+			// not treat a held file as one the profile dropped.
+			if known, owned := m.Files[dst]; owned {
+				newHashes[dst] = known
+			}
+			held = append(held, dst)
 			return nil
 		}
 		// Read the staged file once; hash in-memory to avoid a second syscall later.
@@ -182,6 +203,10 @@ func applyWithManifest(stagedRoot, targetRoot, harnessName string, ctx ApplyCtx,
 
 	reportSkipped(out, skipped, h)
 	reportExcluded(out, excluded)
+	slices.Sort(held)
+	for _, dst := range held {
+		fmt.Fprintf(out, logHeld, statusHeld, dst)
+	}
 
 	// Back up all conflicts before any write so the user never sees partial state.
 	if len(conflicts) > 0 {
