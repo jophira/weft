@@ -1,0 +1,52 @@
+name: Bug report
+description: Something isn't working the way it should
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you ran and what went wrong.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+
+  - type: input
+    id: command
+    attributes:
+      label: Command
+      description: The exact weft command that triggered this.
+      placeholder: "weft profile use hybrid"
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: weft version
+      description: Output of `weft version`.
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: OS
+      placeholder: "macOS 15.1, Ubuntu 24.04, Windows 11, ..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant output
+      description: Command output, error messages, or the bundle from `weft bug-report`.
+      render: shell
+    validations:
+      required: false
