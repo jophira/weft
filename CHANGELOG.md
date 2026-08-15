@@ -9,6 +9,32 @@ from, so keep entries written for someone deciding whether to upgrade.
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-08-15
+
+**No code change since v0.2.0.** The binaries are the same build; there is
+nothing here to upgrade for. This release exists to put the new release-notes
+path through a real tag.
+
+### Docs
+
+- **The changelog moved into the repository** (#252, PR #253). It lived outside
+  the repo until now, so a public repo shipped without one and the release notes
+  were generated from commit subjects, which drops `docs:`, `test:` and `chore:`
+  work and cannot carry a reason or a migration note.
+
+  The history was reconciled into dated `[0.0.9]`, `[0.1.0]` and `[0.2.0]`
+  sections, resolved with `git tag --contains` on each entry's merge commit
+  rather than by eye, and the entries that had never been written were added.
+
+  From this release on, the notes you are reading are the section of
+  `CHANGELOG.md` matching the tag. `scripts/release-notes.sh` extracts it and
+  the release workflow hands it to GoReleaser, so the file and this page cannot
+  disagree. A missing or empty section fails the release rather than publishing
+  a blank page.
+
+  `CONTRIBUTING.md` covers what to write and where. The v0.2.0 notes were
+  backfilled from the same file.
+
 ## [0.2.0] - 2026-08-15
 
 ### Added — conflict detection and `weft resolve` (ADR 0004 D5, PR #247)
