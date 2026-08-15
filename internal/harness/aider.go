@@ -28,7 +28,7 @@ func (a *Aider) Name() string { return "aider" }
 // directory is the signal that actually fires on a stock install.
 func (a *Aider) detectSignals() detectSpec {
 	return detectSpec{
-		binary: "aider",
+		binaries: []string{"aider"},
 		candidates: []locate.Candidate{
 			locate.HomeRel(".aider"),
 			locate.HomeRel(".aider.conf.yml"),

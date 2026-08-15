@@ -11,7 +11,7 @@ type Codex struct{ detection }
 func (c *Codex) Name() string { return "codex" }
 
 func (c *Codex) detectSignals() detectSpec {
-	return detectSpec{binary: "codex", candidates: []locate.Candidate{locate.HomeRel(".codex")}}
+	return detectSpec{binaries: []string{"codex"}, candidates: []locate.Candidate{locate.HomeRel(".codex")}}
 }
 
 func (c *Codex) Detect() bool { return c.run(c.detectSignals()) }

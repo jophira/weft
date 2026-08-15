@@ -34,25 +34,31 @@ func builtins() []Known {
 		},
 		{
 			&GenericHarness{
-				name:         "opencode",
-				detectBinary: "opencode",
-				candidates:   []locate.Candidate{locate.XDGRel("opencode")},
+				name:           "opencode",
+				detectBinaries: []string{"opencode"},
+				// The config root is created on first run, not at install time,
+				// so a freshly installed opencode is only visible through its
+				// data root. Config stays first: it is where weft writes.
+				candidates: []locate.Candidate{
+					locate.XDGRel("opencode"),
+					locate.XDGDataRel("opencode"),
+				},
 			},
 			"",
 		},
 		{
 			&GenericHarness{
-				name:         "hermes",
-				detectBinary: "hermes",
-				candidates:   []locate.Candidate{locate.HomeRel(".hermes")},
+				name:           "hermes",
+				detectBinaries: []string{"hermes"},
+				candidates:     []locate.Candidate{locate.HomeRel(".hermes")},
 			},
 			"",
 		},
 		{
 			&GenericHarness{
-				name:         "goose",
-				detectBinary: "goose",
-				candidates:   []locate.Candidate{locate.XDGRel("goose")},
+				name:           "goose",
+				detectBinaries: []string{"goose"},
+				candidates:     []locate.Candidate{locate.XDGRel("goose")},
 			},
 			"",
 		},

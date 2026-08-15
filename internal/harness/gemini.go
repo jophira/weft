@@ -11,7 +11,7 @@ type GeminiCLI struct{ detection }
 func (g *GeminiCLI) Name() string { return "gemini-cli" }
 
 func (g *GeminiCLI) detectSignals() detectSpec {
-	return detectSpec{binary: "gemini", candidates: []locate.Candidate{locate.HomeRel(".gemini")}}
+	return detectSpec{binaries: []string{"gemini"}, candidates: []locate.Candidate{locate.HomeRel(".gemini")}}
 }
 
 func (g *GeminiCLI) Detect() bool { return g.run(g.detectSignals()) }
