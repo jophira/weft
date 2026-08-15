@@ -85,7 +85,7 @@ func runBrew() error {
 func selfUpdate(latest string) error {
 	if runtime.GOOS == "windows" {
 		fmt.Printf("Automatic update is not supported on Windows.\n")
-		fmt.Printf("Download the latest release from: https://github.com/jophira/weft/releases/tag/v%s\n", latest)
+		fmt.Printf("Download the latest release from: %s\n", update.ReleasePageURL(latest))
 		return nil
 	}
 
@@ -131,13 +131,11 @@ func selfUpdate(latest string) error {
 	return nil
 }
 
+// releaseURL is the archive for this platform. The owner and repo come from
+// internal/update rather than being spelled out again: the two copies drifted
+// once already, and the source repo publishes no releases at all (#250).
 func releaseURL(version string) string {
-	os_ := runtime.GOOS
-	arch := runtime.GOARCH
-	return fmt.Sprintf(
-		"https://github.com/%s/%s/releases/download/v%s/weft_%s_%s.tar.gz",
-		"jophira", "weft", version, os_, arch,
-	)
+	return update.AssetURL(version, runtime.GOOS, runtime.GOARCH, "tar.gz")
 }
 
 const maxDownloadBytes = 100 << 20 // 100 MB
