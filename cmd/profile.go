@@ -423,11 +423,14 @@ func mergeAndApply(p *profile.Profile, roots []string, srcs []source.Source, cfg
 	if !quiet {
 		conflictOut = os.Stdout
 	}
-	held, cErr := detectApplyConflicts(stagedDir, cfgDir, conflictOut)
+	held, conflictCount, cErr := detectApplyConflicts(stagedDir, cfgDir, conflictOut)
 	if cErr != nil {
 		fmt.Fprintf(os.Stderr, "[weft] conflict scan failed: %v\n", cErr)
 		slog.Warn("conflict scan failed", slog.Any("error", cErr))
 	}
+	// The status line reads these rather than recomputing them, so they are
+	// recorded on every apply including the watcher's quiet ones (ADR 0004).
+	recordStatusCounts(cfgDir, p.Name, conflictCount)
 
 	for _, target := range targets {
 		h, ok := hReg.Get(target)
@@ -1123,11 +1126,14 @@ func startTargetWatcher(
 			// Re-check for conflicts on every batch rather than reusing the apply's
 			// scan: the watcher runs for hours, and the second harness's edit is
 			// exactly the event that arrives after the last apply looked.
-			held, cErr := detectApplyConflicts(filepath.Join(cfgDir, "staged", p.Name), cfgDir, os.Stdout)
+			held, conflictCount, cErr := detectApplyConflicts(filepath.Join(cfgDir, "staged", p.Name), cfgDir, os.Stdout)
 			if cErr != nil {
 				fmt.Fprintf(os.Stderr, "[weft] conflict scan failed: %v\n", cErr)
 				slog.Warn("conflict scan failed", slog.String("target", tgt), slog.Any("error", cErr))
 			}
+			// A conflict that appears mid-watch must reach the status line too,
+			// otherwise the count only ever refreshes on a full apply.
+			recordStatusCounts(cfgDir, p.Name, conflictCount)
 			// Track whether any write-back refreshed a manifest hash, so the
 			// batch is persisted once instead of per file.
 			dirty := false

@@ -35,6 +35,13 @@ var statusCmd = &cobra.Command{
 to, the profile it carries and whether its managed instruction block has drifted
 from what weft last wrote (i.e. was edited outside weft).
 
+Also reports two counts the last apply recorded: files sitting in a harness that
+no source owns (see 'weft adopt --scan'), and files two harnesses have both
+changed since the last apply (see 'weft resolve --take'). Both come from a cache
+rather than a fresh scan, so a status line can read them once per turn without
+walking every harness root. They are omitted when no apply has recorded them, or
+when the recorded numbers are more than a day old.
+
 Use --short for a single-line summary suitable for a shell prompt or a harness
 status line (e.g. Claude Code's statusLine command).`,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -50,7 +57,13 @@ status line (e.g. Claude Code's statusLine command).`,
 		if err != nil {
 			return fmt.Errorf("reading watcher runstate: %w", err)
 		}
-		renderStatus(os.Stdout, activeProfileName(), rs, statuses, statusShort)
+		// Counts come from the cache the last apply wrote. Recomputing them here
+		// would walk every harness root, and --short runs once per turn.
+		counts, err := runstate.ReadCounts(cfgDir)
+		if err != nil {
+			return fmt.Errorf("reading status counts: %w", err)
+		}
+		renderStatus(os.Stdout, activeProfileName(), rs, counts, statuses, statusShort)
 		return nil
 	},
 }
@@ -112,7 +125,7 @@ func instructionDrift(m *manifest.Manifest) string {
 
 // renderStatus writes the status report to w. short emits a single summary line.
 // rs is the live watcher's runstate, or nil when no watcher is running.
-func renderStatus(w io.Writer, active string, rs *runstate.RunState, statuses []harnessStatus, short bool) {
+func renderStatus(w io.Writer, active string, rs *runstate.RunState, counts *runstate.Counts, statuses []harnessStatus, short bool) {
 	if active == "" {
 		active = "none"
 	}
@@ -128,7 +141,8 @@ func renderStatus(w io.Writer, active string, rs *runstate.RunState, statuses []
 		if rs != nil {
 			watch = "on"
 		}
-		fmt.Fprintf(w, "weft: %s · %d harness · drift:%d · watch:%s\n", active, len(statuses), drift, watch)
+		fmt.Fprintf(w, "weft: %s · %d harness · drift:%d%s · watch:%s\n",
+			active, len(statuses), drift, countsSegment(counts, time.Now()), watch)
 		return
 	}
 
@@ -137,6 +151,10 @@ func renderStatus(w io.Writer, active string, rs *runstate.RunState, statuses []
 		fmt.Fprintf(w, "Watcher: running (pid %d, profile %q, up %s)\n", rs.PID, rs.Profile, fmtUptime(rs.Uptime()))
 	} else {
 		fmt.Fprintln(w, "Watcher: not running")
+	}
+	if counts != nil {
+		fmt.Fprintf(w, "Adoptable: %d · conflicts: %d (as of %s)\n",
+			counts.Adoptable, counts.Conflicts, counts.UpdatedAt.Format("2006-01-02 15:04"))
 	}
 	if len(statuses) == 0 {
 		fmt.Fprintln(w, "No harnesses applied yet. Run 'weft profile use <name>'.")
@@ -154,6 +172,25 @@ func renderStatus(w io.Writer, active string, rs *runstate.RunState, statuses []
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", s.Harness, dashIfEmpty(s.Profile), instr, s.Drift)
 	}
 	_ = tw.Flush()
+}
+
+// countsStaleAfter is how long a cached count stays worth showing. It is set
+// well beyond a normal apply interval: the watcher refreshes on every batch, so
+// counts older than this mean nothing has applied in a long time, and a number
+// from that far back sends the user looking for files that have since moved.
+const countsStaleAfter = 24 * time.Hour
+
+// countsSegment renders the adoptable and conflict counts for the one-line
+// summary, or "" when there is nothing trustworthy to show.
+//
+// Absent and zero are deliberately different. No cache means no apply has
+// recorded one, so the honest output is silence rather than "adopt:0", which
+// asserts a scan happened and found nothing.
+func countsSegment(c *runstate.Counts, now time.Time) string {
+	if c == nil || c.Stale(now, countsStaleAfter) {
+		return ""
+	}
+	return fmt.Sprintf(" · adopt:%d · conflict:%d", c.Adoptable, c.Conflicts)
 }
 
 func dashIfEmpty(s string) string {

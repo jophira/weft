@@ -76,7 +76,7 @@ func TestInstructionDrift_noBlockIsNA(t *testing.T) {
 
 func TestRenderStatus_short(t *testing.T) {
 	var buf bytes.Buffer
-	renderStatus(&buf, "hybrid", nil, []harnessStatus{
+	renderStatus(&buf, "hybrid", nil, nil, []harnessStatus{
 		{Harness: "a", Drift: "ok"},
 		{Harness: "b", Drift: "drift"},
 		{Harness: "c", Drift: "n/a"},
@@ -90,9 +90,59 @@ func TestRenderStatus_short(t *testing.T) {
 	}
 }
 
+// TestRenderStatus_shortWithCounts covers the status line affordance: a cached
+// tally reaches --short without the render walking any harness root.
+func TestRenderStatus_shortWithCounts(t *testing.T) {
+	var buf bytes.Buffer
+	counts := &runstate.Counts{Adoptable: 18, Conflicts: 2, UpdatedAt: time.Now()}
+	renderStatus(&buf, "hybrid", nil, counts, []harnessStatus{{Harness: "a", Drift: "ok"}}, true)
+	got := buf.String()
+	if !strings.Contains(got, "adopt:18") || !strings.Contains(got, "conflict:2") {
+		t.Errorf("short status = %q, want it to carry both counts", got)
+	}
+}
+
+// TestRenderStatus_shortOmitsAbsentCounts pins the difference between "no scan
+// has run" and "a scan found nothing". Printing adopt:0 for the first asserts a
+// scan happened, which is a claim the render cannot make.
+func TestRenderStatus_shortOmitsAbsentCounts(t *testing.T) {
+	var buf bytes.Buffer
+	renderStatus(&buf, "hybrid", nil, nil, []harnessStatus{{Harness: "a", Drift: "ok"}}, true)
+	if got := buf.String(); strings.Contains(got, "adopt:") || strings.Contains(got, "conflict:") {
+		t.Errorf("short status = %q, want no counts when none are cached", got)
+	}
+}
+
+// TestRenderStatus_shortOmitsStaleCounts covers the other silence case: a number
+// from days ago sends the user looking for files that have since moved.
+func TestRenderStatus_shortOmitsStaleCounts(t *testing.T) {
+	var buf bytes.Buffer
+	old := &runstate.Counts{Adoptable: 18, Conflicts: 2, UpdatedAt: time.Now().Add(-72 * time.Hour)}
+	renderStatus(&buf, "hybrid", nil, old, []harnessStatus{{Harness: "a", Drift: "ok"}}, true)
+	if got := buf.String(); strings.Contains(got, "adopt:") {
+		t.Errorf("short status = %q, want stale counts dropped", got)
+	}
+}
+
+// TestRenderStatus_longNamesTheCountAge. The full report has room to say when the
+// numbers were taken, which --short does not, so it says it.
+func TestRenderStatus_longNamesTheCountAge(t *testing.T) {
+	var buf bytes.Buffer
+	at := time.Date(2026, 8, 15, 14, 2, 0, 0, time.UTC)
+	counts := &runstate.Counts{Adoptable: 3, Conflicts: 1, UpdatedAt: at}
+	renderStatus(&buf, "hybrid", nil, counts, nil, false)
+	got := buf.String()
+	if !strings.Contains(got, "Adoptable: 3") || !strings.Contains(got, "conflicts: 1") {
+		t.Errorf("long status = %q, want both counts", got)
+	}
+	if !strings.Contains(got, "2026-08-15 14:02") {
+		t.Errorf("long status = %q, want it to date the counts", got)
+	}
+}
+
 func TestRenderStatus_emptyMentionsNoHarnesses(t *testing.T) {
 	var buf bytes.Buffer
-	renderStatus(&buf, "", nil, nil, false)
+	renderStatus(&buf, "", nil, nil, nil, false)
 	got := buf.String()
 	if !strings.Contains(got, "Active profile: none") || !strings.Contains(got, "No harnesses applied") {
 		t.Errorf("empty status = %q", got)
@@ -105,7 +155,7 @@ func TestRenderStatus_emptyMentionsNoHarnesses(t *testing.T) {
 func TestRenderStatus_watcherRunning(t *testing.T) {
 	var buf bytes.Buffer
 	rs := &runstate.RunState{PID: 4242, Profile: "hybrid", StartedAt: time.Now().Add(-90 * time.Minute)}
-	renderStatus(&buf, "hybrid", rs, nil, false)
+	renderStatus(&buf, "hybrid", rs, nil, nil, false)
 	got := buf.String()
 	if !strings.Contains(got, "Watcher: running") || !strings.Contains(got, "pid 4242") || !strings.Contains(got, `profile "hybrid"`) {
 		t.Errorf("running watcher status = %q", got)
