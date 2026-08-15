@@ -233,6 +233,27 @@ path through a real tag.
 
 ## [0.1.0] - 2026-07-21
 
+### Fixed — files projected to paths the harness ignores (ADR 0004 D1, D2 and D9, PR #215)
+
+- **Everything but the root instruction file landed in the wrong place**
+  (#213). Projection routed files through a rename map keyed on the exact
+  relative path, and the only entry any harness declared was the instruction
+  file's. So a command staged as `commands/review.md` was written to
+  `~/.codex/commands/review.md`, a directory Codex never reads, while Codex
+  reads `prompts/`. Agents and skills went to directories no harness reads at
+  all.
+
+  The failure was invisible: weft logged those files as applied and tracked
+  them in the manifest, so an apply reported success and the manifest agreed.
+  Cursor was correct only because its adapter skipped everything but
+  `CLAUDE.md` by hand.
+
+  Routing is now by file class, with each harness declaring what it does with
+  each one. A class with no native home is skipped and logged rather than
+  written somewhere the tool ignores. Classes a harness cannot execute but can
+  read on request are advertised instead: weft appends an index to the managed
+  instruction block naming what exists and where.
+
 ### Added — canonical MCP config (ADR 0004 D4, PRs #216 and #219)
 
 - **One `mcp.yaml` per source, rendered into each harness's own dialect**
@@ -299,8 +320,45 @@ path through a real tag.
   directories are resolved from each harness's own `ClassSupport` declaration, so
   Codex `prompts/review.md` adopts into the source's `commands/`.
 
+### Docs
+
+- MIT `LICENSE`, README badges, and a corrected cask description.
+
+### Tests
+
+- **The CLI e2e suite no longer reports a cached pass.** It builds the weft
+  binary and drives it through `exec`, so Go's cache key covers the test
+  sources and their imports but cannot see through the subprocess. A change
+  under `internal/` left those inputs untouched, so a restored cache reported
+  `ok` for exactly the class of change the suite exists to catch. CI now runs
+  it with `-count=1`.
 
 ## [0.0.9] - 2026-07-19
+
+### Added — the two-home split and the work plane (ADR 0003)
+
+- **`~/weft` workbench, `~/.config/weft` engine room** (#189, PR #190). Content
+  you edit moves to a workbench at `~/weft`; weft's own machine state stays in
+  the config dir. New `weft_home`, `docs_dir` and `audit_dir` config keys, and
+  `{{weft.home}}` / `{{weft.docs}}` anchors alongside `{{weft.root}}`. `weft
+  init` scaffolds the layout idempotently and `weft migrate` relocates an
+  existing setup without destroying anything. A legacy fallback keeps
+  pre-migration layouts working.
+
+- **Work plane** (#191, PR #192). `weft rules resolve` appends
+  `~/weft/work/projects/<repo>/kb/**/*.md` to the bundle, keyed by repository
+  identity, so per-project knowledge reaches a harness without being registered
+  as a source. `--no-work` opts out, and a KB error is best-effort so it can
+  never break the bundle a hook consumes. `weft ticket new/list` scaffolds
+  `~/weft/work/tickets/<ID>/` from templates, never overwriting.
+
+- **Source lifecycle** (#193, PR #194). `weft source relocate` and `weft source
+  rename`, plus doctor integrity checks over the registry. This also corrected
+  an Epic A design bug found while migrating a real setup: the registry holds
+  small pointer files and belongs in the engine room, while source *content*
+  belongs in the workbench. Defaulting the registry to the workbench collided
+  pointers with content directories and flipped resolution once content landed
+  there.
 
 ### Added — rules resolver ergonomics
 
@@ -360,6 +418,10 @@ path through a real tag.
   file. `weft profile use --no-watch` now also warns when a watcher is running,
   since its one-shot apply would otherwise race with the watcher.
 
+- **`--config` reaches `status`, `target` and `resolve`** (#184, PR #188).
+  Those three read the default config directory rather than the active one, so
+  under `--config` they reported on state they were not managing.
+
 ### Added — portability & mixed-source support
 
 - **`{{weft.root}}` path anchors** (#166, PR #167). Rule/command/agent files
@@ -394,6 +456,32 @@ path through a real tag.
   / `hooks_dir` (and the apply path's staged/manifests, MCP server, and doctor)
   beside the active config file. Explicit config keys still win. `--config` is
   now safe for testing and CI.
+
+- **Manifest ownership survives a file leaving the staged set** (#209, PR
+  #210). `applyWithManifest` replaced the manifest file map wholesale on every
+  apply, so any path absent from the current staged tree lost its entry.
+  Ownership meant "currently staged" rather than "weft wrote this", so a file
+  dropped by a profile switch and staged again later came back as a conflict,
+  was backed up, and was overwritten. The same lookup gates startup write-back,
+  so genuine external edits to such a file were missed too.
+
+- **Write-back refreshes the manifest hash** (PR #211). Write-back copied an
+  externally edited target file to its source but left the manifest holding the
+  pre-edit hash. The next apply compared the target against that stale hash,
+  declared the file externally modified, and backed up a file it had just
+  reconciled before writing byte-identical content. The README documents that
+  apply as a no-op; it was not one.
+
+### Changed
+
+- **Go directive to 1.26.5** (PR #175), for GO-2026-5856 in `crypto/tls` ECH.
+
+- Dependency bumps: `cel-go` 0.28.1 → 0.29.2 (#174, #205), `mcp-go` 0.55.1 →
+  0.56.0 (#204), `golang.org/x/crypto` 0.53.0 → 0.54.0 (#173),
+  `golang.org/x/sys` 0.46.0 → 0.47.0 (#172), `actions/setup-go` (#203).
+
+- Apply now logs `unchanged` rather than `skip` for a file that already matches
+  what weft wrote, since nothing was skipped.
 
 ### Docs
 
