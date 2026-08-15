@@ -633,6 +633,17 @@ Config file: `~/.config/weft/config.yaml`. Keys: `weft_home`, `sources_dir`,
 Override the config location with `--config <path>` on any command — it fully
 isolates weft's state (including `weft_home`) under that file's directory.
 
+## Changelog
+
+[CHANGELOG.md](CHANGELOG.md) covers every release. Each section is what the
+release notes for that tag are built from.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for local setup, the test tiers and the
+commit convention. Security reports go through GitHub private vulnerability
+reporting, see [SECURITY.md](SECURITY.md).
+
 ## License
 
 MIT. See [LICENSE](LICENSE).
