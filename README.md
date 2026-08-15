@@ -300,6 +300,127 @@ The guards:
 Adopting also records weft's ownership of the harness copy in the manifest, so the next
 apply reports `· unchanged` rather than treating the file as an external edit.
 
+## Class-aware projection — what each harness gets
+
+A source holds more than instructions. Commands, agents, skills and MCP server definitions
+all live alongside them, and no two harnesses read them from the same place. Claude Code
+runs commands from `~/.claude/commands/`, Codex from `~/.codex/prompts/`, and Cursor runs
+none at all.
+
+So weft routes by **class** rather than copying the staged tree verbatim. Every file is one
+of `instructions`, `commands`, `agents`, `skills` or `mcp`, and each harness declares what
+it does with each one:
+
+| Class | claude-code | codex | cursor | gemini-cli |
+|---|---|---|---|---|
+| `instructions` | `CLAUDE.md` | `AGENTS.md` | `weft.mdc` | `GEMINI.md` |
+| `commands` | `commands/` | `prompts/` | advertised | advertised |
+| `agents` | `agents/` | advertised | advertised | advertised |
+| `skills` | `skills/` | advertised | advertised | advertised |
+| `mcp` | `~/.claude.json` | `~/.codex/config.toml` | `~/.cursor/mcp.json` | `~/.gemini/settings.json` |
+
+Codex runs markdown prompts, so commands translate by relocation alone. Gemini CLI's
+commands are TOML rather than markdown, which is a format gap and not just a path gap, so
+they are advertised until a TOML emitter exists. Cursor consumes `.mdc` rule files and
+nothing else.
+
+A class with no native home is **skipped and logged**, never written to a path the tool
+ignores. One line per class per apply:
+
+```
+  ~ skipped   4 agents file(s) — advertised in the instruction index instead
+  ~ skipped   2 skills file(s) — no native location in this harness
+```
+
+Some skipped classes are still **advertised**: the harness cannot execute them, but it can
+read a file when told one exists, so weft appends an index to the managed instruction block
+naming what is available and where. It widens reach cheaply and is not parity, so it is
+never reported as such.
+
+Classes withheld by config are reported separately, because "this harness cannot take it"
+and "you told weft not to send it" have different fixes:
+
+```
+  ~ skipped   6 commands file(s) — excluded by harness_sync config
+```
+
+`instructions` and `mcp` never travel as copied files. The instruction file is a managed
+block inside a document whose surrounding prose is yours, and MCP config is merged key by
+key into a file holding unrelated tool state, so `~/.claude.json` keeps everything that is
+not an `mcpServers` entry. Canonical MCP lives in a source's `mcp.yaml` and each harness
+renders its own dialect. Secrets go in by reference only (`${env:GITHUB_TOKEN}`), never as
+a literal.
+
+A harness weft knows nothing about, including anything you add through `harnesses.yaml`,
+copies every class at its staged path. That is wrong for a tool with its own layout, but
+weft has no basis to guess a better one, and dropping the files silently would be worse than
+putting them where you can find them.
+
+### Choosing what participates — `harness_sync`
+
+Set it per profile to narrow what a harness receives:
+
+```yaml
+harness_sync:
+  claude-code: [instructions, commands, agents, skills, mcp]
+  codex:       [instructions, commands, mcp]
+  cursor:      [instructions]
+```
+
+A harness with no entry is unrestricted and gets every class it natively supports, so a
+profile written before `harness_sync` existed projects exactly what it did before. An
+explicit empty list projects nothing.
+
+## Conflicts — two harnesses, one file
+
+Write-back takes an edit made inside one harness, pushes it to the owning source, and the
+next apply fans it out to the others. That is safe while only one copy has moved. When two
+harnesses have both been edited since the last apply, whichever one write-back visits last
+would win, and the other edit would be gone with nothing left to recover it from.
+
+So weft refuses. Both copies stay on disk exactly as you left them, the apply holds the file
+rather than overwriting either side, and it reports:
+
+```
+! conflict: commands/review.md changed in claude-code and codex since 14:02
+  → weft resolve commands/review.md --take claude-code|codex
+```
+
+Nothing is written until you name a winner:
+
+```bash
+weft resolve commands/review.md --take claude-code
+```
+
+The losing copies are backed up under `~/.config/weft/backups/resolve/<timestamp>/` before
+they are rewritten, and the owning source is updated so the next apply keeps the decision
+instead of undoing it. Nothing is deleted.
+
+There is no `--take merge`. Weft has no merge algorithm for harness files, so combining two
+versions is a job for you and your editor.
+
+Conflict detection covers `commands`, `agents` and `skills`. The path you pass is the one
+printed in the report, relative to the staged tree, which is the one name that means the
+same thing in every harness.
+
+## Status line
+
+`weft status --short` prints a single line for a shell prompt or a harness status line:
+
+```
+weft: hybrid · 3 harness · drift:1 · adopt:18 · conflict:2 · watch:on
+```
+
+`adopt` is the count `weft adopt --scan` would list, and `conflict` the number of files
+being held. Both come from a cache the last apply wrote, so the line costs a file read
+rather than a walk of every harness root, which matters when it renders once per turn. They
+are left out entirely when no apply has recorded them, or when what was recorded is more
+than a day old: a stale number sends you looking for files that have since moved.
+
+For Claude Code, wire it up as the `statusLine` command in `~/.claude/settings.json`. Codex
+has no per-turn shell hook, so this is a Claude-family affordance rather than something
+every harness can show.
+
 ## Commands
 
 | Command | Description |
@@ -316,7 +437,9 @@ apply reports `· unchanged` rather than treating the file as an external edit.
 | `adopt --scan` | List commands/agents/skills authored inside a harness that no source owns |
 | `adopt <harness> <path>... --into <source>` | Copy those files into a source so weft can fan them out; confirms first, refuses to clobber (`--force`) or to carry literal credentials |
 | `hook add/list/run/remove` | Manage lifecycle hooks |
-| `status [--short]` | Show active profile and per-harness projection state (instruction path, block drift) |
+| `resolve <target-path>` | Reverse-lookup the source(s) that produced a file written to a harness |
+| `resolve <path> --take <harness>` | Settle a held conflict by taking one harness's copy; backs the losing copies up first and updates the owning source |
+| `status [--short]` | Show active profile and per-harness projection state (instruction path, block drift), plus the cached adoptable and conflict counts |
 | `autostart enable/disable/status` | Opt in to running the watcher at login (systemd user unit, LaunchAgent, or Task Scheduler); `--profile` pins a profile, `--linger` keeps it alive without a login session |
 | `doctor` | Health check — discovered harnesses, config issues, path-reference lint, and rule-annotation health (missing front-matter, duplicate labels, dangling extends, with suggested fixes); `--fix` heals stale/hardcoded paths to `{{weft.root}}` anchors, `--all` also lists external/dead refs |
 | `version` | Print version, commit, and build date |

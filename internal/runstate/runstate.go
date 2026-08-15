@@ -51,8 +51,15 @@ func Write(cfgDir string, rs RunState) error {
 	if err != nil {
 		return fmt.Errorf("runstate: marshalling: %w", err)
 	}
-	dst := pathFor(cfgDir)
-	tmp, err := os.CreateTemp(cfgDir, fileName+".*.tmp")
+	return atomicWrite(cfgDir, fileName, data)
+}
+
+// atomicWrite writes data to cfgDir/name via a temp file and a rename, so a
+// concurrent read never observes a partial file. Shared by both sidecars this
+// package owns. cf. Java: Files.move(tmp, dst, ATOMIC_MOVE).
+func atomicWrite(cfgDir, name string, data []byte) error {
+	dst := filepath.Join(cfgDir, name)
+	tmp, err := os.CreateTemp(cfgDir, name+".*.tmp")
 	if err != nil {
 		return fmt.Errorf("runstate: temp file: %w", err)
 	}
