@@ -415,6 +415,20 @@ func mergeAndApply(p *profile.Profile, roots []string, srcs []source.Source, cfg
 		return err
 	}
 
+	// Find the files two or more harnesses have both changed since the last apply,
+	// before anything is written back or overwritten. Each side is then held: the
+	// write-back leaves it alone and the apply leaves it alone, so the user still
+	// has both versions when they choose one with `weft resolve` (ADR 0004 D5).
+	var conflictOut io.Writer
+	if !quiet {
+		conflictOut = os.Stdout
+	}
+	held, cErr := detectApplyConflicts(stagedDir, cfgDir, conflictOut)
+	if cErr != nil {
+		fmt.Fprintf(os.Stderr, "[weft] conflict scan failed: %v\n", cErr)
+		slog.Warn("conflict scan failed", slog.Any("error", cErr))
+	}
+
 	for _, target := range targets {
 		h, ok := hReg.Get(target)
 		if !ok {
@@ -424,7 +438,7 @@ func mergeAndApply(p *profile.Profile, roots []string, srcs []source.Source, cfg
 		// On the initial (non-quiet) apply, write back any externally-modified
 		// target files to their source before overwriting them.
 		if !quiet {
-			if wbErr := startupWriteBack(stagedDir, target, cfgDir, p, srcs); wbErr != nil {
+			if wbErr := startupWriteBack(stagedDir, target, cfgDir, p, srcs, held[target]); wbErr != nil {
 				fmt.Fprintf(os.Stderr, "[weft] startup write-back warning: %v\n", wbErr)
 				slog.Warn("startup write-back warning", slog.String("target", target), slog.Any("error", wbErr))
 			}
@@ -447,6 +461,7 @@ func mergeAndApply(p *profile.Profile, roots []string, srcs []source.Source, cfg
 			SourceAttribution: attr,
 			Out:               applyOut,
 			AllowedClasses:    allowed,
+			Held:              held[target],
 		}
 		if err := h.Apply(stagedDir, ctx); err != nil {
 			return fmt.Errorf("applying to %s: %w", target, err)
@@ -1105,6 +1120,14 @@ func startTargetWatcher(
 			// callback invocation so each write-back call does not rebuild it.
 			// cf. Java: compute a HashMap<String,Source> before the for-each loop.
 			wbSrcMap := buildSrcMap(srcs)
+			// Re-check for conflicts on every batch rather than reusing the apply's
+			// scan: the watcher runs for hours, and the second harness's edit is
+			// exactly the event that arrives after the last apply looked.
+			held, cErr := detectApplyConflicts(filepath.Join(cfgDir, "staged", p.Name), cfgDir, os.Stdout)
+			if cErr != nil {
+				fmt.Fprintf(os.Stderr, "[weft] conflict scan failed: %v\n", cErr)
+				slog.Warn("conflict scan failed", slog.String("target", tgt), slog.Any("error", cErr))
+			}
 			// Track whether any write-back refreshed a manifest hash, so the
 			// batch is persisted once instead of per file.
 			dirty := false
@@ -1113,6 +1136,10 @@ func startTargetWatcher(
 					continue // not a weft-managed file — ignore silently
 				}
 				fmt.Printf("\n[weft] target changed: %s\n", c.Rel)
+				if held[tgt][c.Rel] {
+					fmt.Printf("[weft] %s: held — another harness changed it too; run 'weft resolve' to pick a side\n", c.Rel)
+					continue
+				}
 				performed, wbErr := dispatchWriteBack(m, c, p, wbSrcMap)
 				if wbErr != nil {
 					fmt.Fprintf(os.Stderr, "[weft] write-back error for %s: %v\n", c.Rel, wbErr)

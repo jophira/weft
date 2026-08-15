@@ -14,7 +14,7 @@ func (w *Windsurf) Name() string { return "windsurf" }
 
 func (w *Windsurf) detectSignals() detectSpec {
 	return detectSpec{
-		binary:     "windsurf",
+		binaries:   []string{"windsurf"},
 		candidates: []locate.Candidate{locate.HomeRel(".codeium", "windsurf")},
 	}
 }

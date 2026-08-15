@@ -13,15 +13,15 @@ import (
 // then copy the staged output into the resolved directory.
 type GenericHarness struct {
 	detection
-	name         string
-	detectBinary string             // binary looked up via PATH; empty = skip
-	candidates   []locate.Candidate // config root candidates; probed in order
+	name           string
+	detectBinaries []string           // binary names looked up via PATH, in order; empty = skip
+	candidates     []locate.Candidate // config root candidates; probed in order
 }
 
 func (g *GenericHarness) Name() string { return g.name }
 
 func (g *GenericHarness) detectSignals() detectSpec {
-	return detectSpec{binary: g.detectBinary, candidates: g.candidates}
+	return detectSpec{binaries: g.detectBinaries, candidates: g.candidates}
 }
 
 func (g *GenericHarness) Detect() bool { return g.run(g.detectSignals()) }

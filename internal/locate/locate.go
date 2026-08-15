@@ -114,6 +114,29 @@ func XDGRel(rel ...string) Candidate {
 	}
 }
 
+// XDGDataRel returns a Candidate whose path is the XDG data dir joined with rel
+// ($XDG_DATA_HOME, or ~/.local/share when unset).
+//
+// The data root is separate from the config root and often appears earlier: a
+// tool may write its state directory on install while only creating its config
+// directory on first run, so a detector keyed on config alone misses a plainly
+// installed tool. Candidate.Path is handed the config dir only, so the data
+// root is resolved here rather than widening that signature for one caller.
+func XDGDataRel(rel ...string) Candidate {
+	return Candidate{
+		Path: func(home, _ string) string {
+			base := os.Getenv("XDG_DATA_HOME")
+			if base == "" {
+				if home == "" {
+					return ""
+				}
+				base = filepath.Join(home, ".local", "share")
+			}
+			return filepath.Join(append([]string{base}, rel...)...)
+		},
+	}
+}
+
 func homeDirs() (home, xdg string) {
 	home, _ = os.UserHomeDir()
 	xdg = os.Getenv("XDG_CONFIG_HOME")

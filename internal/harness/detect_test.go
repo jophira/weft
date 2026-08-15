@@ -165,6 +165,126 @@ func TestAiderDetect_ConfigFile(t *testing.T) {
 	}
 }
 
+// TestDetect_SecondBinaryName is the reason detectSpec.binaries is a slice: a
+// tool that ships its entry point under an alternative name offers no other
+// signal on a fresh install, and the evidence must name the binary that matched
+// rather than the first one tried.
+func TestDetect_SecondBinaryName(t *testing.T) {
+	testenv.SetHome(t, t.TempDir())
+	fakeBinary(t, "othername")
+
+	g := &GenericHarness{name: "mytool", detectBinaries: []string{"mytool", "othername"}}
+	if !g.Detect() {
+		t.Fatal("othername on PATH but Detect returned false")
+	}
+	via, detail := g.DetectedVia()
+	if via != DetectBinary {
+		t.Fatalf("via = %v, want DetectBinary", via)
+	}
+	if !strings.HasSuffix(detail, "othername") {
+		t.Errorf("detail = %q, want the path to othername", detail)
+	}
+}
+
+// TestDetect_BinaryOrderIsPriority pins that the first declared name wins when
+// both are installed, so a harness can express which entry point it prefers.
+func TestDetect_BinaryOrderIsPriority(t *testing.T) {
+	testenv.SetHome(t, t.TempDir())
+	dir := fakeBinaryDir(t, "first", "second")
+
+	g := &GenericHarness{name: "mytool", detectBinaries: []string{"first", "second"}}
+	if !g.Detect() {
+		t.Fatal("both binaries on PATH but Detect returned false")
+	}
+	if _, detail := g.DetectedVia(); !strings.HasSuffix(detail, "first") {
+		t.Errorf("detail = %q, want %s/first", detail, dir)
+	}
+}
+
+// TestOpencodeDetect_DataRoot covers the reported miss: opencode creates its
+// config root on first run, so a machine that has installed it but never run it
+// is only visible through the XDG data root.
+func TestOpencodeDetect_DataRoot(t *testing.T) {
+	home := t.TempDir()
+	testenv.SetHome(t, home)
+	testenv.ClearPath(t)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("XDG_DATA_HOME", "")
+	if err := os.MkdirAll(filepath.Join(home, ".local", "share", "opencode"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	h := opencodeHarness(t)
+	if !h.Detect() {
+		t.Fatal("~/.local/share/opencode exists but opencode was not detected")
+	}
+	via, detail := h.(DetectReporter).DetectedVia()
+	if via != DetectConfigDir {
+		t.Fatalf("via = %v, want DetectConfigDir", via)
+	}
+	if !strings.Contains(detail, ".local/share/opencode") {
+		t.Errorf("detail = %q, want it to name the data root", detail)
+	}
+}
+
+// TestOpencodeDetect_ConfigRootWins keeps the write target ahead of the data
+// root: weft projects into the config directory, so that is the root to report
+// when both exist.
+func TestOpencodeDetect_ConfigRootWins(t *testing.T) {
+	home := t.TempDir()
+	testenv.SetHome(t, home)
+	testenv.ClearPath(t)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("XDG_DATA_HOME", "")
+	for _, d := range []string{
+		filepath.Join(home, ".config", "opencode"),
+		filepath.Join(home, ".local", "share", "opencode"),
+	} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	h := opencodeHarness(t)
+	if !h.Detect() {
+		t.Fatal("both roots exist but opencode was not detected")
+	}
+	_, detail := h.(DetectReporter).DetectedVia()
+	if !strings.Contains(detail, ".config/opencode") {
+		t.Errorf("detail = %q, want the config root to take priority", detail)
+	}
+}
+
+// fakeBinaryDir puts several executables on one temp PATH and returns the dir.
+func fakeBinaryDir(t *testing.T, names ...string) string {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("binary detection uses PATHEXT on Windows; covered on Unix")
+	}
+	dir := t.TempDir()
+	for _, n := range names {
+		//nolint:gosec // test fixture must be executable
+		if err := os.WriteFile(filepath.Join(dir, n), []byte("#!/bin/sh\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", dir)
+	return dir
+}
+
+// opencodeHarness returns the built-in opencode adapter, so the tests assert the
+// shipped detection table rather than a copy of it.
+func opencodeHarness(t *testing.T) Harness {
+	t.Helper()
+	for _, k := range builtins() {
+		if k.H.Name() == "opencode" {
+			return k.H
+		}
+	}
+	t.Fatal("opencode is not in the built-in harness list")
+	return nil
+}
+
 // TestDetectSignals_DescribesBothSignals covers the "not found" message: it must
 // tell the user that installing the tool is sufficient, not just that a
 // directory is missing.
@@ -221,4 +341,15 @@ func TestDetectedSignal_NamesTheKindOfEvidence(t *testing.T) {
 			t.Errorf("DetectedSignal = %q, want empty when nothing matched", got)
 		}
 	})
+}
+
+// TestDetectSignals_NamesEveryBinary keeps the "not found" message honest once a
+// harness declares alternatives: naming only the first sends users looking for
+// an entry point their install may not have.
+func TestDetectSignals_NamesEveryBinary(t *testing.T) {
+	g := &GenericHarness{name: "mytool", detectBinaries: []string{"mytool", "othername"}}
+	got := DetectSignals(g)
+	if !strings.Contains(got, "mytool") || !strings.Contains(got, "othername") {
+		t.Errorf("DetectSignals = %q, want it to name both binaries", got)
+	}
 }

@@ -2,6 +2,7 @@ package harness
 
 import (
 	"os/exec"
+	"strings"
 
 	"github.com/jophira/weft/internal/locate"
 )
@@ -29,9 +30,12 @@ const (
 // so the zero value of every adapter (&ClaudeCode{}, &Aider{}) stays usable
 // without a constructor.
 type detectSpec struct {
-	// binary is looked up on PATH. Empty skips the check, for harnesses that
-	// ship no CLI entry point.
-	binary string
+	// binaries are looked up on PATH, in order, and the first hit wins. Empty
+	// skips the check, for harnesses that ship no CLI entry point. It is a slice
+	// rather than a single name because a tool can rename its entry point, or
+	// ship under two names during a transition, and the alternative name is then
+	// the only signal a fresh install offers.
+	binaries []string
 	// candidates are config roots, probed in order. os.Stat accepts files as
 	// well as directories, so a marker config file is a valid candidate.
 	candidates []locate.Candidate
@@ -61,8 +65,11 @@ func (d *detection) run(spec detectSpec) bool {
 		d.root, d.bin, d.via = p, "", DetectConfigDir
 		return true
 	}
-	if spec.binary != "" {
-		if p, err := exec.LookPath(spec.binary); err == nil {
+	for _, name := range spec.binaries {
+		if name == "" {
+			continue
+		}
+		if p, err := exec.LookPath(name); err == nil {
 			if paths := locate.All(spec.candidates); len(paths) > 0 {
 				d.root = paths[0]
 			}
@@ -108,11 +115,12 @@ func resolved(root string) detection {
 // installing the tool is enough on its own.
 func describeSignals(spec detectSpec) string {
 	s := locate.Display(spec.candidates)
-	if spec.binary == "" {
+	bins := strings.Join(spec.binaries, " or ")
+	if bins == "" {
 		return s
 	}
 	if s == "" {
-		return spec.binary + " on PATH"
+		return bins + " on PATH"
 	}
-	return s + ", or " + spec.binary + " on PATH"
+	return s + ", or " + bins + " on PATH"
 }

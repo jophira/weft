@@ -10,7 +10,7 @@ type ClaudeCode struct{ detection }
 func (c *ClaudeCode) Name() string { return "claude-code" }
 
 func (c *ClaudeCode) detectSignals() detectSpec {
-	return detectSpec{binary: "claude", candidates: []locate.Candidate{locate.HomeRel(".claude")}}
+	return detectSpec{binaries: []string{"claude"}, candidates: []locate.Candidate{locate.HomeRel(".claude")}}
 }
 
 func (c *ClaudeCode) Detect() bool { return c.run(c.detectSignals()) }
