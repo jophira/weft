@@ -5,7 +5,8 @@ test layout and the commit convention the project already uses.
 
 ## Local setup
 
-Requires Go 1.24 or later (the module targets Go 1.26.5, see `go.mod`).
+Requires the Go version declared in `go.mod`. With `GOTOOLCHAIN=auto`, the
+default, `go build` fetches that toolchain for you if you are on an older one.
 
 ```bash
 git clone https://github.com/jophira/weft.git
