@@ -114,13 +114,25 @@ func TestAutostartRun_should_hand_off_to_a_manual_profile_use(t *testing.T) {
 
 // watcherDeadline is how long the autostarted watcher gets to report itself live.
 //
-// It is deliberately still a fixed 20s. The one observed failure (#224, on
-// windows-latest) hit this deadline, and 20s is generous for a process spawn
-// even on a cold runner, so raising it would hide the next occurrence rather
-// than explain it. The dump below is what decides whether a slow start or a
-// watcher that never comes up is the real cause; the deadline is worth revisiting
-// once a failure has been read rather than guessed at.
-const watcherDeadline = 20 * time.Second
+// 20s held everywhere until the CI history was measured (#224). Across 19
+// windows-latest runs the e2e package total came out bimodal, roughly 6s to 11s
+// on twelve of them and 26s to 34s on the other seven, with nothing between the
+// two clusters. A runner in the slow mode is doing four times the work per unit
+// of wall clock, and the one recorded failure sat at 21.23s against this 20s
+// deadline, a hair over the edge rather than anywhere near a hang.
+//
+// So Windows gets a deadline scaled for the slow mode. That is not hiding the
+// problem: since #239 a timeout dumps the process state, the watcher's own
+// output, its log and the full status, so a failure at 90s is evidence of a
+// watcher that never came up, which 20s could never distinguish from a runner
+// having a bad minute. The other platforms have shown no such spread and keep
+// the tighter bound.
+var watcherDeadline = func() time.Duration {
+	if runtime.GOOS == "windows" {
+		return 90 * time.Second
+	}
+	return 20 * time.Second
+}()
 
 // waitForWatcher blocks until `weft status --short` reports a live watcher.
 //
@@ -144,6 +156,13 @@ func waitForWatcher(t *testing.T, home string, watcher *exec.Cmd, watcherOut *lo
 		lastStatus = runWeft(t, home, "status", "--short")
 		polls++
 		if strings.Contains(lastStatus, "watch:on") {
+			// Recorded on the way through, not only on failure. A deadline can
+			// only be set from the distribution of successful startups, and a
+			// number that appears exclusively in failures is the one case that
+			// says nothing about where to put the bound. CI runs the package
+			// with -v, so this reaches the log on every run.
+			t.Logf("watcher became live in %s (%d polls, deadline %s)",
+				time.Since(start).Round(time.Millisecond), polls, watcherDeadline)
 			return
 		}
 		if !time.Now().Before(deadline) {
