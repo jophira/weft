@@ -42,6 +42,30 @@ func DetectSignals(h Harness) string {
 	return ""
 }
 
+// DetectedSignal renders what the last Detect call matched: the kind of
+// evidence and the path it was found at ("config ~/.claude", "binary
+// ~/.local/bin/codex"). Returns "" when the harness was not found, or when the
+// adapter does not report its signal.
+//
+// The kind is spelled out because the two are not interchangeable. A config
+// root is where weft will write; a binary on PATH only says the tool exists, so
+// a surprising detection can be traced to the thing that actually matched.
+func DetectedSignal(h Harness) string {
+	r, ok := h.(DetectReporter)
+	if !ok {
+		return ""
+	}
+	via, evidence := r.DetectedVia()
+	switch via {
+	case DetectConfigDir:
+		return "config " + evidence
+	case DetectBinary:
+		return "binary " + evidence
+	default:
+		return ""
+	}
+}
+
 // Registry holds all known harness adapters.
 type Registry struct {
 	harnesses []Harness

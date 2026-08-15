@@ -478,6 +478,9 @@ func mergeAndApply(p *profile.Profile, roots []string, srcs []source.Source, cfg
 func resolveApplyTargets(p *profile.Profile, quiet bool) []string {
 	configured := p.ResolvedTargets()
 	if len(configured) > 0 {
+		if !quiet {
+			hintUntargetedHarnesses(p)
+		}
 		return configured
 	}
 	// Auto-detect: use any installed harness.
@@ -491,6 +494,19 @@ func resolveApplyTargets(p *profile.Profile, quiet bool) []string {
 		fmt.Printf("  no target set — auto-detected: %s\n", detected[0])
 	}
 	return detected
+}
+
+// hintUntargetedHarnesses names harnesses that are installed but absent from the
+// profile's target list. A printed line rather than a prompt: apply also runs
+// under watch, where a question would hang with nobody to answer it. Callers
+// pass quiet on that path, so the hint is confined to an interactive apply.
+func hintUntargetedHarnesses(p *profile.Profile) {
+	pending := untargetedNames(profile.TargetReport(p, detectHarnesses()))
+	if len(pending) == 0 {
+		return
+	}
+	fmt.Printf("  installed but not targeted: %s\n", strings.Join(pending, ", "))
+	fmt.Println("    run 'weft target detect --add' to target them")
 }
 
 // harnessTargetRoot returns the target directory last written by the given

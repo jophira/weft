@@ -177,3 +177,48 @@ func TestDetectSignals_DescribesBothSignals(t *testing.T) {
 		t.Error("DetectSignals(Warp) = \"\", want its config candidates")
 	}
 }
+
+// TestDetectedSignal_NamesTheKindOfEvidence covers the detect report's signal
+// column: a config hit and a binary hit must stay distinguishable, since only
+// the first names a root weft will write to.
+func TestDetectedSignal_NamesTheKindOfEvidence(t *testing.T) {
+	t.Run("config dir", func(t *testing.T) {
+		home := t.TempDir()
+		testenv.SetHome(t, home)
+		testenv.ClearPath(t)
+		if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		c := &ClaudeCode{}
+		if !c.Detect() {
+			t.Fatal("~/.claude exists but Detect returned false")
+		}
+		got := DetectedSignal(c)
+		if !strings.HasPrefix(got, "config ") || !strings.Contains(got, ".claude") {
+			t.Errorf("DetectedSignal = %q, want a config hit naming ~/.claude", got)
+		}
+	})
+
+	t.Run("binary", func(t *testing.T) {
+		testenv.SetHome(t, t.TempDir()) // empty home — only the binary can match
+		fakeBinary(t, "claude")
+		c := &ClaudeCode{}
+		if !c.Detect() {
+			t.Fatal("claude on PATH but Detect returned false")
+		}
+		got := DetectedSignal(c)
+		if !strings.HasPrefix(got, "binary ") || !strings.HasSuffix(got, "claude") {
+			t.Errorf("DetectedSignal = %q, want a binary hit naming the executable", got)
+		}
+	})
+
+	t.Run("not found", func(t *testing.T) {
+		testenv.SetHome(t, t.TempDir())
+		testenv.ClearPath(t)
+		c := &ClaudeCode{}
+		c.Detect()
+		if got := DetectedSignal(c); got != "" {
+			t.Errorf("DetectedSignal = %q, want empty when nothing matched", got)
+		}
+	})
+}
