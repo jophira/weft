@@ -12,9 +12,19 @@ import (
 
 const checkInterval = 24 * time.Hour
 
+// RepoOwner and RepoName name the repository that holds published releases.
+//
+// Releases live in their own repository, not alongside the source:
+// .goreleaser.yaml sets release.github to jophira/weft-releases, and
+// jophira/weft carries no releases at all. Pointing the update check at the
+// source repo returns 404 from releases/latest, which reads as "nothing to
+// report" and silently disables updates entirely (#250).
+//
+// Exported so cmd/update.go builds its download URL from the same pair rather
+// than repeating the strings, which is how the two drifted apart.
 const (
-	repoOwner = "jophira"
-	repoName  = "weft"
+	RepoOwner = "jophira"
+	RepoName  = "weft-releases"
 )
 
 // Cache is persisted to ~/.config/weft/.update_check.json.
@@ -71,8 +81,27 @@ func WriteCache(path string, c Cache) error {
 	return os.WriteFile(path, data, 0o644)
 }
 
+// LatestAPIURL is the endpoint the check reads. Exported so a test can pin it
+// without reaching the network.
+func LatestAPIURL() string {
+	return fmt.Sprintf("https://api.github.com/repos/%s/%s/releases/latest", RepoOwner, RepoName)
+}
+
+// ReleasePageURL names the human-facing page for a version, for the platforms
+// that cannot self-update.
+func ReleasePageURL(version string) string {
+	return fmt.Sprintf("https://github.com/%s/%s/releases/tag/v%s", RepoOwner, RepoName, version)
+}
+
+// AssetURL is the download URL for one platform's archive of a version. The
+// name matches goreleaser's archive name_template.
+func AssetURL(version, goos, goarch, ext string) string {
+	return fmt.Sprintf("https://github.com/%s/%s/releases/download/v%s/weft_%s_%s.%s",
+		RepoOwner, RepoName, version, goos, goarch, ext)
+}
+
 func fetchLatest() (string, error) {
-	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/releases/latest", repoOwner, repoName)
+	url := LatestAPIURL()
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Get(url) //nolint:gosec // URL is constructed from known constant owner/repo, not user input
 	if err != nil {

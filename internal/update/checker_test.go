@@ -470,3 +470,54 @@ func TestWriteCache_roundtrip(t *testing.T) {
 		t.Errorf("IgnoredVersion = %q, want 1.9.0", out.IgnoredVersion)
 	}
 }
+
+// ── Release repository ────────────────────────────────────────────────────────
+
+// TestReleaseRepo_isTheReleasesRepoNotTheSource is the regression for #250.
+// Releases are published to jophira/weft-releases; jophira/weft carries none, so
+// pointing the check at the source repo returns 404 from releases/latest, which
+// reads as "nothing to report" and disables updates without saying so.
+func TestReleaseRepo_isTheReleasesRepoNotTheSource(t *testing.T) {
+	if update.RepoName == "weft" {
+		t.Fatal("RepoName = weft, the source repo, which publishes no releases — want weft-releases")
+	}
+	if update.RepoOwner != "jophira" || update.RepoName != "weft-releases" {
+		t.Errorf("release repo = %s/%s, want jophira/weft-releases", update.RepoOwner, update.RepoName)
+	}
+}
+
+func TestLatestAPIURL(t *testing.T) {
+	want := "https://api.github.com/repos/jophira/weft-releases/releases/latest"
+	if got := update.LatestAPIURL(); got != want {
+		t.Errorf("LatestAPIURL = %q, want %q", got, want)
+	}
+}
+
+func TestReleasePageURL(t *testing.T) {
+	want := "https://github.com/jophira/weft-releases/releases/tag/v0.2.0"
+	if got := update.ReleasePageURL("0.2.0"); got != want {
+		t.Errorf("ReleasePageURL = %q, want %q", got, want)
+	}
+}
+
+// TestAssetURL_matchesGoreleaserNaming pins the archive name against
+// .goreleaser.yaml's name_template, "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}".
+// The v0.1.0 release published weft_linux_amd64.tar.gz and weft_darwin_arm64.tar.gz
+// under exactly these names, so a change to either side must break this test
+// rather than a user's update.
+func TestAssetURL_matchesGoreleaserNaming(t *testing.T) {
+	tests := []struct {
+		goos, goarch, ext, want string
+	}{
+		{"linux", "amd64", "tar.gz", "https://github.com/jophira/weft-releases/releases/download/v0.2.0/weft_linux_amd64.tar.gz"},
+		{"darwin", "arm64", "tar.gz", "https://github.com/jophira/weft-releases/releases/download/v0.2.0/weft_darwin_arm64.tar.gz"},
+		{"windows", "amd64", "zip", "https://github.com/jophira/weft-releases/releases/download/v0.2.0/weft_windows_amd64.zip"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.goos+"_"+tc.goarch, func(t *testing.T) {
+			if got := update.AssetURL("0.2.0", tc.goos, tc.goarch, tc.ext); got != tc.want {
+				t.Errorf("AssetURL = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
