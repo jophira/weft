@@ -97,8 +97,25 @@ Commits carry no AI attribution lines (no `Co-Authored-By: Claude`, no
    split it into separate commits rather than one sweep.
 3. Run `make test`, `make e2e` and `make lint` before pushing. Run `make
    test-integration` too if the change touches git remotes or the MCP server.
-4. Open the PR against `main`. CI runs the unit and e2e suites across Linux,
+4. Add an entry under `## [Unreleased]` in `CHANGELOG.md` if the change is one a
+   user would notice. See below for what that means.
+5. Open the PR against `main`. CI runs the unit and e2e suites across Linux,
    macOS and Windows, plus lint and a `govulncheck` scan.
+
+## Changelog
+
+`CHANGELOG.md` is the source of the published release notes. The release
+workflow extracts the section matching the tag and hands it to GoReleaser, and
+the release fails rather than publishing empty notes if that section is missing.
+So an entry written at PR time is the entry users read.
+
+Add yours under `## [Unreleased]`, in the subsection that fits (`Added`,
+`Fixed`, `Changed`, `Deprecated`, `Removed`, `Docs`, `Tests`). Write it for
+someone deciding whether to upgrade: what changed, and why it matters. Name the
+issue and the PR. A refactor nobody can observe does not need one.
+
+Cutting a release moves `[Unreleased]` to a dated version heading and leaves a
+fresh empty `[Unreleased]` behind.
 
 ## Reporting bugs
 

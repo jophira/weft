@@ -45,6 +45,10 @@ checksum:
   name_template: "checksums.txt"
   algorithm: sha256
 
+# Superseded at release time by --release-notes, which the release workflow fills
+# from the CHANGELOG section for the tag. Kept as the fallback for a local
+# `goreleaser release` run without that flag, so a release never ends up with no
+# notes at all.
 changelog:
   sort: asc
   use: git

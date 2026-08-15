@@ -21,11 +21,20 @@ jobs:
         with:
           go-version-file: go.mod
 
+      # The published notes are the CHANGELOG section for this tag, so the file
+      # and the release page cannot disagree. Generated-from-commits notes drop
+      # docs:, test: and chore: work by config and cannot carry a reason or a
+      # migration note. A missing or empty section fails here, before anything
+      # is published: an empty release page is not obviously wrong to anyone
+      # watching the job go green.
+      - name: Extract release notes from CHANGELOG
+        run: scripts/release-notes.sh "${GITHUB_REF_NAME}" > /tmp/release-notes.md
+
       - uses: goreleaser/goreleaser-action@v7
         with:
           distribution: goreleaser
           version: "~> v2"
-          args: release --clean
+          args: release --clean --release-notes=/tmp/release-notes.md
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASES_GITHUB_TOKEN }}
           HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
