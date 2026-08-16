@@ -11,6 +11,7 @@ import (
 
 	"github.com/jophira/weft/internal/advice"
 	"github.com/jophira/weft/internal/logger"
+	"github.com/jophira/weft/internal/project"
 )
 
 // logLevelFlag backs --log-level. Empty means "not set", so the config file and
@@ -71,6 +72,8 @@ func setObservabilityDefaults() {
 	viper.SetDefault("log_max_kb", int(logger.DefaultMaxLogBytes/1024))
 	viper.SetDefault("log_generations", logger.DefaultGenerations)
 	viper.SetDefault("advice_throttle_hours", int(advice.DefaultThrottle/time.Hour))
+	viper.SetDefault("project_sync", "on-visit")
+	viper.SetDefault("project_max_age_days", int(project.DefaultMaxAge/(24*time.Hour)))
 }
 
 // rawLogLevel returns the level as the user spelled it, flag first, then env,

@@ -104,6 +104,11 @@ var rootCmd = &cobra.Command{
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		initObservability(cmd)
 
+		// Record the repository we are running in, if any. This is what makes
+		// project scope work without the user maintaining a list: the daemon has
+		// no working directory, but every foreground command does.
+		registerCurrentProject()
+
 		if cmd.Name() == "update" {
 			return
 		}
