@@ -171,6 +171,34 @@ func Extract(content []byte) (body string, found bool) {
 	return strings.Trim(inner, "\n"), true
 }
 
+// Strip returns content with the managed block removed, leaving everything the
+// user authored. Content with no block is returned unchanged.
+//
+// The inverse of Upsert, and the reason it exists is fan-in. When weft reads a
+// repository's own CLAUDE.md or AGENTS.md as project input, anything weft wrote
+// there must not come back in: re-ingesting a block weft assembled would
+// duplicate every rule on each pass and, in the inline case, grow the file
+// without bound.
+func Strip(content []byte) []byte {
+	s := string(content)
+	start, end, ok := blockSpan(s)
+	if !ok {
+		return content
+	}
+	before := strings.TrimRight(s[:start], "\n")
+	after := strings.TrimLeft(s[end:], "\n")
+	switch {
+	case before == "" && after == "":
+		return nil
+	case before == "":
+		return []byte(ensureTrailingNewline(after))
+	case after == "":
+		return []byte(ensureTrailingNewline(before))
+	default:
+		return []byte(ensureTrailingNewline(before + "\n\n" + after))
+	}
+}
+
 // blockSpan locates the managed block within s. It returns the byte offset of
 // BlockBegin and the offset just past BlockEnd (end of that line). ok is false
 // when either marker is missing or out of order.

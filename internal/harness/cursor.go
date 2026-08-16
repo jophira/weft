@@ -70,3 +70,15 @@ func (c *Cursor) InstructionSpec() (InstructionSpec, error) {
 	path, err := homeJoin(".cursor", "rules", "weft.mdc")
 	return InstructionSpec{Path: path, Strategy: StrategyInline, Preamble: cursorMDCHeader}, err
 }
+
+// ProjectSpec: Cursor reads .mdc rule files from .cursor/rules in the project,
+// with no include directive, so content is inlined the same way as the global
+// file. Existing project rules are read back as input.
+func (c *Cursor) ProjectSpec() ProjectSpec {
+	return ProjectSpec{
+		Delivery: ProjectInline,
+		Path:     ".cursor/rules/weft.mdc",
+		Preamble: cursorMDCHeader,
+		Inputs:   []string{".cursor/rules/*.mdc"},
+	}
+}

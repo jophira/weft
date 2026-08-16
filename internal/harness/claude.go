@@ -49,3 +49,16 @@ func (c *ClaudeCode) InstructionSpec() (InstructionSpec, error) {
 	path, err := homeJoin(".claude", "CLAUDE.md")
 	return InstructionSpec{Path: path, Strategy: StrategyImport, ImportTemplate: "@{path}"}, err
 }
+
+// ProjectSpec: Claude Code runs SessionStart hooks and reads project settings
+// from .claude/settings.local.json, which is the conventionally gitignored one
+// of the pair. That combination is the only delivery costing no tracked diff at
+// all, so Claude Code takes the hook and its project CLAUDE.md is left alone
+// even though @-imports would work there too.
+func (c *ClaudeCode) ProjectSpec() ProjectSpec {
+	return ProjectSpec{
+		Delivery: ProjectHook,
+		Path:     ".claude/settings.local.json",
+		Inputs:   []string{"CLAUDE.md", ".claude/CLAUDE.md"},
+	}
+}

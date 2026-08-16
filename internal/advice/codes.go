@@ -13,6 +13,7 @@ package advice
 //	W1xx  instruction content and size
 //	W2xx  sources and profiles
 //	W3xx  deprecations
+//	W4xx  project scope
 const (
 	// CodeUntargetedHarness: a harness is installed but the active profile does
 	// not target it.
@@ -37,6 +38,16 @@ const (
 	CodeWriteBackFailed = "W203"
 	// CodeConflictScanFailed: the conflict scan could not run.
 	CodeConflictScanFailed = "W204"
+
+	// CodeNoProjectInstructions: the repository has no instruction file any
+	// detected harness would read, so there is nothing project-scoped to fan in.
+	CodeNoProjectInstructions = "W401"
+	// CodeProjectWriteOff: a harness needing inline delivery is in use here, but
+	// writing a tracked project file has not been opted into.
+	CodeProjectWriteOff = "W402"
+	// CodeProjectExcludeFailed: weft's repo-local state could not be excluded
+	// from git, so it will show up in git status.
+	CodeProjectExcludeFailed = "W403"
 
 	// CodeProjectsSnippetDeprecated: the source still uses the legacy
 	// <!-- weft:projects --> placeholder.

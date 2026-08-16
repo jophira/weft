@@ -43,3 +43,19 @@ func (g *GeminiCLI) InstructionSpec() (InstructionSpec, error) {
 	path, err := homeJoin(".gemini", "GEMINI.md")
 	return InstructionSpec{Path: path, Strategy: StrategyImport, ImportTemplate: "@{path}"}, err
 }
+
+// ProjectSpec: Gemini CLI has no session-start command hook, but it does resolve
+// @-imports inside a project GEMINI.md, so one line pointing into <repo>/.weft
+// is enough and never needs rewriting.
+//
+// The import target sits inside the repository deliberately. Gemini's import
+// processor validates paths against an allowed-directory list, so a pointer
+// reaching into $HOME could be refused; one staying within the project cannot.
+func (g *GeminiCLI) ProjectSpec() ProjectSpec {
+	return ProjectSpec{
+		Delivery:       ProjectImport,
+		Path:           "GEMINI.md",
+		ImportTemplate: "@{path}",
+		Inputs:         []string{"GEMINI.md"},
+	}
+}
