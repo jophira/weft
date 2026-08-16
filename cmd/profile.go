@@ -1077,6 +1077,11 @@ func startProfileWatchers(p *profile.Profile, roots []string, srcs []source.Sour
 				slog.Bool("ok", false), slog.String("error", applyErr.Error()))
 			return
 		}
+		// Registered repositories are refreshed too, since a source change alters
+		// what their bundles should hold. The cost is bounded by how many
+		// repositories the user actually works in, not by what is on the disk,
+		// which is the whole reason the registry is built from visits.
+		syncActiveProjects(detectedHarnesses(), io.Discard)
 		slog.Info("watch.reapply", slog.String("trigger", "source"),
 			slog.Duration("duration", time.Since(reapplyStart)), slog.Bool("ok", true))
 		fmt.Printf("[weft] applied at %s\n", time.Now().Format("15:04:05"))

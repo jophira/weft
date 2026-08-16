@@ -160,7 +160,7 @@ func TestEnsureExcluded_writesEntryAndIsIdempotent(t *testing.T) {
 		t.Error("first EnsureExcluded reported no write")
 	}
 	got := readExclude(t, filepath.Join(root, ".git"))
-	if !hasExcludeEntry(got) {
+	if !hasExcludeEntry(got, ExcludeEntry) {
 		t.Errorf("exclude = %q, want it to contain %q", got, ExcludeEntry)
 	}
 
@@ -195,7 +195,7 @@ func TestEnsureExcluded_preservesExistingContent(t *testing.T) {
 	if !strings.Contains(got, "*.local") {
 		t.Errorf("exclude = %q, lost the user's own entries", got)
 	}
-	if !hasExcludeEntry(got) {
+	if !hasExcludeEntry(got, ExcludeEntry) {
 		t.Errorf("exclude = %q, missing weft's entry", got)
 	}
 }
@@ -220,6 +220,43 @@ func TestEnsureExcluded_respectsAUserWrittenEquivalent(t *testing.T) {
 	}
 }
 
+// Hook delivery writes a settings file at a conventionally-ignored path, but a
+// convention is not a rule: a fresh repository ignores nothing, so without the
+// extra exclusion the "no tracked diff" delivery still leaves an untracked file
+// in git status.
+func TestEnsureExcluded_alsoExcludesHookWrittenFiles(t *testing.T) {
+	root := newRepo(t, "")
+	if _, err := EnsureExcluded(root, ".claude/settings.local.json"); err != nil {
+		t.Fatalf("EnsureExcluded: %v", err)
+	}
+	got := readExclude(t, filepath.Join(root, ".git"))
+	if !hasExcludeEntry(got, "/.claude/settings.local.json") {
+		t.Errorf("exclude = %q, want the hook settings file excluded", got)
+	}
+	if !hasExcludeEntry(got, ExcludeEntry) {
+		t.Errorf("exclude = %q, want the state dir excluded too", got)
+	}
+}
+
+func TestEnsureExcluded_addsOnlyTheMissingPatterns(t *testing.T) {
+	root := newRepo(t, "")
+	if _, err := EnsureExcluded(root); err != nil {
+		t.Fatalf("first: %v", err)
+	}
+	// The state dir is already there; only the settings path is new.
+	wrote, err := EnsureExcluded(root, ".claude/settings.local.json")
+	if err != nil {
+		t.Fatalf("second: %v", err)
+	}
+	if !wrote {
+		t.Fatal("reported no write when a new pattern was needed")
+	}
+	got := readExclude(t, filepath.Join(root, ".git"))
+	if n := strings.Count(got, ExcludeEntry); n != 1 {
+		t.Errorf("state dir entry appears %d times, want 1", n)
+	}
+}
+
 func TestEnsureExcluded_worktreeUsesTheMainCheckout(t *testing.T) {
 	main := newRepo(t, "")
 	wt := newWorktree(t, main, "263_project-scope")
@@ -229,7 +266,7 @@ func TestEnsureExcluded_worktreeUsesTheMainCheckout(t *testing.T) {
 	}
 	// One entry in the shared info/exclude covers every worktree.
 	got := readExclude(t, filepath.Join(main, ".git"))
-	if !hasExcludeEntry(got) {
+	if !hasExcludeEntry(got, ExcludeEntry) {
 		t.Errorf("main checkout exclude = %q, want weft's entry", got)
 	}
 }

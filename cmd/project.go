@@ -204,9 +204,51 @@ func humaniseSince(now, then time.Time) string {
 	}
 }
 
+var projectSyncCmd = &cobra.Command{
+	Use:   "sync",
+	Short: "Deliver project rules to the harnesses used in this repository",
+	Long: `Assemble this repository's rule bundle and point each detected harness at it.
+
+Everything weft writes goes under .weft, which is excluded from git via
+.git/info/exclude, so nothing appears in your teammates' diffs. Harnesses are
+reached by the cheapest mechanism each supports:
+
+  hook     a session-start hook in a gitignored settings file (no tracked diff)
+  import   one import line in the tracked instruction file, written once
+  inline   the content itself, rewritten whenever rules change (opt-in)
+
+Inline delivery is off until you enable it per harness, because it is the only
+one that puts a recurring diff in a tracked file.`,
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		out := cmd.OutOrStdout()
+		cwd, err := os.Getwd()
+		if err != nil {
+			return fmt.Errorf("resolving working directory: %w", err)
+		}
+		root, ok := project.FindRoot(cwd)
+		if !ok {
+			return fmt.Errorf("%s is not inside a git repository — project rules apply per repository", cwd)
+		}
+
+		detected := detectedHarnesses()
+		if len(detected) == 0 {
+			fmt.Fprintln(out, "No harnesses detected — nothing to deliver to.")
+			return nil
+		}
+
+		delivered, err := syncProject(root, detected, out)
+		if err != nil {
+			return err
+		}
+		reportDelivery(out, root, delivered, detected)
+		return nil
+	},
+}
+
 func init() {
 	rootCmd.AddCommand(projectCmd)
-	projectCmd.AddCommand(projectListCmd, projectStatusCmd, projectForgetCmd)
+	projectCmd.AddCommand(projectListCmd, projectStatusCmd, projectForgetCmd, projectSyncCmd)
 
 	projectListCmd.Flags().BoolVar(&projectListAll, "all", false, "include entries past the staleness window")
 	projectForgetCmd.Flags().BoolVar(&projectForgetStale, "stale", false, "forget every entry past the staleness window")

@@ -25,6 +25,7 @@ var (
 	rulesCachePath  string
 	rulesRecord     bool
 	rulesNoWork     bool
+	rulesNoProject  bool
 
 	rulesBuildRoot   string
 	rulesBuildOutput string
@@ -109,6 +110,21 @@ Examples:
 						bundle += "\n\n"
 					}
 					bundle += wb
+				}
+			}
+			// Append the repository's own instruction files last, so a rule
+			// written in the repo beats a general one from a global source.
+			// This is what carries project scope to hook-delivered harnesses:
+			// they run this command and read its stdout, so a rule someone put
+			// in CLAUDE.md reaches every harness working in the repository.
+			if !rulesNoProject {
+				if pb, pErr := projectInputBundle(repoAbs); pErr != nil {
+					fmt.Fprintf(os.Stderr, "weft: project instructions skipped: %v\n", pErr)
+				} else if pb != "" {
+					if bundle != "" {
+						bundle += "\n\n"
+					}
+					bundle += pb
 				}
 			}
 			fmt.Fprintln(out, bundle)
@@ -370,6 +386,7 @@ func init() {
 	rulesResolveCmd.Flags().BoolVar(&rulesRebuild, "rebuild-cache", false, "ignore any existing cache and regenerate it")
 	rulesResolveCmd.Flags().StringVar(&rulesCachePath, "cache", "", "cache file path (only with --rules-root; default: <rules-root>/signals.yaml)")
 	rulesResolveCmd.Flags().BoolVar(&rulesRecord, "record", false, "append a deduped audit record to <repo>/.weft/ and the global ~/.config/weft/audit rollup")
+	rulesResolveCmd.Flags().BoolVar(&rulesNoProject, "no-project", false, "do not append this repository's own instruction files")
 	rulesResolveCmd.Flags().BoolVar(&rulesNoWork, "no-work", false, "do not append the repo's work-plane knowledge base (~/weft/work/projects/<repo>/kb)")
 
 	rulesBuildCmd.Flags().StringVar(&rulesBuildRoot, "rules-root", "", "path to the rules tree to index (required)")

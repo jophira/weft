@@ -48,3 +48,15 @@ func (c *Codex) InstructionSpec() (InstructionSpec, error) {
 	path, err := homeJoin(".codex", "AGENTS.md")
 	return InstructionSpec{Path: path, Strategy: StrategyInline}, err
 }
+
+// ProjectSpec: Codex reads a project AGENTS.md and has neither a session-start
+// hook nor an include directive, so the only reliable delivery is inlining the
+// content. That rewrites a tracked file whenever rules change, which is why the
+// level is off unless the user opts the repository in.
+func (c *Codex) ProjectSpec() ProjectSpec {
+	return ProjectSpec{
+		Delivery: ProjectInline,
+		Path:     "AGENTS.md",
+		Inputs:   []string{"AGENTS.md"},
+	}
+}
