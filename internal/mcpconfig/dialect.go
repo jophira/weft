@@ -3,9 +3,10 @@ package mcpconfig
 import (
 	"fmt"
 	"maps"
-	"os"
 	"path/filepath"
 	"slices"
+
+	"github.com/jophira/weft/internal/locate"
 )
 
 // Harness names. These must match Harness.Name() exactly: DialectFor is called
@@ -71,11 +72,13 @@ func DialectFor(harness string) (Dialect, bool) {
 	return nil, false
 }
 
-// homePath resolves a home-relative native file path.
+// homePath resolves a home-relative native file path, honouring the harness
+// home override so an isolated run writes its MCP documents alongside the rest
+// of the harness tree rather than into the real home (#265).
 func homePath(rel ...string) (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("resolving home directory: %w", err)
+	home := locate.HarnessHome()
+	if home == "" {
+		return "", fmt.Errorf("resolving home directory")
 	}
 	return filepath.Join(append([]string{home}, rel...)...), nil
 }

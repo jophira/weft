@@ -332,9 +332,9 @@ func trackAndWriteFile(absPath, rel, harnessName string, content []byte, ctx App
 // then delegates to applyWithManifest. It is the common Apply body for harnesses
 // whose target is a single directory under $HOME (e.g. ~/.claude, ~/.aider).
 func applyToHomeDir(stagedRoot, dotSubdir string, h Harness, ctx ApplyCtx, renames map[string]string) error {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return fmt.Errorf("resolving home directory: %w", err)
+	home := locate.HarnessHome()
+	if home == "" {
+		return fmt.Errorf("resolving home directory")
 	}
 	target := filepath.Join(home, dotSubdir)
 	if err := os.MkdirAll(target, 0o755); err != nil {

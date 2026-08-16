@@ -4,12 +4,14 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
 	"github.com/jophira/weft/internal/advice"
+	"github.com/jophira/weft/internal/locate"
 	"github.com/jophira/weft/internal/logger"
 	"github.com/jophira/weft/internal/project"
 )
@@ -63,6 +65,47 @@ func initObservability(cmd *cobra.Command) {
 		Throttle: time.Duration(viper.GetInt("advice_throttle_hours")) * time.Hour,
 		Store:    adviceStore(),
 	}))
+
+	// After SetDefault, not before: this raises a hint, and adding it to the bus
+	// that is about to be replaced would drop it silently.
+	applyHarnessHome()
+}
+
+// envHarnessHome redirects every harness path, so an apply can be exercised
+// without touching the real ~/.claude, ~/.codex and the rest.
+const envHarnessHome = "WEFT_HARNESS_HOME"
+
+// applyHarnessHome installs the harness home override, if one is configured.
+//
+// Env first, then config, so a one-off test run needs no file edit. Nothing is
+// overridden by default: applying to the real harnesses is what weft is for.
+//
+// --config does not imply this. It reads as though it should, which is exactly
+// how #265 came about, but implying it would silently change where an existing
+// user's applies land. The hint below closes that gap by saying plainly what
+// --config does and does not cover.
+func applyHarnessHome() {
+	home := os.Getenv(envHarnessHome)
+	if home == "" {
+		home = viper.GetString("harness_home")
+	}
+	if home == "" {
+		if cfgFile != "" {
+			advice.Add(advice.Advice{
+				Code:     advice.CodeConfigHomeNotIsolated,
+				Severity: advice.Info,
+				Message:  "--config isolates weft's own state, but applies still write to the real home harness directories",
+				Fix:      "set " + envHarnessHome + "=<dir> (or harness_home in config) to redirect them too",
+			})
+		}
+		return
+	}
+	expanded := locate.ExpandHome(home)
+	if abs, err := filepath.Abs(expanded); err == nil {
+		expanded = abs
+	}
+	locate.SetHarnessHome(expanded)
+	slog.Info("harness_home", slog.String("path", expanded))
 }
 
 // setObservabilityDefaults registers the viper defaults for logging and advice.

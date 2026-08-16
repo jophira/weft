@@ -628,10 +628,33 @@ projection time:
 
 Config file: `~/.config/weft/config.yaml`. Keys: `weft_home`, `sources_dir`,
 `profiles_dir`, `hooks_dir`, `docs_dir`, `audit_dir`, `active_profile`,
-`warn_instruction_size_kb`.
+`warn_instruction_size_kb`, `harness_home`, `log_level`, `log_max_kb`,
+`log_generations`, `advice_muted`, `advice_throttle_hours`, `project_sync`,
+`project_max_age_days`, `project_write`.
 
-Override the config location with `--config <path>` on any command — it fully
-isolates weft's state (including `weft_home`) under that file's directory.
+Override the config location with `--config <path>` on any command. It isolates
+the state weft owns (sources, profiles, staged output, manifests, backups) under
+that file's directory.
+
+### Isolating what weft writes to
+
+`--config` moves weft's own state. It does not move where an apply **writes**:
+harness directories are resolved from your home directory, so `weft profile use`
+still updates the real `~/.claude`, `~/.codex` and the rest.
+
+To redirect those as well, set `harness_home` (or `WEFT_HARNESS_HOME`):
+
+```bash
+WEFT_HARNESS_HOME=/tmp/weft-test weft --config /tmp/weft-test/config.yaml profile use demo
+```
+
+Every harness path then resolves under that directory: detection, config roots,
+instruction files and MCP documents. Weft's own log, update check and git
+credentials keep using your real home, because those are not harness state.
+
+This is what makes it safe to exercise an apply on a machine that also runs weft
+for real. Without it, weft warns on any `--config` run that harness writes are
+still going to your actual home.
 
 ## Changelog
 

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/jophira/weft/internal/instruction"
+	"github.com/jophira/weft/internal/locate"
 	"github.com/jophira/weft/internal/manifest"
 )
 
@@ -122,11 +123,13 @@ func ProjectInstruction(h Harness, stagedRoot string, sources []SourceInstructio
 	return manifest.Save(ctx.CfgDir, m)
 }
 
-// homeJoin resolves the user's home directory and joins the given parts onto it.
+// homeJoin resolves the harness home directory and joins the given parts onto
+// it. Goes through locate.HarnessHome rather than os.UserHomeDir so an isolated
+// run cannot leak a write into the real home (#265).
 func homeJoin(parts ...string) (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("resolving home directory: %w", err)
+	home := locate.HarnessHome()
+	if home == "" {
+		return "", fmt.Errorf("resolving home directory")
 	}
 	return filepath.Join(append([]string{home}, parts...)...), nil
 }

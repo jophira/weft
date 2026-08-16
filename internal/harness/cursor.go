@@ -29,9 +29,9 @@ const cursorMDCHeader = "---\nalwaysApply: true\n---\n"
 // Apply writes CLAUDE.md to ~/.cursor/rules/weft.mdc with always-apply frontmatter.
 // Other staged files (commands, hooks, etc.) have no Cursor global equivalent and are skipped.
 func (c *Cursor) Apply(stagedRoot string, ctx ApplyCtx) error {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return fmt.Errorf("resolving home directory: %w", err)
+	home := locate.HarnessHome()
+	if home == "" {
+		return fmt.Errorf("resolving home directory")
 	}
 	rulesDir := filepath.Join(home, ".cursor", "rules")
 	if err := os.MkdirAll(rulesDir, 0o755); err != nil {

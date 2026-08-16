@@ -14,6 +14,7 @@ package advice
 //	W2xx  sources and profiles
 //	W3xx  deprecations
 //	W4xx  project scope
+//	W5xx  isolation and configuration
 const (
 	// CodeUntargetedHarness: a harness is installed but the active profile does
 	// not target it.
@@ -48,6 +49,10 @@ const (
 	// CodeProjectExcludeFailed: weft's repo-local state could not be excluded
 	// from git, so it will show up in git status.
 	CodeProjectExcludeFailed = "W403"
+
+	// CodeConfigHomeNotIsolated: --config was given, but harness writes still go
+	// to the real home directory.
+	CodeConfigHomeNotIsolated = "W501"
 
 	// CodeProjectsSnippetDeprecated: the source still uses the legacy
 	// <!-- weft:projects --> placeholder.
