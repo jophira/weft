@@ -23,10 +23,24 @@ var targetCmd = &cobra.Command{
 	Short: "Manage AI harness targets",
 }
 
+var (
+	targetListFiles bool
+	targetListAll   bool
+)
+
 var targetListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "Show all known harnesses and whether they are installed",
+	Long: `List every harness weft knows about and whether it is installed.
+
+With --files, report per-harness coverage instead: which files weft manages in
+each detected config root, which files it recognises but does not manage, and
+how many entries it does not recognise at all. That is the answer to "does weft
+handle everything this harness reads", stated as a report rather than a guess.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if targetListFiles {
+			return printCoverageReport(cmd.OutOrStdout(), targetListAll)
+		}
 		all := harness.All()
 
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
@@ -389,6 +403,8 @@ func init() {
 	rootCmd.AddCommand(targetCmd)
 	targetCmd.AddCommand(targetListCmd, targetDetectCmd, targetApplyCmd, targetBackupsCmd, targetRevertCmd)
 
+	targetListCmd.Flags().BoolVar(&targetListFiles, "files", false, "report per-harness file coverage instead of the harness list")
+	targetListCmd.Flags().BoolVar(&targetListAll, "all", false, "with --files, also list unrecognised entries by name")
 	targetDetectCmd.Flags().BoolVar(&targetDetectAdd, "add", false, "append newly detected harnesses to the active profile's targets")
 	targetRevertCmd.Flags().StringVar(&revertBackup, "backup", "", "timestamp of a specific backup to restore (e.g. 20260605-143022)")
 }

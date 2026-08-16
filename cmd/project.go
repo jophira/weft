@@ -116,6 +116,8 @@ var projectStatusCmd = &cobra.Command{
 		} else {
 			fmt.Fprintln(out, "  state:   (not written yet)")
 		}
+
+		printProjectCoverage(out, root)
 		return nil
 	},
 }

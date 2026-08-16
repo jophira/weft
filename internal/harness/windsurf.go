@@ -48,3 +48,13 @@ func (w *Windsurf) InstructionSpec() (InstructionSpec, error) {
 	path, err := homeJoin(".codeium", "windsurf", "global_rules.md")
 	return InstructionSpec{Path: path, Strategy: StrategyInline}, err
 }
+
+// KnownFiles: Windsurf reads one global rules file.
+func (w *Windsurf) KnownFiles() []KnownFile {
+	return []KnownFile{
+		{Rel: "global_rules.md", Kind: FileInstructions, Desc: "global rules"},
+		{Rel: "memories", Dir: true, Kind: FileInstructions, Desc: "persisted memories"},
+	}
+}
+
+func (w *Windsurf) StateEntries() []string { return []string{"logs", "cache", "tmp"} }

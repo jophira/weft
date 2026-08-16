@@ -29,6 +29,16 @@ func builtins() []Known {
 			&GenericHarness{
 				name:       "antigravity",
 				candidates: []locate.Candidate{locate.HomeRel(".gemini", "antigravity")},
+				known: []KnownFile{
+					{Rel: "commands", Dir: true, Kind: FileCommands, Desc: "custom commands"},
+					{Rel: "knowledge", Dir: true, Kind: FileInstructions, Desc: "knowledge entries"},
+					{Rel: "mcp_config.json", Kind: FileMCP, Desc: "MCP servers"},
+				},
+				state: []string{
+					"brain", "code_tracker", "context_state", "conversations",
+					"html_artifacts", "implicit", "installation_id",
+					"browserAllowlist.txt", "user_settings.pb",
+				},
 			},
 			"",
 		},
@@ -43,6 +53,13 @@ func builtins() []Known {
 					locate.XDGRel("opencode"),
 					locate.XDGDataRel("opencode"),
 				},
+				known: []KnownFile{
+					{Rel: "AGENTS.md", Kind: FileInstructions, Desc: "root instruction file"},
+					{Rel: "opencode.json", Kind: FileSettings, Desc: "settings and MCP servers"},
+					{Rel: "opencode.jsonc", Kind: FileSettings, Desc: "settings and MCP servers"},
+					{Rel: "commands", Dir: true, Kind: FileCommands, Desc: "custom commands"},
+				},
+				state: []string{"node_modules", "package.json", "package-lock.json", ".gitignore", "log", "cache"},
 			},
 			"",
 		},

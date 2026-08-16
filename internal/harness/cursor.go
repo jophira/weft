@@ -82,3 +82,14 @@ func (c *Cursor) ProjectSpec() ProjectSpec {
 		Inputs:   []string{".cursor/rules/*.mdc"},
 	}
 }
+
+// KnownFiles: Cursor's rules live as separate .mdc files, so the directory is
+// the unit rather than one instruction file.
+func (c *Cursor) KnownFiles() []KnownFile {
+	return []KnownFile{
+		{Rel: "rules", Dir: true, Kind: FileInstructions, Desc: "always-apply rule files"},
+		{Rel: "mcp.json", Kind: FileMCP, Desc: "MCP servers"},
+	}
+}
+
+func (c *Cursor) StateEntries() []string { return []string{"logs", "tmp"} }

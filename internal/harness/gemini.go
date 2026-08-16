@@ -59,3 +59,17 @@ func (g *GeminiCLI) ProjectSpec() ProjectSpec {
 		Inputs:         []string{"GEMINI.md"},
 	}
 }
+
+// KnownFiles: Gemini CLI keeps servers in settings.json alongside everything
+// else, so that one file is both settings and MCP.
+func (g *GeminiCLI) KnownFiles() []KnownFile {
+	return []KnownFile{
+		{Rel: "GEMINI.md", Kind: FileInstructions, Desc: "root instruction file"},
+		{Rel: "settings.json", Kind: FileSettings, Desc: "settings and MCP servers"},
+		{Rel: "commands", Dir: true, Kind: FileCommands, Desc: "custom commands"},
+	}
+}
+
+func (g *GeminiCLI) StateEntries() []string {
+	return []string{"tmp", "antigravity", "history", "logs", "installation_id"}
+}

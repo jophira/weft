@@ -99,3 +99,19 @@ func (a *Aider) Wire(ctx ApplyCtx) error {
 
 	return writeTrackedSidecar(confPath, wiringManifestKey(confPath), a.Name(), merged, ctx)
 }
+
+// KnownFiles: aider's conventions file lives in the config root, but the config
+// pointing at it sits at ~/.aider.conf.yml, outside this root. The report names
+// only what is inside.
+func (a *Aider) KnownFiles() []KnownFile {
+	return []KnownFile{
+		{Rel: "CONVENTIONS.md", Kind: FileInstructions, Desc: "coding conventions"},
+	}
+}
+
+func (a *Aider) StateEntries() []string {
+	return []string{
+		"caches", "analytics.jsonl", "analytics.json", "installs.json",
+		".aider.chat.history.md", "tmp",
+	}
+}

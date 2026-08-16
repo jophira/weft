@@ -60,3 +60,21 @@ func (c *Codex) ProjectSpec() ProjectSpec {
 		Inputs:   []string{"AGENTS.md"},
 	}
 }
+
+// KnownFiles: Codex keeps its instruction file and its server config side by
+// side, and names its prompt directory differently from every other harness.
+func (c *Codex) KnownFiles() []KnownFile {
+	return []KnownFile{
+		{Rel: "AGENTS.md", Kind: FileInstructions, Desc: "root instruction file"},
+		{Rel: "config.toml", Kind: FileMCP, Desc: "settings and MCP servers"},
+		{Rel: "prompts", Dir: true, Kind: FileCommands, Desc: "prompt templates"},
+		{Rel: "skills", Dir: true, Kind: FileSkills, Desc: "skill bundles"},
+	}
+}
+
+func (c *Codex) StateEntries() []string {
+	return []string{
+		"sessions", "log", "tmp", ".tmp", "installation_id", "history.jsonl",
+		"version.json", "*.sqlite", "*.sqlite-shm", "*.sqlite-wal",
+	}
+}
