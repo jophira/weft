@@ -72,21 +72,33 @@ func TestInstructionSpecsHonourHarnessHome(t *testing.T) {
 
 // A generic harness resolves its config root through locate candidates rather
 // than homeJoin, so it needs its own assertion.
+//
+// ConfigPath returns a *display* string, not a filesystem path: it is
+// forward-slashed for portability and may join several candidates with "  or  ".
+// Both sides are therefore normalised before comparing, which matters on Windows
+// where the override itself is backslashed.
 func TestGenericHarnessConfigPathHonoursHarnessHome(t *testing.T) {
 	fake := populatedHarnessHome(t)
 	withHarnessHome(t, fake)
 
+	want := filepath.ToSlash(fake) + "/"
 	for _, k := range builtins() {
 		cp, ok := k.H.(ConfigPather)
 		if !ok {
 			continue
 		}
-		path := cp.ConfigPath()
-		if path == "" {
+		display := cp.ConfigPath()
+		if display == "" {
 			continue // nothing resolved on this platform
 		}
-		if !strings.HasPrefix(path, fake+string(filepath.Separator)) {
-			t.Errorf("%s: config path %q is outside the harness home %q", k.H.Name(), path, fake)
+		for _, candidate := range strings.Split(display, "  or  ") {
+			got := filepath.ToSlash(strings.TrimSpace(candidate))
+			if got == "" {
+				continue
+			}
+			if !strings.HasPrefix(got, want) {
+				t.Errorf("%s: config path %q is outside the harness home %q", k.H.Name(), got, want)
+			}
 		}
 	}
 }
