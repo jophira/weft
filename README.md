@@ -300,6 +300,36 @@ The guards:
 Adopting also records weft's ownership of the harness copy in the manifest, so the next
 apply reports `· unchanged` rather than treating the file as an external edit.
 
+## Coverage — what weft manages, and what it does not
+
+`weft target list --files` audits every detected harness against its config root:
+
+```
+claude-code  ~/.claude
+  ✓ managed
+      CLAUDE.md  instructions            root instruction file
+      agents/    agents        1 file    subagent definitions
+      commands/  commands      18 files  slash commands
+      skills/    skills        20 files  skill bundles
+  ~ unmanaged
+      hooks/                 hooks       4 files    hook scripts
+      plugins/               plugins     467 files  installed plugins
+      settings.json          settings               hooks, permissions, env, status line
+      settings.local.json    settings               machine-local settings overrides
+      statusline-command.sh  statusline             status line command
+  · other: 1 unrecognised entry
+```
+
+**Managed** is what weft writes, per its manifest. **Unmanaged** is what weft recognises and
+leaves alone, which is the half worth acting on. **Other** counts entries weft does not
+recognise at all; `--all` names them. Credentials files are never listed.
+
+A harness weft knows no layout for says so, rather than reporting empty coverage. The two
+are different answers and only one of them is a gap in weft.
+
+`weft project status` asks the same question of the current repository, showing which
+instruction files are read as input and which weft writes.
+
 ## Class-aware projection — what each harness gets
 
 A source holds more than instructions. Commands, agents, skills and MCP server definitions

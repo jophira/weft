@@ -62,3 +62,38 @@ func (c *ClaudeCode) ProjectSpec() ProjectSpec {
 		Inputs:   []string{"CLAUDE.md", ".claude/CLAUDE.md"},
 	}
 }
+
+// KnownFiles: Claude Code has the widest surface of any harness weft targets,
+// and most of it is not projected. Declaring the whole set is what turns
+// "does weft handle all of it" into a report.
+func (c *ClaudeCode) KnownFiles() []KnownFile {
+	return []KnownFile{
+		{Rel: "CLAUDE.md", Kind: FileInstructions, Desc: "root instruction file"},
+		{Rel: "settings.json", Kind: FileSettings, Desc: "hooks, permissions, env, status line"},
+		{Rel: "settings.local.json", Kind: FileSettings, Desc: "machine-local settings overrides"},
+		{Rel: "keybindings.json", Kind: FileKeybindings, Desc: "custom key bindings"},
+		{Rel: "statusline-command.sh", Kind: FileStatusline, Desc: "status line command"},
+		{Rel: "commands", Dir: true, Kind: FileCommands, Desc: "slash commands"},
+		{Rel: "agents", Dir: true, Kind: FileAgents, Desc: "subagent definitions"},
+		{Rel: "skills", Dir: true, Kind: FileSkills, Desc: "skill bundles"},
+		{Rel: "hooks", Dir: true, Kind: FileHooks, Desc: "hook scripts"},
+		{Rel: "output-styles", Dir: true, Kind: FileOutputStyles, Desc: "response style presets"},
+		{Rel: "plugins", Dir: true, Kind: FilePlugins, Desc: "installed plugins"},
+	}
+}
+
+// StateEntries: everything Claude Code writes for itself. Session transcripts
+// alone run to thousands of files, so leaving them in the unrecognised count
+// would bury the handful of entries worth acting on.
+func (c *ClaudeCode) StateEntries() []string {
+	return []string{
+		"projects", "sessions", "history.jsonl", "todos", "statsig", "cache",
+		"debug", "downloads", "file-history", "ide", "jobs", "paste-cache",
+		"plans", "session-env", "shell-snapshots", "tasks", "telemetry",
+		"usage-data", "backups", "chrome", "daemon", "daemon.log", ".cc-writes",
+		"tmp", ".last-cleanup", ".last-update-result.json",
+		// Backups weft and the harness both leave behind, matched by shape so the
+		// list does not need a new entry every time one is written.
+		"*.bak", "*.bak-*", "*.log",
+	}
+}

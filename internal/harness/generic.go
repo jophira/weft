@@ -16,7 +16,18 @@ type GenericHarness struct {
 	name           string
 	detectBinaries []string           // binary names looked up via PATH, in order; empty = skip
 	candidates     []locate.Candidate // config root candidates; probed in order
+	// known and state feed the coverage report. Both are optional: a generic
+	// harness weft knows nothing about reports an undeclared layout, which is
+	// honest, rather than an empty one, which would read as "nothing here".
+	known []KnownFile
+	state []string
 }
+
+// KnownFiles implements FileAware for the generic adapters that declare a layout.
+func (g *GenericHarness) KnownFiles() []KnownFile { return g.known }
+
+// StateEntries implements FileAware.
+func (g *GenericHarness) StateEntries() []string { return g.state }
 
 func (g *GenericHarness) Name() string { return g.name }
 
