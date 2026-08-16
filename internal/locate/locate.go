@@ -125,6 +125,12 @@ func XDGRel(rel ...string) Candidate {
 func XDGDataRel(rel ...string) Candidate {
 	return Candidate{
 		Path: func(home, _ string) string {
+			// An override replaces the data root outright, ignoring the real
+			// XDG_DATA_HOME: honouring it would send an XDG-following harness back
+			// to the real tree and leave the isolation half-applied.
+			if harnessHome != "" {
+				return filepath.Join(append([]string{harnessHome, ".local", "share"}, rel...)...)
+			}
 			base := os.Getenv("XDG_DATA_HOME")
 			if base == "" {
 				if home == "" {
@@ -137,9 +143,46 @@ func XDGDataRel(rel ...string) Candidate {
 	}
 }
 
+// harnessHome, when set, replaces the user's home directory for every
+// harness-owned path: detection candidates, config roots, instruction files and
+// MCP documents.
+//
+// It exists because --config isolated only weft's own state. An apply run under
+// a throwaway config still wrote into the real ~/.claude, ~/.codex and the rest,
+// so there was no way to exercise an apply on a machine that also uses weft for
+// real. See issue #265.
+//
+// Deliberately narrow: weft's own state, the log, the update check and git auth
+// keep using the real home. Redirecting those would change where weft keeps its
+// things, which is what --config already governs.
+var harnessHome string
+
+// SetHarnessHome overrides the home directory used to resolve harness paths.
+// An empty string restores the real home.
+func SetHarnessHome(path string) { harnessHome = path }
+
+// HarnessHome returns the directory harness paths resolve against: the override
+// when set, otherwise the user's real home.
+//
+// Callers that write into a harness must use this rather than os.UserHomeDir,
+// which is the distinction the isolation test enforces.
+func HarnessHome() string {
+	if harnessHome != "" {
+		return harnessHome
+	}
+	home, _ := os.UserHomeDir()
+	return home
+}
+
 func homeDirs() (home, xdg string) {
-	home, _ = os.UserHomeDir()
-	xdg = os.Getenv("XDG_CONFIG_HOME")
+	home = HarnessHome()
+	// With an override in play the real XDG_CONFIG_HOME is ignored on purpose.
+	// Honouring it would send an XDG-following harness (opencode, goose) back to
+	// the real config root and leave the isolation half-applied, which is worse
+	// than not isolating at all because it looks contained and is not.
+	if harnessHome == "" {
+		xdg = os.Getenv("XDG_CONFIG_HOME")
+	}
 	if xdg == "" {
 		xdg = filepath.Join(home, ".config")
 	}
