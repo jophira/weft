@@ -4,15 +4,14 @@ import (
 	"bufio"
 	"fmt"
 	"io"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/jophira/weft/internal/advice"
 	"github.com/jophira/weft/internal/autosync"
 	"github.com/jophira/weft/internal/config"
 	"github.com/jophira/weft/internal/locate"
-	"github.com/jophira/weft/internal/logger"
 	"github.com/jophira/weft/internal/source"
 	"github.com/jophira/weft/internal/update"
 	"github.com/jophira/weft/internal/validate"
@@ -103,8 +102,7 @@ var rootCmd = &cobra.Command{
 	Short: "Composable AI rules manager",
 	Long:  "Weft by Jophira — manage, layer, and sync AI rule sources across teams and harnesses.",
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
-		logger.Init(Version)
-		slog.Info("run", slog.String("cmd", cmd.CommandPath()))
+		initObservability(cmd)
 
 		if cmd.Name() == "update" {
 			return
@@ -127,6 +125,14 @@ var rootCmd = &cobra.Command{
 		}
 	},
 	PersistentPostRun: func(cmd *cobra.Command, args []string) {
+		// Advice goes to stderr, always, and before the update prompt so a hint
+		// is never buried under it. stdout is a contract elsewhere: `weft rules
+		// resolve` writes the rule bundle there for a session hook to fold into
+		// the model's context, and `weft status --short` writes a status line.
+		// A suggestion on either would be injected as instructions or rendered
+		// into the prompt.
+		advice.Emit(os.Stderr)
+
 		if cmd.Name() == "update" || updateResultCh == nil {
 			return
 		}
@@ -171,6 +177,7 @@ func Execute() {
 func init() {
 	cobra.OnInitialize(initConfig)
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default: $HOME/.config/weft/config.yaml)")
+	rootCmd.PersistentFlags().StringVar(&logLevelFlag, "log-level", "", "log verbosity: debug, info, warn, error (default: info, or "+envLogLevel+")")
 }
 
 // isInteractiveTTY returns false when stdin is a pipe, redirect, or CI environment,
@@ -309,6 +316,7 @@ func initConfig() {
 		viper.SetDefault("docs_dir", docs)
 	}
 	viper.SetDefault("warn_instruction_size_kb", validate.DefaultWarnSizeKB)
+	setObservabilityDefaults()
 }
 
 // legacyAwareDir returns preferred, unless preferred is absent and legacy still

@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/jophira/weft/internal/advice"
 	"github.com/jophira/weft/internal/locate"
 	"github.com/jophira/weft/internal/source"
 )
@@ -67,15 +68,17 @@ func stagedUsesProjectsSnippet(stagedDir string) bool {
 	return strings.Contains(content, projectsPlaceholder) || strings.Contains(content, projectsBegin)
 }
 
-// warnProjectsSnippetDeprecated prints a migration notice for the projects
+// warnProjectsSnippetDeprecated raises a migration notice for the projects
 // mechanism. It is emitted only when a profile actually expands the snippet, so
-// users who don't use it are never nagged. Best-effort to stderr: the snippet
-// still works today, so this never affects the apply's success.
+// users who don't use it are never nagged. Advisory only: the snippet still
+// works today, so this never affects the apply's success.
 func warnProjectsSnippetDeprecated() {
-	fmt.Fprintln(os.Stderr, "⚠ weft: the projects-snippet ("+projectsPlaceholder+") is deprecated;")
-	fmt.Fprintln(os.Stderr, "  migrate project rules to resolver front-matter (detect:/extends:) — see")
-	fmt.Fprintln(os.Stderr, "  `weft rules resolve` and the rules-resolver guide. The snippet still")
-	fmt.Fprintln(os.Stderr, "  works today; it will be removed in a future release.")
+	advice.Add(advice.Advice{
+		Code:     advice.CodeProjectsSnippetDeprecated,
+		Severity: advice.Warn,
+		Message:  "the projects-snippet (" + projectsPlaceholder + ") is deprecated and will be removed in a future release",
+		Fix:      "migrate project rules to resolver front-matter (detect:/extends:), see 'weft rules resolve'",
+	})
 }
 
 // replaceProjectsBlock replaces the first <!-- weft:projects:begin -->...

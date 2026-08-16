@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -83,10 +84,12 @@ Examples:
 			}
 		}
 
+		resolveStart := time.Now()
 		ress, err := resolveAcrossRoots(repoAbs, roots, opts)
 		if err != nil {
 			return err
 		}
+		logResolve(repoAbs, profileName, ress, time.Since(resolveStart))
 
 		out := cmd.OutOrStdout()
 		if rulesShowManife {
@@ -120,6 +123,24 @@ Examples:
 		}
 		return nil
 	},
+}
+
+// logResolve records one resolve to the event log.
+//
+// Separate from recordResolve, which is the opt-in audit trail written into the
+// repo. This one is unconditional and goes to weft's own log: a resolve running
+// from a session hook is the single most frequent thing weft does, and until now
+// it left no trace, so "did the hook fire, and what did it pick" had no answer
+// outside --record.
+func logResolve(repoAbs, profileName string, ress []sourceResolution, took time.Duration) {
+	rec := buildResolveRecord(repoAbs, profileName, ress, time.Now().UTC())
+	slog.Info("resolve.done",
+		slog.String("repo", rec.Repo),
+		slog.String("profile", profileName),
+		slog.String("resolution_hash", rec.ResolutionHash),
+		slog.Int("rules_loaded", len(rec.Loaded)),
+		slog.Duration("duration", took),
+	)
 }
 
 // recordResolve persists an audit record of the resolve to the repo's
