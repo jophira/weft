@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/jophira/weft/internal/advice"
 	"github.com/jophira/weft/internal/locate"
 	"github.com/jophira/weft/internal/profile"
 	"github.com/jophira/weft/internal/source"
@@ -102,11 +103,12 @@ func stagedUsesSourcesSnippet(stagedDir string) bool {
 // users who don't use it are never nagged. Best-effort to stderr: the snippet
 // still works today, so this never affects the apply's success.
 func warnSourcesSnippetDeprecated() {
-	fmt.Fprintln(os.Stderr, "⚠ weft: the sources read-map ("+sourcesPlaceholder+") is deprecated;")
-	fmt.Fprintln(os.Stderr, "  the resolver injects rule bodies directly — wire `weft rules resolve`")
-	fmt.Fprintln(os.Stderr, "  into a SessionStart hook and annotate rules with front-matter")
-	fmt.Fprintln(os.Stderr, "  (detect:/extends:). The snippet still works today; it will be removed")
-	fmt.Fprintln(os.Stderr, "  in a future release.")
+	advice.Add(advice.Advice{
+		Code:     advice.CodeSourcesSnippetDeprecated,
+		Severity: advice.Warn,
+		Message:  "the sources read-map (" + sourcesPlaceholder + ") is deprecated and will be removed in a future release",
+		Fix:      "wire 'weft rules resolve' into a SessionStart hook and annotate rules with front-matter (detect:/extends:)",
+	})
 }
 
 // generateSourcesSnippet builds the <!-- weft:sources:begin/end --> block for

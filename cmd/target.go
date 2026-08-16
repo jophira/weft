@@ -157,6 +157,10 @@ func untargetedNames(rows []profile.TargetStatus) []string {
 
 // printDetectHint names the command that would act on the report, shown only
 // when there is something for it to do.
+//
+// This one stays a direct print rather than going on the advice bus. `weft
+// target detect` exists to produce exactly this answer, so throttling it would
+// mean the command sometimes runs and says nothing.
 func printDetectHint(out io.Writer, rows []profile.TargetStatus) {
 	pending := untargetedNames(rows)
 	if len(pending) == 0 {

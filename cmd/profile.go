@@ -18,6 +18,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
+	"github.com/jophira/weft/internal/advice"
 	"github.com/jophira/weft/internal/anchor"
 	"github.com/jophira/weft/internal/collect"
 	"github.com/jophira/weft/internal/config"
@@ -183,6 +184,15 @@ func stageProfile(p *profile.Profile, roots []string, srcs []source.Source, outp
 			slog.Debug("source file not synced — not in a managed directory",
 				"file", rel,
 				"hint", "configure project_dir_names in source structure, or move to a managed dir (commands/, skills/, etc.)")
+			// One hint however many files were skipped: the bus keeps a single
+			// entry per code, and naming the first is enough to find the rest at
+			// debug level.
+			advice.Add(advice.Advice{
+				Code:     advice.CodeSourceNotSynced,
+				Severity: advice.Info,
+				Message:  fmt.Sprintf("source file not projected, it is outside every managed directory: %s", rel),
+				Fix:      "move it under commands/, agents/, skills/, or add its directory to project_dir_names; run with --log-level debug to list them all",
+			})
 		}).
 		MergeRoots(namedRoots(roots, srcs), outputDir)
 	return written, attr, contribs, err
@@ -276,12 +286,21 @@ func fmtBytes(n int) string {
 }
 
 // printQualityReport reads the staged CLAUDE.md, prints a provenance line, and
-// emits any size or duplicate-block warnings. contribs is the per-source byte
+// raises any size or duplicate-block warnings. contribs is the per-source byte
 // count already captured during staging — no second collect walk is needed.
-func printQualityReport(stagedDir string, p *profile.Profile, contribs []sourceContrib) {
+//
+// quiet suppresses the provenance line only. The warnings always run, because
+// an instruction file crossing the size threshold during a watch re-apply is
+// exactly when the user most needs to hear about it, and the advice bus handles
+// the repetition that the quiet flag used to prevent.
+func printQualityReport(stagedDir string, p *profile.Profile, contribs []sourceContrib, quiet bool) {
 	content, err := os.ReadFile(filepath.Join(stagedDir, "CLAUDE.md"))
 	if err != nil {
 		return // no instruction file; nothing to report
+	}
+	checkInstructionQuality(content)
+	if quiet {
+		return
 	}
 
 	if p.Overlay == profile.OverlayMerge && len(contribs) > 1 {
@@ -304,24 +323,70 @@ func printQualityReport(stagedDir string, p *profile.Profile, contribs []sourceC
 			fmt.Printf("  CLAUDE.md: %s\n", fmtBytes(len(content)))
 		}
 	}
+}
 
+// checkInstructionQuality raises the size and duplicate-block hints for the
+// assembled instruction file.
+func checkInstructionQuality(content []byte) {
 	warnKB := viper.GetInt("warn_instruction_size_kb")
 	if warnKB <= 0 {
 		warnKB = validate.DefaultWarnSizeKB
 	}
 	r := validate.Instruction(content, warnKB)
 	if r.SizeWarning {
-		fmt.Printf("  ! CLAUDE.md is %s — long instruction files may reduce model compliance\n", fmtBytes(len(content)))
-		fmt.Printf("    (change threshold: weft config set warn-size <KB>)\n")
+		advice.Add(advice.Advice{
+			Code:     advice.CodeInstructionSize,
+			Severity: advice.Warn,
+			Message: fmt.Sprintf("CLAUDE.md is %s, long instruction files may reduce model compliance",
+				fmtBytes(len(content))),
+			Fix: "raise the threshold with: weft config set warn-size <KB>",
+		})
 	}
-	for _, dupe := range r.DuplicateBlocks {
-		fmt.Printf("  ! duplicate block: %q\n", dupe)
+	// Reported as one hint rather than one per block. The bus keeps a single
+	// entry per code, and a wall of near-identical lines was never the useful
+	// part: the count says how bad it is, the first example says where to look.
+	if n := len(r.DuplicateBlocks); n > 0 {
+		advice.Add(advice.Advice{
+			Code:     advice.CodeDuplicateBlock,
+			Severity: advice.Warn,
+			Message:  fmt.Sprintf("%d duplicate block(s) in CLAUDE.md, first: %q", n, r.DuplicateBlocks[0]),
+			Fix:      "run 'weft profile diff' to see which sources overlap",
+		})
 	}
 }
 
 // mergeAndApply runs the merge+apply pipeline for a resolved profile.
 // quiet suppresses informational output (used during watch re-applies).
+// mergeAndApply times and logs one apply, delegating the work to applyProfile.
+//
+// The wrapper exists so the timing and the outcome are recorded on every return
+// path without applyProfile's dozen returns each having to remember to. Until
+// now an apply left no trace at all, so "why did my rules change at 14:03" had
+// no answer.
 func mergeAndApply(p *profile.Profile, roots []string, srcs []source.Source, cfgDir string, quiet bool) error {
+	started := time.Now()
+	slog.Info("apply.start",
+		slog.String("profile", p.Name),
+		slog.Int("sources", len(roots)),
+		slog.String("overlay", string(p.Overlay)),
+		slog.Bool("quiet", quiet),
+	)
+
+	err := applyProfile(p, roots, srcs, cfgDir, quiet)
+
+	attrs := []any{
+		slog.String("profile", p.Name),
+		slog.Duration("duration", time.Since(started)),
+		slog.Bool("ok", err == nil),
+	}
+	if err != nil {
+		attrs = append(attrs, slog.String("error", err.Error()))
+	}
+	slog.Info("apply.done", attrs...)
+	return err
+}
+
+func applyProfile(p *profile.Profile, roots []string, srcs []source.Source, cfgDir string, quiet bool) error {
 	stagedDir := filepath.Join(cfgDir, "staged", p.Name)
 
 	if !quiet {
@@ -349,24 +414,24 @@ func mergeAndApply(p *profile.Profile, roots []string, srcs []source.Source, cfg
 		return fmt.Errorf("expanding projects placeholder: %w", err)
 	}
 	// The projects-snippet is deprecated in favour of the convention-driven
-	// resolver. Nudge only profiles that actually use it, and only on the initial
-	// apply (quiet is set on watch re-applies) so watch mode doesn't nag.
-	if !quiet && stagedUsesProjectsSnippet(stagedDir) {
+	// resolver. Nudge only profiles that actually use it. No quiet gate: the
+	// advice bus throttles by code, which is what kept watch mode from nagging.
+	if stagedUsesProjectsSnippet(stagedDir) {
 		warnProjectsSnippetDeprecated()
 	}
 	if err := expandSourcesPlaceholder(stagedDir, srcs, p); err != nil {
 		return fmt.Errorf("expanding sources placeholder: %w", err)
 	}
 	// The sources read-map is deprecated in favour of the convention-driven
-	// resolver. Nudge only profiles that actually use it, and only on the initial
-	// apply (quiet is set on watch re-applies) so watch mode doesn't nag.
-	if !quiet && stagedUsesSourcesSnippet(stagedDir) {
+	// resolver. Nudge only profiles that actually use it. No quiet gate, for the
+	// same reason as the projects-snippet above.
+	if stagedUsesSourcesSnippet(stagedDir) {
 		warnSourcesSnippetDeprecated()
 	}
 	if !quiet {
 		fmt.Printf("  %d file(s) merged into staging\n", len(staged))
-		printQualityReport(stagedDir, p, contribs)
 	}
+	printQualityReport(stagedDir, p, contribs, quiet)
 
 	targets := resolveApplyTargets(p, quiet)
 	if len(targets) == 0 {
@@ -389,8 +454,14 @@ func mergeAndApply(p *profile.Profile, roots []string, srcs []source.Source, cfg
 				continue
 			}
 			if wbErr := instructionWriteBack(h, cfgDir, p, srcs); wbErr != nil {
-				fmt.Fprintf(os.Stderr, "[weft] instruction write-back warning: %v\n", wbErr)
-				slog.Warn("instruction write-back warning", slog.String("target", target), slog.Any("error", wbErr))
+				slog.Warn("writeback", slog.String("stage", "instruction"),
+					slog.String("target", target), slog.String("error", wbErr.Error()))
+				advice.Add(advice.Advice{
+					Code:     advice.CodeWriteBackFailed,
+					Severity: advice.Warn,
+					Message:  fmt.Sprintf("instruction write-back to %s did not complete: %v", target, wbErr),
+					Fix:      "run 'weft doctor' to check the source and manifest state",
+				})
 			}
 		}
 	}
@@ -425,9 +496,15 @@ func mergeAndApply(p *profile.Profile, roots []string, srcs []source.Source, cfg
 	}
 	held, conflictCount, cErr := detectApplyConflicts(stagedDir, cfgDir, conflictOut)
 	if cErr != nil {
-		fmt.Fprintf(os.Stderr, "[weft] conflict scan failed: %v\n", cErr)
-		slog.Warn("conflict scan failed", slog.Any("error", cErr))
+		slog.Warn("conflict", slog.String("stage", "scan"), slog.String("error", cErr.Error()))
+		advice.Add(advice.Advice{
+			Code:     advice.CodeConflictScanFailed,
+			Severity: advice.Warn,
+			Message:  fmt.Sprintf("conflict scan did not run: %v", cErr),
+			Fix:      "run 'weft doctor' to check harness manifests",
+		})
 	}
+	slog.Info("conflict", slog.String("stage", "detected"), slog.Int("count", conflictCount))
 	// The status line reads these rather than recomputing them, so they are
 	// recorded on every apply including the watcher's quiet ones (ADR 0004).
 	recordStatusCounts(cfgDir, p.Name, conflictCount)
@@ -442,8 +519,14 @@ func mergeAndApply(p *profile.Profile, roots []string, srcs []source.Source, cfg
 		// target files to their source before overwriting them.
 		if !quiet {
 			if wbErr := startupWriteBack(stagedDir, target, cfgDir, p, srcs, held[target]); wbErr != nil {
-				fmt.Fprintf(os.Stderr, "[weft] startup write-back warning: %v\n", wbErr)
-				slog.Warn("startup write-back warning", slog.String("target", target), slog.Any("error", wbErr))
+				slog.Warn("writeback", slog.String("stage", "startup"),
+					slog.String("target", target), slog.String("error", wbErr.Error()))
+				advice.Add(advice.Advice{
+					Code:     advice.CodeWriteBackFailed,
+					Severity: advice.Warn,
+					Message:  fmt.Sprintf("startup write-back for %s did not complete: %v", target, wbErr),
+					Fix:      "run 'weft doctor' to check the source and manifest state",
+				})
 			}
 		}
 
@@ -496,9 +579,9 @@ func mergeAndApply(p *profile.Profile, roots []string, srcs []source.Source, cfg
 func resolveApplyTargets(p *profile.Profile, quiet bool) []string {
 	configured := p.ResolvedTargets()
 	if len(configured) > 0 {
-		if !quiet {
-			hintUntargetedHarnesses(p)
-		}
+		// No quiet gate: the bus throttles by code, so a watcher re-applying
+		// every few seconds mentions this once a day rather than never.
+		hintUntargetedHarnesses(p)
 		return configured
 	}
 	// Auto-detect: use any installed harness.
@@ -516,15 +599,18 @@ func resolveApplyTargets(p *profile.Profile, quiet bool) []string {
 
 // hintUntargetedHarnesses names harnesses that are installed but absent from the
 // profile's target list. A printed line rather than a prompt: apply also runs
-// under watch, where a question would hang with nobody to answer it. Callers
-// pass quiet on that path, so the hint is confined to an interactive apply.
+// under watch, where a question would hang with nobody to answer it.
 func hintUntargetedHarnesses(p *profile.Profile) {
 	pending := untargetedNames(profile.TargetReport(p, detectHarnesses()))
 	if len(pending) == 0 {
 		return
 	}
-	fmt.Printf("  installed but not targeted: %s\n", strings.Join(pending, ", "))
-	fmt.Println("    run 'weft target detect --add' to target them")
+	advice.Add(advice.Advice{
+		Code:     advice.CodeUntargetedHarness,
+		Severity: advice.Info,
+		Message:  "installed but not targeted: " + strings.Join(pending, ", "),
+		Fix:      "run 'weft target detect --add' to target them",
+	})
 }
 
 // harnessTargetRoot returns the target directory last written by the given
@@ -977,13 +1063,22 @@ func startProfileWatchers(p *profile.Profile, roots []string, srcs []source.Sour
 	// Source watcher: re-apply when source files change.
 	stopSrc, err := watch.Debounced(roots, 300*time.Millisecond, func() {
 		fmt.Printf("\n[weft] source change detected — re-applying...\n")
+		reapplyStart := time.Now()
 		guard.Lock()
 		defer guard.Unlock()
+		// The watcher outlives PersistentPostRun by hours, so it flushes the bus
+		// itself. Without this the throttled hints would queue up and only reach
+		// the terminal when the user finally stopped the watcher.
+		defer advice.Emit(os.Stderr)
 		if applyErr := mergeAndApply(p, roots, srcs, cfgDir, true); applyErr != nil {
 			fmt.Fprintf(os.Stderr, "[weft] error: %v\n", applyErr)
-			slog.Error("re-apply failed", slog.Any("error", applyErr))
+			slog.Error("watch.reapply", slog.String("trigger", "source"),
+				slog.Duration("duration", time.Since(reapplyStart)),
+				slog.Bool("ok", false), slog.String("error", applyErr.Error()))
 			return
 		}
+		slog.Info("watch.reapply", slog.String("trigger", "source"),
+			slog.Duration("duration", time.Since(reapplyStart)), slog.Bool("ok", true))
 		fmt.Printf("[weft] applied at %s\n", time.Now().Format("15:04:05"))
 		// The apply may have projected the first file into a directory that did
 		// not exist when the watchers were built, which leaves that directory
@@ -1378,7 +1473,7 @@ Formats:
 			_ = expandSourcesPlaceholder(tmpDir, srcs, p) // best-effort for inspect
 			fmt.Println()
 			fmt.Println("Quality report:")
-			printQualityReport(tmpDir, p, contribs)
+			printQualityReport(tmpDir, p, contribs, false)
 		}
 
 		return nil

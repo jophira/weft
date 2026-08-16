@@ -117,7 +117,7 @@ func TestDefaultLogPath_usesHomeLocalShare(t *testing.T) {
 func TestRotatingWriter_writesData(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.log")
-	rw, err := newRotatingWriter(path, 1024)
+	rw, err := newRotatingWriter(path, 1024, 1)
 	if err != nil {
 		t.Fatalf("newRotatingWriter: %v", err)
 	}
@@ -141,7 +141,7 @@ func TestRotatingWriter_rotatesWhenFull(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.log")
 	// Cap at 10 bytes so a 12-byte write triggers rotation.
-	rw, err := newRotatingWriter(path, 10)
+	rw, err := newRotatingWriter(path, 10, 1)
 	if err != nil {
 		t.Fatalf("newRotatingWriter: %v", err)
 	}
@@ -184,7 +184,7 @@ func TestRotatingWriter_overwritesOldBackup(t *testing.T) {
 		t.Fatalf("setup: %v", err)
 	}
 
-	rw, err := newRotatingWriter(path, 5)
+	rw, err := newRotatingWriter(path, 5, 1)
 	if err != nil {
 		t.Fatalf("newRotatingWriter: %v", err)
 	}
