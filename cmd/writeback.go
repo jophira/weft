@@ -73,13 +73,30 @@ func writeBackSingleSourceMap(
 // normalizeForSource prepares harness file content for writing back to a source.
 // Generated placeholder expansions are collapsed to their compact placeholder form,
 // and source attribution markers are stripped — both belong only in the assembled
-// harness output, not in source files.
+// harness output, not in source files. The staged-copy generated-file header
+// (#261) is stripped too: it names the source it was generated from and is
+// meaningless once the text it heads is what the source itself now holds.
 func normalizeForSource(content []byte) []byte {
 	s := string(content)
 	s = replaceSourcesBlock(s, sourcesPlaceholder)
 	s = replaceProjectsBlock(s, projectsPlaceholder)
 	s = stripAttributionMarkers(s)
+	s = stripGeneratedNote(s)
 	return []byte(s)
+}
+
+// stripGeneratedNote removes the leading "<!-- weft: generated from source
+// ... -->" line instruction.GeneratedFileNote writes atop a staged copy.
+func stripGeneratedNote(s string) string {
+	lines := strings.Split(s, "\n")
+	out := lines[:0]
+	for _, line := range lines {
+		if strings.HasPrefix(strings.TrimSpace(line), "<!-- weft: generated from source ") {
+			continue
+		}
+		out = append(out, line)
+	}
+	return strings.Join(out, "\n")
 }
 
 // stripAttributionMarkers removes <!-- weft:source:begin ... --> and

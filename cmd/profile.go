@@ -444,16 +444,47 @@ func applyProfile(p *profile.Profile, roots []string, srcs []source.Source, cfgD
 	hReg := harness.NewRegistry(harness.Instances()...)
 	attr := sourceAttribution(rootAttribution, srcs)
 
+	var conflictOut io.Writer
+	if !quiet {
+		conflictOut = os.Stdout
+	}
+
+	// Find every source section two or more Tier B harnesses have both edited
+	// since the last apply, BEFORE the write-back loop below fans the first
+	// edit into the source and the second overwrites it (#257). instrDir still
+	// holds the previous apply's staged copies at this point — stageInstructions
+	// has not run yet — which is the base this comparison needs.
+	instrDir := filepath.Join(cfgDir, "profiles", p.Name, "instructions")
+	instrConflicts, icErr := detectInstructionConflicts(targets, hReg, cfgDir, instrDir)
+	if icErr != nil {
+		slog.Warn("conflict", slog.String("stage", "instructions-scan"), slog.String("error", icErr.Error()))
+		advice.Add(advice.Advice{
+			Code:     advice.CodeConflictScanFailed,
+			Severity: advice.Warn,
+			Message:  fmt.Sprintf("instruction conflict scan did not run: %v", icErr),
+			Fix:      "run 'weft doctor' to check harness manifests",
+		})
+	}
+	if len(instrConflicts) > 0 && conflictOut != nil {
+		now := time.Now()
+		for _, c := range instrConflicts {
+			fmt.Fprint(conflictOut, c.report(now))
+		}
+	}
+	instrHeld := holdInstructions(instrConflicts)
+
 	// Preserve external edits to a Tier B harness's managed instruction block by
 	// writing each source's section back to its source BEFORE re-assembling, so
 	// the regenerated block reflects those edits instead of discarding them.
+	// Sections instrHeld freezes are skipped: both edits stay exactly where the
+	// user left them until `weft resolve` picks a winner.
 	if !quiet {
 		for _, target := range targets {
 			h, ok := hReg.Get(target)
 			if !ok {
 				continue
 			}
-			if wbErr := instructionWriteBack(h, cfgDir, p, srcs); wbErr != nil {
+			if wbErr := instructionWriteBack(h, cfgDir, instrDir, p, srcs, instrHeld.sources); wbErr != nil {
 				slog.Warn("writeback", slog.String("stage", "instruction"),
 					slog.String("target", target), slog.String("error", wbErr.Error()))
 				advice.Add(advice.Advice{
@@ -470,7 +501,6 @@ func applyProfile(p *profile.Profile, roots []string, srcs []source.Source, cfgD
 	// drop the merged CLAUDE.md from the staged tree: the instruction file is now
 	// projected separately per harness tier, while harness Apply copies only the
 	// sidecar assets (commands/, skills/, …).
-	instrDir := filepath.Join(cfgDir, "profiles", p.Name, "instructions")
 	sourceInstrs, err := stageInstructions(roots, srcs, p, instrDir)
 	if err != nil {
 		return fmt.Errorf("staging instructions: %w", err)
@@ -490,10 +520,6 @@ func applyProfile(p *profile.Profile, roots []string, srcs []source.Source, cfgD
 	// before anything is written back or overwritten. Each side is then held: the
 	// write-back leaves it alone and the apply leaves it alone, so the user still
 	// has both versions when they choose one with `weft resolve` (ADR 0004 D5).
-	var conflictOut io.Writer
-	if !quiet {
-		conflictOut = os.Stdout
-	}
 	held, conflictCount, cErr := detectApplyConflicts(stagedDir, cfgDir, conflictOut)
 	if cErr != nil {
 		slog.Warn("conflict", slog.String("stage", "scan"), slog.String("error", cErr.Error()))
@@ -504,6 +530,7 @@ func applyProfile(p *profile.Profile, roots []string, srcs []source.Source, cfgD
 			Fix:      "run 'weft doctor' to check harness manifests",
 		})
 	}
+	conflictCount += len(instrConflicts)
 	slog.Info("conflict", slog.String("stage", "detected"), slog.Int("count", conflictCount))
 	// The status line reads these rather than recomputing them, so they are
 	// recorded on every apply including the watcher's quiet ones (ADR 0004).
@@ -554,8 +581,12 @@ func applyProfile(p *profile.Profile, roots []string, srcs []source.Source, cfgD
 		}
 		// Project the instruction file: a thin import block (Tier A) or inlined
 		// content within managed markers (Tier B), preserving the user's own
-		// content outside the block.
-		if err := harness.ProjectInstruction(h, stagedDir, sourceInstrs, ctx); err != nil {
+		// content outside the block. A held section's content is overridden
+		// with what this harness already has on disk (#257): the source was
+		// left untouched, so the regenerated body would otherwise silently
+		// revert the harness's copy back to the pre-conflict base.
+		projInstrs := overrideHeldSections(sourceInstrs, instrHeld.content[target])
+		if err := harness.ProjectInstruction(h, stagedDir, projInstrs, ctx); err != nil {
 			return fmt.Errorf("projecting instructions to %s: %w", target, err)
 		}
 		// Render the canonical MCP document into the harness's own format. Like
