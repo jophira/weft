@@ -16,6 +16,16 @@ func TestImportBody_ordersAndTemplates(t *testing.T) {
 	}
 }
 
+func TestGeneratedFileNote_isSingleLineAndNamesSource(t *testing.T) {
+	note := GeneratedFileNote("personal")
+	if strings.Contains(note, "\n") {
+		t.Errorf("note must be a single line: %q", note)
+	}
+	if !strings.Contains(note, `"personal"`) {
+		t.Errorf("note must name its source: %q", note)
+	}
+}
+
 func TestInlineBody_wrapsAttributionAndSkipsEmpty(t *testing.T) {
 	body := InlineBody([]SourceContent{
 		{Name: "personal", Content: "p-rules"},
