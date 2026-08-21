@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/jophira/weft/internal/anchor"
 	"github.com/jophira/weft/internal/harness"
 	"github.com/jophira/weft/internal/instruction"
 	"github.com/jophira/weft/internal/locate"
@@ -93,7 +94,7 @@ func instructionWriteBack(h harness.Harness, cfgDir, instrDir string, p *profile
 		if mkErr := os.MkdirAll(filepath.Dir(dst), 0o755); mkErr != nil {
 			return fmt.Errorf("creating source dir for %q: %w", sec.Name, mkErr)
 		}
-		out := normalizeForSource([]byte(sec.Content + "\n"))
+		out := anchor.Collapse(normalizeForSource([]byte(sec.Content+"\n")), anchorsForSource(sec.Name, srcMap))
 		if wErr := os.WriteFile(dst, out, 0o644); wErr != nil { //nolint:gosec // dst derived from registered source root
 			return fmt.Errorf("writing instruction write-back to source %q: %w", sec.Name, wErr)
 		}

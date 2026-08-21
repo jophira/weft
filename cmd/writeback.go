@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/jophira/weft/internal/anchor"
 	"github.com/jophira/weft/internal/manifest"
 	"github.com/jophira/weft/internal/profile"
 	"github.com/jophira/weft/internal/source"
@@ -64,10 +65,28 @@ func writeBackSingleSourceMap(
 	if err := os.MkdirAll(filepath.Dir(srcPath), 0o755); err != nil {
 		return false, fmt.Errorf("creating source dir for %s: %w", c.Rel, err)
 	}
-	if err := os.WriteFile(srcPath, normalizeForSource(content), 0o644); err != nil { //nolint:gosec // srcPath is derived from source root config, not user input
+	out := anchor.Collapse(normalizeForSource(content), anchorsForSource(srcName, srcMap))
+	if err := os.WriteFile(srcPath, out, 0o644); err != nil { //nolint:gosec // srcPath is derived from source root config, not user input
 		return false, fmt.Errorf("writing %s to source %s: %w", c.Rel, srcName, err)
 	}
 	return true, nil
+}
+
+// anchorsForSource builds the Anchors a write-back to srcName's own file
+// should collapse against: srcName's root as {{weft.root}}, every registered
+// source's root for {{weft.source:NAME}}, and the machine-global home/docs
+// anchors — the same targets Expand resolved when the content was projected.
+func anchorsForSource(srcName string, srcMap map[string]source.Source) anchor.Anchors {
+	home, docs := globalAnchors()
+	byName := make(map[string]string, len(srcMap))
+	for name, s := range srcMap {
+		byName[name] = s.Root
+	}
+	root := ""
+	if s, ok := srcMap[srcName]; ok {
+		root = s.Root
+	}
+	return anchor.Anchors{Root: root, Home: home, Docs: docs, ByName: byName}
 }
 
 // normalizeForSource prepares harness file content for writing back to a source.

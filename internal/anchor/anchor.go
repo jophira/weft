@@ -17,6 +17,7 @@ package anchor
 
 import (
 	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -66,6 +67,59 @@ func Expand(content []byte, a Anchors) []byte {
 		}
 		return match // unresolved — leave visible
 	})
+	return []byte(s)
+}
+
+// Collapse reverses Expand against the same Anchors: absolute paths matching
+// an anchor's target are turned back into their token form, so content
+// written back to a source stays machine-independent instead of landing with
+// a hardcoded path where an anchor used to be (#259). A path matching no
+// anchor is left untouched.
+//
+// Anchors can overlap — Docs nested under Home, or one source's root nested
+// under another's — so the longest matching path is collapsed first; a
+// shorter, less specific match processed first would swallow part of a
+// longer one before it ever got a chance to match. Where two anchors resolve
+// to the exact same path (a source registered at {{weft.root}}'s own root),
+// {{weft.root}} wins over naming that source explicitly, since a source
+// should self-reference rather than name itself.
+func Collapse(content []byte, a Anchors) []byte {
+	type candidate struct {
+		path  string
+		token string
+	}
+	var candidates []candidate
+	if a.Root != "" {
+		candidates = append(candidates, candidate{a.Root, RootToken})
+	}
+	if a.Home != "" {
+		candidates = append(candidates, candidate{a.Home, HomeToken})
+	}
+	if a.Docs != "" {
+		candidates = append(candidates, candidate{a.Docs, DocsToken})
+	}
+	names := make([]string, 0, len(a.ByName))
+	for name := range a.ByName {
+		names = append(names, name)
+	}
+	sort.Strings(names) // deterministic order for equal-length ties
+	for _, name := range names {
+		if path := a.ByName[name]; path != "" {
+			candidates = append(candidates, candidate{path, "{{weft.source:" + name + "}}"})
+		}
+	}
+
+	// Longest path first; among equal-length paths, the order built above
+	// (Root, Home, Docs, then names alphabetically) is preserved by a stable
+	// sort, giving Root priority on a same-path collision.
+	sort.SliceStable(candidates, func(i, j int) bool {
+		return len(candidates[i].path) > len(candidates[j].path)
+	})
+
+	s := string(content)
+	for _, c := range candidates {
+		s = strings.ReplaceAll(s, c.path, c.token)
+	}
 	return []byte(s)
 }
 
