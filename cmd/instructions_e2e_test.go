@@ -103,6 +103,46 @@ func TestMergeAndApply_TierA_importBlockAndCopies(t *testing.T) {
 	}
 }
 
+func TestMergeAndApply_TierA_copiesAreReadOnlyWithGeneratedHeader(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	cfgDir := t.TempDir()
+
+	srcs := buildLayeredSources(t)
+	p := &profile.Profile{
+		Name:    "layered",
+		Sources: []string{"personal", "team", "company"},
+		Overlay: profile.OverlayCascade,
+		Targets: []string{"claude-code"},
+	}
+
+	if err := mergeAndApply(p, rootsOf(srcs), srcs, cfgDir, true); err != nil {
+		t.Fatalf("mergeAndApply: %v", err)
+	}
+
+	instrDir := filepath.Join(cfgDir, "profiles", "layered", "instructions")
+	personalCopyPath := filepath.Join(instrDir, "00-personal.md")
+
+	info, err := os.Stat(personalCopyPath)
+	if err != nil {
+		t.Fatalf("stat instruction copy: %v", err)
+	}
+	if info.Mode().Perm()&0o222 != 0 {
+		t.Errorf("instruction copy should be read-only, got mode %v", info.Mode().Perm())
+	}
+
+	content := readFile(t, personalCopyPath)
+	if !strings.HasPrefix(content, `<!-- weft: generated from source "personal"`) {
+		t.Errorf("instruction copy missing generated-file header:\n%s", content)
+	}
+
+	// Re-apply must still rewrite the (now read-only) copies cleanly.
+	if err := mergeAndApply(p, rootsOf(srcs), srcs, cfgDir, true); err != nil {
+		t.Fatalf("re-apply mergeAndApply: %v", err)
+	}
+}
+
 func TestMergeAndApply_TierB_inlineAttributedContent(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

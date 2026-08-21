@@ -8,6 +8,7 @@ import (
 
 	"github.com/jophira/weft/internal/anchor"
 	"github.com/jophira/weft/internal/harness"
+	"github.com/jophira/weft/internal/instruction"
 	"github.com/jophira/weft/internal/profile"
 	"github.com/jophira/weft/internal/source"
 )
@@ -87,10 +88,14 @@ func stageInstructions(roots []string, srcs []source.Source, p *profile.Profile,
 		// resolves to real paths on this machine.
 		home, docs := globalAnchors()
 		content = string(anchor.Expand([]byte(content), anchor.Anchors{Root: s.Root, Home: home, Docs: docs, ByName: byName}))
+		content = instruction.GeneratedFileNote(s.Name) + "\n" + content
 
 		fname := fmt.Sprintf("%02d-%s.md", i, s.Name)
 		path := filepath.Join(instrDir, fname)
-		if err := os.WriteFile(path, []byte(content), 0o644); err != nil { //nolint:gosec // path under weft's own config dir
+		// 0o444: read-only so an editor warns before an accidental edit is
+		// silently lost on the next apply (#261). instrDir was just recreated
+		// above, so there is no pre-existing read-only file to fight here.
+		if err := os.WriteFile(path, []byte(content), 0o444); err != nil { //nolint:gosec // path under weft's own config dir
 			return nil, fmt.Errorf("writing instruction copy %s: %w", fname, err)
 		}
 		out = append(out, harness.SourceInstruction{Name: s.Name, Content: content, CopyPath: path})

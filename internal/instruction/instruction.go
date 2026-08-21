@@ -31,6 +31,14 @@ const (
 	inlineNote = "<!-- weft assembled your sources in priority order; later entries win on conflict -->"
 )
 
+// GeneratedFileNote is the single-line header stageInstructions writes atop
+// each staged per-source instruction copy, naming the source it was generated
+// from. It is model-visible: Tier A imports the file this heads, and Tier B
+// inlines its content, so it stays one line rather than a paragraph.
+func GeneratedFileNote(sourceName string) string {
+	return "<!-- weft: generated from source " + strconv.Quote(sourceName) + "; edit there, not here -->"
+}
+
 // SourceContent pairs a source name with its assembled instruction text, used to
 // build an inline (Tier B) block with per-source attribution.
 type SourceContent struct {
