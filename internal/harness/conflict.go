@@ -174,8 +174,8 @@ func (c Conflict) Harnesses() []string {
 func (c Conflict) Report(now time.Time) string {
 	return fmt.Sprintf("! conflict: %s changed in %s since %s\n  → weft resolve %s --take %s\n",
 		c.Canonical,
-		joinAnd(c.Harnesses()),
-		sinceLabel(c.Since, now),
+		JoinAnd(c.Harnesses()),
+		SinceLabel(c.Since, now),
 		c.Canonical,
 		strings.Join(c.Harnesses(), "|"))
 }
@@ -187,10 +187,10 @@ func FormatConflicts(w io.Writer, conflicts []Conflict, now time.Time) {
 	}
 }
 
-// sinceLabel renders an apply time as a bare clock reading when it happened
+// SinceLabel renders an apply time as a bare clock reading when it happened
 // today and a full date otherwise. "since 14:02" is unambiguous for an apply an
 // hour ago and actively misleading for one last week.
-func sinceLabel(t, now time.Time) string {
+func SinceLabel(t, now time.Time) string {
 	if t.IsZero() {
 		return "the last apply"
 	}
@@ -200,8 +200,8 @@ func sinceLabel(t, now time.Time) string {
 	return t.Format("2006-01-02 15:04")
 }
 
-// joinAnd renders names as prose: "a and b", "a, b and c".
-func joinAnd(names []string) string {
+// JoinAnd renders names as prose: "a and b", "a, b and c".
+func JoinAnd(names []string) string {
 	switch len(names) {
 	case 0:
 		return ""

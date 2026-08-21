@@ -21,7 +21,22 @@ import (
 //
 // It is the cross-harness sync hub: an edit made in one harness lands in the
 // source and is re-projected to every harness on the next apply.
-func instructionWriteBack(h harness.Harness, cfgDir string, p *profile.Profile, srcs []source.Source) error {
+//
+// held names the sources a conflict has frozen (#257): two or more Tier B
+// harnesses diverged on that section since the last apply, so neither edit is
+// pushed to the source until `weft resolve` picks a winner. detectInstruction
+// Conflicts must run before this, on the same targets, or held will always be
+// empty and the second write here silently discards the first.
+//
+// instrDir is the same base detection reads: a harness only pushes a section
+// whose content actually differs from that base. Without this check, a
+// harness whose own copy of an *unrelated* section happens to still equal the
+// base would still get rewritten here (the outer gate below only checks
+// whether the whole block changed *somewhere*), and if another harness had
+// just pushed a genuine edit to that section, this write would silently
+// revert it — the same last-writer-wins failure #257 exists to close, just
+// arrived at through an untouched section instead of a genuinely conflicting one.
+func instructionWriteBack(h harness.Harness, cfgDir, instrDir string, p *profile.Profile, srcs []source.Source, held map[string]bool) error {
 	ic, ok := h.(harness.InstructionConsumer)
 	if !ok {
 		return nil
@@ -59,6 +74,13 @@ func instructionWriteBack(h harness.Harness, cfgDir string, p *profile.Profile, 
 	srcMap := buildSrcMap(srcs)
 	_ = p // reserved for future write_back overrides; sections route by source name today
 	for _, sec := range instruction.ParseInline(body) {
+		if held[sec.Name] {
+			fmt.Printf("[weft] hold instruction write-back for %q — conflict, run weft resolve\n", sec.Name)
+			continue
+		}
+		if !instrSectionChanged(instrDir, sec) {
+			continue // this harness's copy of the section matches the base — not its edit
+		}
 		s, ok := srcMap[sec.Name]
 		if !ok {
 			continue // unknown source — leave the edit in place

@@ -119,7 +119,13 @@ func ProjectInstruction(h Harness, stagedRoot string, sources []SourceInstructio
 		m.Profile = ctx.ProfileName
 	}
 	m.InstructionPath = spec.Path
-	m.InstructionBlock = manifest.HashBytes([]byte(body))
+	// Hash what Extract will read back, not the pre-Upsert body: Upsert adds a
+	// newline before BlockEnd and Extract trims all leading/trailing newlines,
+	// so a body ending in "\n" (e.g. one with an advertised-index tail) would
+	// otherwise hash differently from its own round-trip and register as an
+	// external edit on every apply, never actually resting at "unchanged" (#257).
+	roundTripped, _ := instruction.Extract(updated)
+	m.InstructionBlock = manifest.HashBytes([]byte(roundTripped))
 	return manifest.Save(ctx.CfgDir, m)
 }
 

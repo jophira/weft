@@ -6,7 +6,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jophira/weft/internal/harness"
 	"github.com/jophira/weft/internal/profile"
+	"github.com/jophira/weft/internal/runstate"
 	"github.com/jophira/weft/internal/source"
 )
 
@@ -221,6 +223,201 @@ func TestInstructionWriteBack_TierBEditFlowsToSource(t *testing.T) {
 	}
 	if strings.Contains(personalSrc, "weft:source:begin") {
 		t.Errorf("attribution markers leaked into source:\n%s", personalSrc)
+	}
+}
+
+// twoTierBTargets returns a profile targeting codex and windsurf, both Tier B,
+// for exercising cross-harness instruction conflicts (#257).
+func twoTierBTargets() *profile.Profile {
+	return &profile.Profile{
+		Name:    "layered",
+		Sources: []string{"personal", "team", "company"},
+		Overlay: profile.OverlayCascade,
+		Targets: []string{"codex", "windsurf"},
+	}
+}
+
+func TestInstructionConflict_TwoHarnessesSameSection_HeldNotOverwritten(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	cfgDir := t.TempDir()
+
+	srcs := buildLayeredSources(t)
+	p := twoTierBTargets()
+
+	if err := mergeAndApply(p, rootsOf(srcs), srcs, cfgDir, false); err != nil {
+		t.Fatalf("initial mergeAndApply: %v", err)
+	}
+
+	agentsPath := filepath.Join(home, ".codex", "AGENTS.md")
+	rulesPath := filepath.Join(home, ".codeium", "windsurf", "global_rules.md")
+
+	// Both harnesses edit the *same* source's section, without an apply in between.
+	writeFile(t, agentsPath, strings.Replace(readFile(t, agentsPath), "# personal rules", "# personal rules\nbranch-naming rule", 1))
+	writeFile(t, rulesPath, strings.Replace(readFile(t, rulesPath), "# personal rules", "# personal rules\ntest-naming rule", 1))
+
+	if err := mergeAndApply(p, rootsOf(srcs), srcs, cfgDir, false); err != nil {
+		t.Fatalf("re-apply mergeAndApply: %v", err)
+	}
+
+	// Source must not have been written from either side.
+	personalSrc := readFile(t, filepath.Join(srcs[0].Root, "CLAUDE.md"))
+	if strings.Contains(personalSrc, "branch-naming rule") || strings.Contains(personalSrc, "test-naming rule") {
+		t.Errorf("conflicting edit reached the source — should have been held:\n%s", personalSrc)
+	}
+
+	// Each harness must still hold its own edit, not the other's and not the base.
+	agentsAfter := readFile(t, agentsPath)
+	if !strings.Contains(agentsAfter, "branch-naming rule") {
+		t.Errorf("codex lost its own edit on a held conflict:\n%s", agentsAfter)
+	}
+	if strings.Contains(agentsAfter, "test-naming rule") {
+		t.Errorf("codex was overwritten with windsurf's edit:\n%s", agentsAfter)
+	}
+
+	rulesAfter := readFile(t, rulesPath)
+	if !strings.Contains(rulesAfter, "test-naming rule") {
+		t.Errorf("windsurf lost its own edit on a held conflict:\n%s", rulesAfter)
+	}
+	if strings.Contains(rulesAfter, "branch-naming rule") {
+		t.Errorf("windsurf was overwritten with codex's edit:\n%s", rulesAfter)
+	}
+
+	counts, err := runstate.ReadCounts(cfgDir)
+	if err != nil {
+		t.Fatalf("reading status counts: %v", err)
+	}
+	if counts.Conflicts < 1 {
+		t.Errorf("expected the instruction conflict to be counted, got %d", counts.Conflicts)
+	}
+}
+
+func TestInstructionConflict_OneDivergedHarness_IsOrdinaryWriteBack(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	cfgDir := t.TempDir()
+
+	srcs := buildLayeredSources(t)
+	p := twoTierBTargets()
+
+	if err := mergeAndApply(p, rootsOf(srcs), srcs, cfgDir, false); err != nil {
+		t.Fatalf("initial mergeAndApply: %v", err)
+	}
+
+	agentsPath := filepath.Join(home, ".codex", "AGENTS.md")
+	writeFile(t, agentsPath, strings.Replace(readFile(t, agentsPath), "# personal rules", "# EDITED personal rules", 1))
+
+	if err := mergeAndApply(p, rootsOf(srcs), srcs, cfgDir, false); err != nil {
+		t.Fatalf("re-apply mergeAndApply: %v", err)
+	}
+
+	personalSrc := readFile(t, filepath.Join(srcs[0].Root, "CLAUDE.md"))
+	if !strings.Contains(personalSrc, "# EDITED personal rules") {
+		t.Errorf("single diverged harness should still write back to the source:\n%s", personalSrc)
+	}
+
+	counts, err := runstate.ReadCounts(cfgDir)
+	if err != nil {
+		t.Fatalf("reading status counts: %v", err)
+	}
+	if counts.Conflicts != 0 {
+		t.Errorf("one diverged harness must not be reported as a conflict, got %d", counts.Conflicts)
+	}
+}
+
+func TestInstructionConflict_DifferentSections_BothWriteBackCleanly(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	cfgDir := t.TempDir()
+
+	srcs := buildLayeredSources(t)
+	p := twoTierBTargets()
+
+	if err := mergeAndApply(p, rootsOf(srcs), srcs, cfgDir, false); err != nil {
+		t.Fatalf("initial mergeAndApply: %v", err)
+	}
+
+	agentsPath := filepath.Join(home, ".codex", "AGENTS.md")
+	rulesPath := filepath.Join(home, ".codeium", "windsurf", "global_rules.md")
+
+	// codex edits "personal", windsurf edits "company" — different sections.
+	writeFile(t, agentsPath, strings.Replace(readFile(t, agentsPath), "# personal rules", "# EDITED personal rules", 1))
+	writeFile(t, rulesPath, strings.Replace(readFile(t, rulesPath), "# company rules", "# EDITED company rules", 1))
+
+	if err := mergeAndApply(p, rootsOf(srcs), srcs, cfgDir, false); err != nil {
+		t.Fatalf("re-apply mergeAndApply: %v", err)
+	}
+
+	personalSrc := readFile(t, filepath.Join(srcs[0].Root, "CLAUDE.md"))
+	if !strings.Contains(personalSrc, "# EDITED personal rules") {
+		t.Errorf("personal edit did not reach its source:\n%s", personalSrc)
+	}
+	companySrc := readFile(t, filepath.Join(srcs[2].Root, "CLAUDE.md"))
+	if !strings.Contains(companySrc, "# EDITED company rules") {
+		t.Errorf("company edit did not reach its source:\n%s", companySrc)
+	}
+
+	counts, err := runstate.ReadCounts(cfgDir)
+	if err != nil {
+		t.Fatalf("reading status counts: %v", err)
+	}
+	if counts.Conflicts != 0 {
+		t.Errorf("edits to different sections must not be reported as a conflict, got %d", counts.Conflicts)
+	}
+}
+
+// TestInstructionConflict_WriteBackWithoutHeldLosesAnEdit pins why the
+// ordering constraint in cmd/profile.go exists: instructionWriteBack must be
+// called with the held set detectInstructionConflicts computed, or the loop
+// reproduces the exact last-writer-wins bug #257 fixes — the second harness
+// visited silently overwrites the first harness's edit in the source, and
+// nothing is reported. If cmd/profile.go is ever reordered so instrHeld is
+// computed too late (or not threaded into instructionWriteBack), the full
+// mergeAndApply integration test above
+// (TestInstructionConflict_TwoHarnessesSameSection_HeldNotOverwritten) starts
+// failing for the same reason demonstrated here in isolation.
+func TestInstructionConflict_WriteBackWithoutHeldLosesAnEdit(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	cfgDir := t.TempDir()
+
+	srcs := buildLayeredSources(t)
+	p := twoTierBTargets()
+
+	if err := mergeAndApply(p, rootsOf(srcs), srcs, cfgDir, false); err != nil {
+		t.Fatalf("initial mergeAndApply: %v", err)
+	}
+
+	agentsPath := filepath.Join(home, ".codex", "AGENTS.md")
+	rulesPath := filepath.Join(home, ".codeium", "windsurf", "global_rules.md")
+	writeFile(t, agentsPath, strings.Replace(readFile(t, agentsPath), "# personal rules", "# personal rules\nbranch-naming rule", 1))
+	writeFile(t, rulesPath, strings.Replace(readFile(t, rulesPath), "# personal rules", "# personal rules\ntest-naming rule", 1))
+
+	instrDir := filepath.Join(cfgDir, "profiles", p.Name, "instructions")
+	hReg := harness.NewRegistry(harness.Instances()...)
+
+	// held=nil simulates write-back running without detection's result — the
+	// bug this issue fixes.
+	for _, target := range p.Targets {
+		h, ok := hReg.Get(target)
+		if !ok {
+			t.Fatalf("harness %q not registered", target)
+		}
+		if err := instructionWriteBack(h, cfgDir, instrDir, p, srcs, nil); err != nil {
+			t.Fatalf("instructionWriteBack(%s): %v", target, err)
+		}
+	}
+
+	personalSrc := readFile(t, filepath.Join(srcs[0].Root, "CLAUDE.md"))
+	gotBranch := strings.Contains(personalSrc, "branch-naming rule")
+	gotTest := strings.Contains(personalSrc, "test-naming rule")
+	if gotBranch == gotTest {
+		t.Fatalf("expected exactly one edit to survive without held (last-writer-wins), got branch=%v test=%v:\n%s",
+			gotBranch, gotTest, personalSrc)
 	}
 }
 
