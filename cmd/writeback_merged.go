@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/jophira/weft/internal/anchor"
 	"github.com/jophira/weft/internal/manifest"
 	"github.com/jophira/weft/internal/merge"
 	"github.com/jophira/weft/internal/profile"
@@ -107,19 +108,23 @@ func writeBackMergedSourceMap(
 			newContent += "\n"
 		}
 
-		if newContent == string(original) {
-			continue
-		}
-
 		s, ok := srcMap[name]
 		if !ok {
 			continue
 		}
+		// Collapse per destination, not on the shared edited/baseline blob
+		// above: {{weft.root}} means a different path for each contributing
+		// source, so it can only be resolved once lines are attributed (#259).
+		collapsed := string(anchor.Collapse([]byte(newContent), anchorsForSource(name, srcMap)))
+		if collapsed == string(original) {
+			continue
+		}
+
 		dst := filepath.Join(s.Root, c.Rel)
 		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 			return false, fmt.Errorf("creating dir for %s: %w", dst, err)
 		}
-		if err := os.WriteFile(dst, []byte(newContent), 0o644); err != nil { //nolint:gosec // dst derived from source root config, not user input
+		if err := os.WriteFile(dst, []byte(collapsed), 0o644); err != nil { //nolint:gosec // dst derived from source root config, not user input
 			return false, fmt.Errorf("writing %s to source %s: %w", c.Rel, name, err)
 		}
 		performed = true
@@ -151,7 +156,7 @@ func writeBackCascadeWinner(
 	if err != nil {
 		return false, fmt.Errorf("reading target %s: %w", c.Rel, err)
 	}
-	edited := normalizeForSource(editedRaw)
+	edited := anchor.Collapse(normalizeForSource(editedRaw), anchorsForSource(winnerName, srcMap))
 
 	winner := srcMap[winnerName]
 	dst := filepath.Join(winner.Root, c.Rel)
