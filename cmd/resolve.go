@@ -19,10 +19,11 @@ import (
 var (
 	resolveTake   string
 	resolveMerged string
+	resolveYes    bool
 )
 
 var resolveCmd = &cobra.Command{
-	Use:   "resolve <target-path> | <path> --take <harness>",
+	Use:   "resolve [<target-path> | <path> --take <harness>]",
 	Short: "Reverse-lookup a target file's source, or settle a conflict between harnesses",
 	Long: `Without --take, resolve a target file path back to the weft source(s) that
 produced it. Useful for debugging or scripting when you want to know which
@@ -48,9 +49,25 @@ them is ever deleted.
 side, and opens the result in $EDITOR. Review is not optional and not skippable
 when the merge comes out clean: a clean merge is where two rules that
 contradict each other slip past unnoticed. Merge therefore needs a terminal;
---take <harness> stays fully non-interactive for scripts.`,
-	Args: cobra.ExactArgs(1),
+--take <harness> stays fully non-interactive for scripts.
+
+With no arguments and a terminal, resolve walks every held conflict and offers
+the same choices one at a time. With --yes, or with stdin redirected, it reports
+what is held and exits non-zero instead of asking.`,
+	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if len(args) == 0 {
+			// A flag with nothing to apply it to is a mistyped command, not a
+			// request to walk everything. Dropping into the interactive loop here
+			// would answer a question the user did not ask.
+			if resolveTake != "" || resolveMerged != "" {
+				return fmt.Errorf(
+					"--take and --merged settle one named conflict, so they need the path from the conflict " +
+						"report (e.g. 'weft resolve commands/review.md --take codex'); " +
+						"run 'weft resolve' with no flags to walk every held conflict")
+			}
+			return runResolveWalk(cmd.InOrStdin(), cmd.OutOrStdout())
+		}
 		if resolveTake != "" || resolveMerged != "" {
 			return runResolveConflict(cmd.OutOrStdout(), args[0], resolveTake, resolveMerged)
 		}
@@ -242,6 +259,28 @@ func runResolveConflict(out io.Writer, label, take, mergedPath string) error {
 	return settleHeld(out, h, take, nil)
 }
 
+// runResolveWalk is `weft resolve` with nothing named: the interactive loop when
+// a human is there to answer, a report and a non-zero exit when nobody is.
+func runResolveWalk(in io.Reader, out io.Writer) error {
+	cfgDir, profileName, err := resolveContext()
+	if err != nil {
+		return err
+	}
+	held, err := collectHeldConflicts(cfgDir, profileName)
+	if err != nil {
+		return err
+	}
+	if len(held) == 0 {
+		fmt.Fprintln(out, "✓ no conflicts held")
+		return nil
+	}
+	if resolveYes || !isInteractiveTTY() {
+		reportHeld(out, held, time.Now())
+		return errConflictsHeld
+	}
+	return resolveLoop(in, out, cfgDir, profileName, held)
+}
+
 // resolveContext resolves the two things every settlement needs, with the same
 // message whichever entry point asked.
 func resolveContext() (cfgDir, profileName string, err error) {
@@ -272,5 +311,7 @@ func init() {
 		"settle a held conflict by taking this harness's copy, or \"merge\" to combine every side and review the result")
 	resolveCmd.Flags().StringVar(&resolveMerged, "merged", "",
 		"apply an already-reviewed merge from this file (printed by --take merge when $EDITOR is unset)")
+	resolveCmd.Flags().BoolVar(&resolveYes, "yes", false,
+		"never prompt: report what is held and exit non-zero")
 	rootCmd.AddCommand(resolveCmd)
 }

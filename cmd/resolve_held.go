@@ -230,3 +230,13 @@ func settleHeld(out io.Writer, h heldConflict, take string, merged []byte) error
 	}
 	return nil
 }
+
+// reportHeld prints every held conflict in the report format the apply uses, so
+// a non-interactive run says the same thing twice rather than two things once.
+func reportHeld(out io.Writer, held []heldConflict, now time.Time) {
+	for _, h := range held {
+		fmt.Fprintf(out, "! conflict: %s changed in %s since %s\n  → weft resolve %s --take %s\n",
+			h.Label, harness.JoinAnd(h.Harnesses), harness.SinceLabel(h.Since, now),
+			h.Label, strings.Join(h.Harnesses, "|"))
+	}
+}
