@@ -459,6 +459,31 @@ Markers never reach a harness. These files are live model input, so a `<<<<<<<` 
 work file under `~/.config/weft/merge/` only, and a saved merge that still carries markers
 is refused.
 
+### Walking every conflict
+
+`weft resolve` with no arguments walks the held conflicts one at a time:
+
+```
+! conflict 1/2: instructions:pers-tech
+    changed in codex and windsurf since 14:02
+
+  [m] merge both, and review in $EDITOR
+  [c] take codex
+  [w] take windsurf
+  [d] show the diff
+  [s] skip
+  [q] quit
+```
+
+Letters bind to harness names, since the set of harnesses varies. Each choice does exactly
+what the equivalent flag does. Skipping leaves that conflict held and moves on, so you can
+settle two now and one tomorrow; quitting leaves the remainder held.
+
+Interactive is sugar on top of the flags. The loop is what you get when stdin is a terminal
+and no `--take` was given. With `--yes`, or with stdin redirected, weft reports what is held
+and exits non-zero rather than asking, because apply also runs under the watcher, where a
+question would hang with nobody to answer it.
+
 ### What is covered
 
 Conflict detection covers `commands`, `agents` and `skills` as whole files, and Tier B
@@ -511,6 +536,7 @@ every harness can show.
 | `resolve <target-path>` | Reverse-lookup the source(s) that produced a file written to a harness |
 | `resolve <path> --take <harness>` | Settle a held conflict by taking one harness's copy; backs the losing copies up first and updates the owning source |
 | `resolve <path> --take merge` | Merge every diverged copy and open the result in `$EDITOR`; the saved file is the resolution, and quitting without saving leaves the conflict held |
+| `resolve` | Walk every held conflict interactively; `--yes` or a non-terminal reports and exits non-zero instead |
 | `status [--short]` | Show active profile and per-harness projection state (instruction path, block drift), plus the cached adoptable and conflict counts |
 | `autostart enable/disable/status` | Opt in to running the watcher at login (systemd user unit, LaunchAgent, or Task Scheduler); `--profile` pins a profile, `--linger` keeps it alive without a login session |
 | `doctor` | Health check — discovered harnesses, config issues, path-reference lint, and rule-annotation health (missing front-matter, duplicate labels, dangling extends, with suggested fixes); `--fix` heals stale/hardcoded paths to `{{weft.root}}` anchors, `--all` also lists external/dead refs |
