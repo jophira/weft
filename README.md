@@ -426,12 +426,53 @@ The losing copies are backed up under `~/.config/weft/backups/resolve/<timestamp
 they are rewritten, and the owning source is updated so the next apply keeps the decision
 instead of undoing it. Nothing is deleted.
 
-There is no `--take merge`. Weft has no merge algorithm for harness files, so combining two
-versions is a job for you and your editor.
+### Merging instead of choosing
 
-Conflict detection covers `commands`, `agents` and `skills`. The path you pass is the one
-printed in the report, relative to the staged tree, which is the one name that means the
-same thing in every harness.
+`--take` settles a conflict by discarding one side. Most of the time nothing needed
+discarding, because the two edits were in different places. `--take merge` keeps both:
+
+```bash
+weft resolve commands/review.md --take merge
+```
+
+Weft merges every diverged copy against what it last wrote, then opens the result in
+`$EDITOR`. The saved file is the resolution. Nothing reaches a source or a harness until
+the editor closes, and quitting without saving leaves the conflict held.
+
+The review is not skippable, and least skippable when the merge comes out clean. Two
+harnesses can each add a rule, in different places, that contradict each other. The text
+merges without a marker, weft reports nothing, and the model reads both on the next turn.
+A merge with markers already has your attention; a clean one is the one that slips past.
+
+That makes merging interactive by definition. `--take merge` without a terminal fails and
+tells you why, while `--take <harness>` stays fully non-interactive for scripts. If
+`$EDITOR` is unset, weft writes the merge, prints its path, and prints the
+`weft resolve ... --merged <file>` command that applies it once you have read it.
+
+A review can sit open, or sit on disk, for as long as you like, so weft re-checks the
+conflict before applying one. If a harness has written to the same file in the meantime,
+the resolution is refused rather than applied over that edit, and your review is kept where
+it is so you can merge again against what is there now.
+
+Markers never reach a harness. These files are live model input, so a `<<<<<<<` block in
+`~/.codex/AGENTS.md` is read as instructions on the next turn. Conflicted text goes to a
+work file under `~/.config/weft/merge/` only, and a saved merge that still carries markers
+is refused.
+
+### What is covered
+
+Conflict detection covers `commands`, `agents` and `skills` as whole files, and Tier B
+instruction blocks per source section, named `instructions:<source>`:
+
+```
+! conflict: instructions (pers-tech) changed in codex and windsurf since 09:12
+  → weft resolve instructions:pers-tech --take codex|windsurf
+```
+
+Sections are the unit rather than the whole block, so two harnesses editing different
+sources in the same window do not collide. For files, the path you pass is the one printed
+in the report, relative to the staged tree, which is the one name that means the same thing
+in every harness.
 
 ## Status line
 
@@ -469,6 +510,7 @@ every harness can show.
 | `hook add/list/run/remove` | Manage lifecycle hooks |
 | `resolve <target-path>` | Reverse-lookup the source(s) that produced a file written to a harness |
 | `resolve <path> --take <harness>` | Settle a held conflict by taking one harness's copy; backs the losing copies up first and updates the owning source |
+| `resolve <path> --take merge` | Merge every diverged copy and open the result in `$EDITOR`; the saved file is the resolution, and quitting without saving leaves the conflict held |
 | `status [--short]` | Show active profile and per-harness projection state (instruction path, block drift), plus the cached adoptable and conflict counts |
 | `autostart enable/disable/status` | Opt in to running the watcher at login (systemd user unit, LaunchAgent, or Task Scheduler); `--profile` pins a profile, `--linger` keeps it alive without a login session |
 | `doctor` | Health check — discovered harnesses, config issues, path-reference lint, and rule-annotation health (missing front-matter, duplicate labels, dangling extends, with suggested fixes); `--fix` heals stale/hardcoded paths to `{{weft.root}}` anchors, `--all` also lists external/dead refs |

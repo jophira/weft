@@ -153,3 +153,40 @@ func TestParseInline_noMarkersYieldsNothing(t *testing.T) {
 		t.Errorf("expected no sections, got %+v", got)
 	}
 }
+
+func TestReplaceSection_swapsOneSectionAndLeavesTheRest(t *testing.T) {
+	body := InlineBody([]SourceContent{
+		{Name: "pers", Content: "pers rules"},
+		{Name: "work", Content: "work rules"},
+	})
+	body += "\n<!-- an advertised-index tail -->"
+
+	got, ok := ReplaceSection(body, "pers", "resolved pers rules")
+	if !ok {
+		t.Fatal("ReplaceSection did not find the section")
+	}
+	if !strings.Contains(got, "resolved pers rules") || strings.Contains(got, "\npers rules\n") {
+		t.Errorf("section not replaced:\n%s", got)
+	}
+	for _, want := range []string{"work rules", "an advertised-index tail"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("ReplaceSection dropped %q:\n%s", want, got)
+		}
+	}
+	// The round trip still splits back into the same two sources.
+	secs := ParseInline(got)
+	if len(secs) != 2 || secs[0].Content != "resolved pers rules" || secs[1].Content != "work rules" {
+		t.Errorf("ParseInline after replace = %+v", secs)
+	}
+}
+
+func TestReplaceSection_unknownSectionIsLeftAlone(t *testing.T) {
+	body := InlineBody([]SourceContent{{Name: "pers", Content: "pers rules"}})
+	got, ok := ReplaceSection(body, "missing", "x")
+	if ok {
+		t.Error("ReplaceSection claimed to replace a section that is not there")
+	}
+	if got != body {
+		t.Errorf("body changed: %q", got)
+	}
+}
