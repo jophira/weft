@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jophira/weft/internal/manifest"
+	"github.com/jophira/weft/internal/merge"
 )
 
 // Conflict detection is the guard on fan-in.
@@ -227,13 +228,34 @@ func HeldPaths(conflicts []Conflict) map[string]map[string]bool {
 	return held
 }
 
-// ErrTakeMerge is returned when the user asks for a three-way merge. ADR 0004
-// specifies no merge algorithm, and inventing one here would mean guessing at
-// how two prose files combine — the guess would be wrong silently, which is the
-// failure conflict detection exists to prevent.
+// ErrTakeMerge is returned when a merge reaches this layer without having been
+// reviewed. Resolve settles conflicts; it does not merge, because the dangerous
+// merge is the *clean* one — two harnesses each adding a rule that contradicts
+// the other, combined without a marker and read by the model on the next turn.
+// The caller runs the merge past a human and passes the reviewed text as
+// Merged (#258).
 var ErrTakeMerge = fmt.Errorf(
-	"--take merge is not implemented: weft has no merge algorithm for harness files, " +
-		"so it would have to guess; pick a side, or merge the two files by hand and re-apply")
+	"--take merge must be reviewed before it is written: run 'weft resolve' interactively, " +
+		"or pick a side with --take <harness>")
+
+// mergeWinnerName is what a merged resolution reports in place of a harness
+// name. No harness won: the text came from all of them.
+const mergeWinnerName = "merge"
+
+// ErrConflictMarkers refuses to write text still carrying merge markers.
+//
+// This is the hazard git does not have. A harness instruction file is live
+// model input, so a "<<<<<<<" block left in ~/.codex/AGENTS.md is read as
+// instructions on the next turn. A conflicted file in a git working tree is
+// inert until you build; here it is not.
+var ErrConflictMarkers = fmt.Errorf(
+	"the merged text still contains conflict markers — resolve them in the editor before saving; " +
+		"nothing was written")
+
+// MergedMarkers reports whether content still carries merge markers.
+func MergedMarkers(content []byte) bool {
+	return merge.HasConflictMarkers(string(content))
+}
 
 // ResolveRequest names the winning side of one conflict.
 type ResolveRequest struct {
@@ -245,6 +267,10 @@ type ResolveRequest struct {
 	// which case only the harness copies are reconciled.
 	SourcePath string
 	CfgDir     string
+	// Merged is the reviewed result of a three-way merge. When set it replaces
+	// every diverged copy rather than one side winning, so no harness keeps a
+	// version the user did not approve, and Take is ignored.
+	Merged []byte
 }
 
 // ResolveResult records what Resolve did, for the caller to report.
@@ -263,25 +289,38 @@ type ResolveResult struct {
 // other side's text, and a resolution they regret an hour later has to be
 // recoverable.
 func Resolve(req ResolveRequest) (ResolveResult, error) {
-	if strings.EqualFold(strings.TrimSpace(req.Take), "merge") {
-		return ResolveResult{}, ErrTakeMerge
-	}
-	winner, ok := pickWinner(req.Conflict, req.Take)
-	if !ok {
-		return ResolveResult{}, fmt.Errorf(
-			"%q is not one of the harnesses that changed %s — pick one of %s",
-			req.Take, req.Conflict.Canonical, strings.Join(req.Conflict.Harnesses(), ", "))
+	var content []byte
+	var winnerName string
+	// A merge has no winner: every copy is replaced by text none of them held,
+	// so every copy is also backed up. Taking a side leaves the winner alone.
+	keep := ""
+
+	if req.Merged != nil {
+		if MergedMarkers(req.Merged) {
+			return ResolveResult{}, ErrConflictMarkers
+		}
+		content, winnerName = req.Merged, mergeWinnerName
+	} else {
+		if strings.EqualFold(strings.TrimSpace(req.Take), mergeWinnerName) {
+			return ResolveResult{}, ErrTakeMerge
+		}
+		winner, ok := pickWinner(req.Conflict, req.Take)
+		if !ok {
+			return ResolveResult{}, fmt.Errorf(
+				"%q is not one of the harnesses that changed %s — pick one of %s",
+				req.Take, req.Conflict.Canonical, strings.Join(req.Conflict.Harnesses(), ", "))
+		}
+		data, err := os.ReadFile(winner.Abs) //nolint:gosec // Abs was resolved from a harness root during detection
+		if err != nil {
+			return ResolveResult{}, fmt.Errorf("reading the %s copy of %s: %w", winner.Harness, req.Conflict.Canonical, err)
+		}
+		content, winnerName, keep = data, winner.Harness, winner.Harness
 	}
 
-	content, err := os.ReadFile(winner.Abs) //nolint:gosec // Abs was resolved from a harness root during detection
-	if err != nil {
-		return ResolveResult{}, fmt.Errorf("reading the %s copy of %s: %w", winner.Harness, req.Conflict.Canonical, err)
-	}
-
-	losers := make([]Divergence, 0, len(req.Conflict.Diverged)-1)
-	backups := make([]conflictFile, 0, len(req.Conflict.Diverged)-1)
+	losers := make([]Divergence, 0, len(req.Conflict.Diverged))
+	backups := make([]conflictFile, 0, len(req.Conflict.Diverged))
 	for _, d := range req.Conflict.Diverged {
-		if d.Harness == winner.Harness {
+		if keep != "" && d.Harness == keep {
 			continue
 		}
 		losers = append(losers, d)
@@ -327,7 +366,7 @@ func Resolve(req ResolveRequest) (ResolveResult, error) {
 	}
 
 	return ResolveResult{
-		Winner:     winner.Harness,
+		Winner:     winnerName,
 		Rewritten:  losers,
 		BackupDir:  backupDir,
 		SourcePath: req.SourcePath,

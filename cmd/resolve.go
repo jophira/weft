@@ -6,17 +6,20 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
-	"github.com/jophira/weft/internal/harness"
 	"github.com/jophira/weft/internal/locate"
 	"github.com/jophira/weft/internal/manifest"
 	"github.com/jophira/weft/internal/profile"
 	"github.com/jophira/weft/internal/source"
 )
 
-var resolveTake string
+var (
+	resolveTake   string
+	resolveMerged string
+)
 
 var resolveCmd = &cobra.Command{
 	Use:   "resolve <target-path> | <path> --take <harness>",
@@ -28,21 +31,28 @@ source owns a file written to a harness config directory (e.g. ~/.claude/).
   weft resolve ~/.claude/CLAUDE.md
   weft resolve ~/.claude/commands/deploy.md
 
-With --take, settle a conflict weft is holding. A conflict is a file two or
-more harnesses have both changed since the last apply. Weft refuses to write
-either side back on its own, because whichever it wrote last would erase the
-other. Name the harness whose copy wins and weft brings the rest into line:
+With --take, settle a conflict weft is holding. A conflict is a file, or one
+source's instruction section, that two or more harnesses have both changed
+since the last apply. Weft refuses to write either side back on its own,
+because whichever it wrote last would erase the other. Name the harness whose
+copy wins and weft brings the rest into line:
 
   weft resolve commands/review.md --take claude-code
+  weft resolve instructions:pers-tech --take codex
 
 The path is the one printed in the conflict report, relative to the staged
 tree. The losing copies are backed up before they are rewritten, and none of
-them is ever deleted. There is no --take merge: weft has no merge algorithm for
-harness files, so combining two versions is a job for you and your editor.`,
+them is ever deleted.
+
+--take merge takes the changes from every harness instead of discarding one
+side, and opens the result in $EDITOR. Review is not optional and not skippable
+when the merge comes out clean: a clean merge is where two rules that
+contradict each other slip past unnoticed. Merge therefore needs a terminal;
+--take <harness> stays fully non-interactive for scripts.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if resolveTake != "" {
-			return runResolveConflict(cmd.OutOrStdout(), args[0], resolveTake)
+		if resolveTake != "" || resolveMerged != "" {
+			return runResolveConflict(cmd.OutOrStdout(), args[0], resolveTake, resolveMerged)
 		}
 		targetPath, err := expandAndAbs(args[0])
 		if err != nil {
@@ -177,83 +187,73 @@ func findSingleSource(_, profileName, rel string) (name, absPath string, err err
 	return "", "", nil
 }
 
-// runResolveConflict settles one held conflict by taking the named harness's
-// copy.
-//
-// The conflict is re-detected here rather than read from a stored record: the
-// user may have edited a third harness, or fixed the divergence by hand, since
-// the report was printed. Acting on a stale record would rewrite files over a
-// disagreement that no longer exists.
-func runResolveConflict(out io.Writer, canonical, take string) error {
-	cfgDir := configDir()
-	if cfgDir == "" {
-		return fmt.Errorf("resolving config directory")
+// runResolveConflict settles one named conflict: by taking one harness's copy,
+// or by merging every side and applying what the user saved in the editor.
+func runResolveConflict(out io.Writer, label, take, mergedPath string) error {
+	cfgDir, profileName, err := resolveContext()
+	if err != nil {
+		return err
 	}
-	profileName := activeProfileName()
-	if profileName == "" {
-		return fmt.Errorf("no active profile — run 'weft profile use <name>' first")
+	held, err := collectHeldConflicts(cfgDir, profileName)
+	if err != nil {
+		return err
 	}
-	// resolveProfileRoots is what expands each source root; a raw registry read
-	// hands back the stored "~/..." form, which no filesystem lookup will match.
-	p, _, srcs, err := resolveProfileRoots(profileName)
+	h, err := findHeld(held, label)
 	if err != nil {
 		return err
 	}
 
-	targets, err := conflictTargets(cfgDir)
-	if err != nil {
-		return err
-	}
-	conflicts, err := harness.DetectConflicts(filepath.Join(cfgDir, "staged", profileName), targets)
-	if err != nil {
-		return err
-	}
-	want := filepath.ToSlash(filepath.Clean(canonical))
-	var conflict harness.Conflict
-	found := false
-	for _, c := range conflicts {
-		if c.Canonical == want {
-			conflict, found = c, true
-			break
+	// --merged finishes a review that started earlier: mergeAndReview writes the
+	// work file and prints this command when there is no $EDITOR to open.
+	if mergedPath != "" {
+		path, pErr := expandAndAbs(mergedPath)
+		if pErr != nil {
+			return fmt.Errorf("resolving path: %w", pErr)
 		}
-	}
-	if !found {
-		return noSuchConflict(want, conflicts)
+		data, rErr := os.ReadFile(path) //nolint:gosec // a path the user named on the command line
+		if rErr != nil {
+			return fmt.Errorf("reading the reviewed merge: %w", rErr)
+		}
+		// The conflict h describes was detected a moment ago; the reviewed file may
+		// have been merged out of something older. Its stamp is what says which.
+		if from, stamped := mergeFingerprint(string(data)); stamped && from != h.fingerprint() {
+			return fmt.Errorf(
+				"%s has changed since that merge was prepared, so applying it would discard the newer "+
+					"edit; re-run 'weft resolve %s --take merge' to merge against what is there now",
+				h.Label, h.Label)
+		}
+		reviewed := strings.TrimLeft(stripMergeHeader(string(data)), "\n")
+		return settleHeld(out, h, mergeWinner, []byte(reviewed))
 	}
 
-	srcPath, srcName := resolveConflictSource(conflict.Canonical, p, srcs)
-	res, err := harness.Resolve(harness.ResolveRequest{
-		Conflict: conflict, Take: take, SourcePath: srcPath, CfgDir: cfgDir,
-	})
-	if err != nil {
-		return err
+	if strings.EqualFold(strings.TrimSpace(take), mergeWinner) {
+		if !isInteractiveTTY() {
+			return errMergeNeedsTTY
+		}
+		merged, mErr := mergeAndReview(out, cfgDir, h, time.Now())
+		if mErr != nil {
+			return mErr
+		}
+		if cErr := confirmUnchanged(cfgDir, profileName, h); cErr != nil {
+			return fmt.Errorf("%w (your review is kept at %s)", cErr, locate.Tilde(mergeWorkFile(cfgDir, h.Label)))
+		}
+		return settleHeld(out, h, mergeWinner, merged)
 	}
-
-	fmt.Fprintf(out, "✓ %s resolved — took the %s copy\n", conflict.Canonical, res.Winner)
-	for _, d := range res.Rewritten {
-		fmt.Fprintf(out, "  ✓ %s ← %s\n", d.Harness, res.Winner)
-	}
-	fmt.Fprintf(out, "  previous copies kept in %s\n", locate.Tilde(res.BackupDir))
-	if srcName != "" {
-		fmt.Fprintf(out, "  source %q updated (%s)\n", srcName, locate.Tilde(srcPath))
-	} else {
-		fmt.Fprintln(out, "  no owning source found — the harness copies agree, but the next apply will "+
-			"restore what the source holds; set write_back.default in your profile")
-	}
-	return nil
+	return settleHeld(out, h, take, nil)
 }
 
-// noSuchConflict explains an unmatched path, listing what is actually held so
-// the user can correct a typo without re-running the apply.
-func noSuchConflict(want string, conflicts []harness.Conflict) error {
-	if len(conflicts) == 0 {
-		return fmt.Errorf("no conflicts to resolve — nothing is held")
+// resolveContext resolves the two things every settlement needs, with the same
+// message whichever entry point asked.
+func resolveContext() (cfgDir, profileName string, err error) {
+	cfgDir = configDir()
+	if cfgDir == "" {
+		return "", "", fmt.Errorf("resolving config directory")
 	}
-	names := make([]string, len(conflicts))
-	for i, c := range conflicts {
-		names[i] = c.Canonical
+	profileName = activeProfileName()
+	if profileName == "" {
+		return "", "", fmt.Errorf("no active profile — run 'weft profile use <name>' first")
 	}
-	return fmt.Errorf("%s is not in conflict — weft is holding %s", want, strings.Join(names, ", "))
+	return cfgDir, profileName, nil
 }
 
 // resolveConflictSource finds the source file the winning content must be
@@ -269,6 +269,8 @@ func resolveConflictSource(canonical string, p *profile.Profile, srcs []source.S
 
 func init() {
 	resolveCmd.Flags().StringVar(&resolveTake, "take", "",
-		"settle a held conflict by taking this harness's copy of the file")
+		"settle a held conflict by taking this harness's copy, or \"merge\" to combine every side and review the result")
+	resolveCmd.Flags().StringVar(&resolveMerged, "merged", "",
+		"apply an already-reviewed merge from this file (printed by --take merge when $EDITOR is unset)")
 	rootCmd.AddCommand(resolveCmd)
 }

@@ -229,3 +229,23 @@ func ensureTrailingNewline(s string) string {
 	}
 	return s + "\n"
 }
+
+// ReplaceSection returns body with the named source's section content replaced,
+// leaving every other byte of the block untouched — the note line, the other
+// sources' sections, and any advertised-index tail included.
+//
+// Rebuilding the block from ParseInline + InlineBody would drop all three, so a
+// resolution that only settles one source's section edits it in place instead.
+func ReplaceSection(body, name, content string) (string, bool) {
+	begin, end := attributionBegin(name), attributionEnd(name)
+	i := strings.Index(body, begin)
+	if i < 0 {
+		return body, false
+	}
+	j := strings.Index(body[i:], end)
+	if j < 0 {
+		return body, false
+	}
+	j += i
+	return body[:i+len(begin)] + "\n" + strings.Trim(content, "\n") + "\n" + body[j:], true
+}

@@ -335,3 +335,61 @@ func TestResolve_UnknownHarnessNamesTheChoices(t *testing.T) {
 		t.Errorf("error must list the real choices, got %v", err)
 	}
 }
+
+// ── merged resolution (#258) ─────────────────────────────────────────────────
+
+func TestResolve_MergedContentReplacesEveryCopy(t *testing.T) {
+	testenv.ClearPath(t)
+	f := newConflictFixture(t)
+	write(t, filepath.Join(f.claudeRoot, filepath.FromSlash(conflictRel)), conflictClaudeEdit)
+	write(t, filepath.Join(f.codexRoot, filepath.FromSlash(conflictCodexRel)), conflictCodexEdit)
+
+	merged := "# review\nedited in claude-code\nedited in codex\n"
+	src := filepath.Join(t.TempDir(), "review.md")
+	res, err := Resolve(ResolveRequest{
+		Conflict: f.detect(t)[0], Merged: []byte(merged), SourcePath: src, CfgDir: f.cfgDir,
+	})
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	// A merge has no winner, so no copy is left holding its own version.
+	if res.Winner != "merge" {
+		t.Errorf("Winner = %q, want %q", res.Winner, "merge")
+	}
+	if len(res.Rewritten) != 2 {
+		t.Errorf("a merge rewrites every diverged copy, got %d", len(res.Rewritten))
+	}
+	for _, p := range []string{
+		filepath.Join(f.claudeRoot, filepath.FromSlash(conflictRel)),
+		filepath.Join(f.codexRoot, filepath.FromSlash(conflictCodexRel)),
+		src,
+	} {
+		if got := readFile(t, p); got != merged {
+			t.Errorf("%s = %q, want the merged text", p, got)
+		}
+	}
+	// Both copies were replaced by text neither held, so both were backed up.
+	for _, name := range []string{"claude-code", "codex"} {
+		if _, err := os.Stat(filepath.Join(res.BackupDir, name)); err != nil {
+			t.Errorf("no backup for %s: %v", name, err)
+		}
+	}
+}
+
+func TestResolve_MergedContentWithMarkersIsRefused(t *testing.T) {
+	testenv.ClearPath(t)
+	f := newConflictFixture(t)
+	write(t, filepath.Join(f.claudeRoot, filepath.FromSlash(conflictRel)), conflictClaudeEdit)
+	write(t, filepath.Join(f.codexRoot, filepath.FromSlash(conflictCodexRel)), conflictCodexEdit)
+
+	marked := "# review\n<<<<<<< claude-code\na\n=======\nb\n>>>>>>> codex\n"
+	_, err := Resolve(ResolveRequest{Conflict: f.detect(t)[0], Merged: []byte(marked), CfgDir: f.cfgDir})
+	if !errors.Is(err, ErrConflictMarkers) {
+		t.Fatalf("expected ErrConflictMarkers, got %v", err)
+	}
+	// A harness instruction file is live model input: a marker left there is read
+	// as instructions on the next turn, so a refused write leaves both copies be.
+	if got := readFile(t, filepath.Join(f.codexRoot, filepath.FromSlash(conflictCodexRel))); got != conflictCodexEdit {
+		t.Errorf("a refused merge must not write anything, codex copy = %q", got)
+	}
+}
