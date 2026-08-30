@@ -99,6 +99,14 @@ func AssetURL(version, goos, goarch, ext string) string {
 		RepoOwner, RepoName, version, goos, goarch, ext)
 }
 
+// ChecksumsURL is the checksums.txt goreleaser publishes alongside the archives
+// for a release. Kept next to AssetURL so the owner/repo pair stays in one
+// place — the two copies of it drifted once already (#250).
+func ChecksumsURL(version string) string {
+	return fmt.Sprintf("https://github.com/%s/%s/releases/download/v%s/checksums.txt",
+		RepoOwner, RepoName, version)
+}
+
 func fetchLatest() (string, error) {
 	url := LatestAPIURL()
 	client := &http.Client{Timeout: 5 * time.Second}
