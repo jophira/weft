@@ -478,22 +478,32 @@ func applyProfile(p *profile.Profile, roots []string, srcs []source.Source, cfgD
 	// the regenerated block reflects those edits instead of discarding them.
 	// Sections instrHeld freezes are skipped: both edits stay exactly where the
 	// user left them until `weft resolve` picks a winner.
-	if !quiet {
-		for _, target := range targets {
-			h, ok := hReg.Get(target)
-			if !ok {
-				continue
-			}
-			if wbErr := instructionWriteBack(h, cfgDir, instrDir, p, srcs, instrHeld.sources); wbErr != nil {
-				slog.Warn("writeback", slog.String("stage", "instruction"),
-					slog.String("target", target), slog.String("error", wbErr.Error()))
-				advice.Add(advice.Advice{
-					Code:     advice.CodeWriteBackFailed,
-					Severity: advice.Warn,
-					Message:  fmt.Sprintf("instruction write-back to %s did not complete: %v", target, wbErr),
-					Fix:      "run 'weft doctor' to check the source and manifest state",
-				})
-			}
+	//
+	// This runs on quiet applies too, unlike the startup write-back below (#286).
+	// The two are not symmetrical: a sidecar file lives in m.Files, so the target
+	// watcher sees a hand edit and writes it back as it happens. The instruction
+	// file deliberately does not (only InstructionPath and InstructionBlock are
+	// tracked), so nothing else is watching it. Skipping this on the watcher's
+	// re-apply meant a single-harness block edit was silently overwritten by the
+	// re-assembly: no write-back, no conflict (that needs two harnesses), no
+	// backup. Re-running it costs nothing when there is no edit —
+	// instructionWriteBack returns early when the on-disk block still hashes to
+	// what weft last wrote, which is also what stops it ping-ponging with the
+	// source watcher it feeds.
+	for _, target := range targets {
+		h, ok := hReg.Get(target)
+		if !ok {
+			continue
+		}
+		if wbErr := instructionWriteBack(h, cfgDir, instrDir, p, srcs, instrHeld.sources); wbErr != nil {
+			slog.Warn("writeback", slog.String("stage", "instruction"),
+				slog.String("target", target), slog.String("error", wbErr.Error()))
+			advice.Add(advice.Advice{
+				Code:     advice.CodeWriteBackFailed,
+				Severity: advice.Warn,
+				Message:  fmt.Sprintf("instruction write-back to %s did not complete: %v", target, wbErr),
+				Fix:      "run 'weft doctor' to check the source and manifest state",
+			})
 		}
 	}
 

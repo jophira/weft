@@ -226,6 +226,63 @@ func TestInstructionWriteBack_TierBEditFlowsToSource(t *testing.T) {
 	}
 }
 
+// The watcher re-applies quietly. A Tier B block edit made while it runs used
+// to be overwritten by the re-assembly with no write-back, no conflict (that
+// needs two harnesses) and no backup — the edit was simply gone (#286).
+func TestInstructionWriteBack_QuietReapplyKeepsTheEdit(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	cfgDir := t.TempDir()
+
+	srcs := buildLayeredSources(t)
+	p := &profile.Profile{
+		Name:    "layered",
+		Sources: []string{"personal", "team", "company"},
+		Overlay: profile.OverlayCascade,
+		Targets: []string{"codex"},
+	}
+	if err := mergeAndApply(p, rootsOf(srcs), srcs, cfgDir, false); err != nil {
+		t.Fatalf("initial mergeAndApply: %v", err)
+	}
+
+	agentsPath := filepath.Join(home, ".codex", "AGENTS.md")
+	edited := strings.Replace(readFile(t, agentsPath), "# personal rules", "# EDITED personal rules", 1)
+	if !strings.Contains(edited, "# EDITED personal rules") {
+		t.Fatal("test setup: edit did not apply")
+	}
+	writeFile(t, agentsPath, edited)
+
+	// quiet=true is the watcher's re-apply, triggered here by a source change.
+	if err := mergeAndApply(p, rootsOf(srcs), srcs, cfgDir, true); err != nil {
+		t.Fatalf("quiet re-apply: %v", err)
+	}
+
+	personalPath := filepath.Join(srcs[0].Root, "CLAUDE.md")
+	if got := readFile(t, personalPath); !strings.Contains(got, "# EDITED personal rules") {
+		t.Errorf("the edit was lost instead of reaching the personal source:\n%s", got)
+	}
+	if got := readFile(t, agentsPath); !strings.Contains(got, "# EDITED personal rules") {
+		t.Errorf("the edit was overwritten in the harness block:\n%s", got)
+	}
+
+	// The write-back feeds the source watcher, which re-applies quietly again.
+	// That must settle rather than loop: with no new edit, instructionWriteBack
+	// sees a block that still hashes to what weft last wrote and does nothing.
+	srcBefore, harnessBefore := readFile(t, personalPath), readFile(t, agentsPath)
+	for i := range 2 {
+		if err := mergeAndApply(p, rootsOf(srcs), srcs, cfgDir, true); err != nil {
+			t.Fatalf("settling re-apply %d: %v", i, err)
+		}
+	}
+	if got := readFile(t, personalPath); got != srcBefore {
+		t.Errorf("source changed on a re-apply with no edit:\n%s", got)
+	}
+	if got := readFile(t, agentsPath); got != harnessBefore {
+		t.Errorf("harness block changed on a re-apply with no edit:\n%s", got)
+	}
+}
+
 // twoTierBTargets returns a profile targeting codex and windsurf, both Tier B,
 // for exercising cross-harness instruction conflicts (#257).
 func twoTierBTargets() *profile.Profile {
