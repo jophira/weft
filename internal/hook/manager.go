@@ -4,14 +4,11 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
-	"regexp"
 	"strings"
 
 	"github.com/jophira/weft/internal/locate"
 	"github.com/jophira/weft/internal/yamlstore"
 )
-
-var validName = regexp.MustCompile(`^[a-z][a-z0-9_-]*$`)
 
 // FileManager persists each Hook as a YAML file under a directory.
 type FileManager struct {
@@ -24,11 +21,11 @@ func NewFileManager(dir string) *FileManager {
 
 // Add writes a new hook YAML file. Errors if the name already exists.
 func (m *FileManager) Add(h Hook) error {
-	if !validName.MatchString(h.Name) {
-		return fmt.Errorf(
-			"invalid name %q: must start with a letter and contain only lowercase letters, digits, hyphens or underscores",
-			h.Name,
-		)
+	// One definition of a valid name, in the package that turns it into a
+	// path. Checked here as well so the failure lands on the create call
+	// rather than on the write underneath it.
+	if err := yamlstore.ValidName(h.Name); err != nil {
+		return err
 	}
 	if err := validateHook(h); err != nil {
 		return err

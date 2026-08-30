@@ -3,7 +3,6 @@ package source
 import (
 	"errors"
 	"fmt"
-	"regexp"
 
 	"github.com/jophira/weft/internal/locate"
 	"github.com/jophira/weft/internal/yamlstore"
@@ -11,9 +10,6 @@ import (
 
 // compile-time check: FileRegistry must satisfy Registry.
 var _ Registry = (*FileRegistry)(nil)
-
-// validName enforces lowercase-start, alphanumeric + hyphen/underscore only.
-var validName = regexp.MustCompile(`^[a-z][a-z0-9_-]*$`)
 
 // FileRegistry persists each Source as a YAML file under a directory.
 type FileRegistry struct {
@@ -26,11 +22,11 @@ func NewFileRegistry(dir string) *FileRegistry {
 
 // Add writes a new source YAML file. Errors if the name already exists.
 func (r *FileRegistry) Add(s Source) error {
-	if !validName.MatchString(s.Name) {
-		return fmt.Errorf(
-			"invalid name %q: must start with a letter and contain only lowercase letters, digits, hyphens or underscores",
-			s.Name,
-		)
+	// One definition of a valid name, in the package that turns it into a
+	// path. Checked here as well so the failure lands on the create call
+	// rather than on the write underneath it.
+	if err := yamlstore.ValidName(s.Name); err != nil {
+		return err
 	}
 	if r.store.Exists(s.Name) {
 		return fmt.Errorf("source %q already exists — use 'weft source remove %s' first", s.Name, s.Name)
