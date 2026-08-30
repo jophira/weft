@@ -550,3 +550,73 @@ func TestResolveMerge_MissingBaseRefusesTheMerge(t *testing.T) {
 		t.Fatalf("expected a missing base to refuse the merge, got %v", mErr)
 	}
 }
+
+// ── the source stays portable through a resolution (#285) ────────────────────
+
+// A resolution writes the winner's bytes to the source. Those bytes came out of
+// a harness, where {{weft.root}} was expanded to this machine's absolute path.
+// Writing them straight through de-portablises the source — the failure #259
+// closed for the ordinary write-back, reopened via `weft resolve`.
+func TestResolveTake_FileConflictKeepsTheSourcePortable(t *testing.T) {
+	cfgDir, claudeCmd, codexCmd := newFileConflictWorld(t)
+
+	p, roots, srcs, err := resolveProfileRoots("layered")
+	if err != nil {
+		t.Fatalf("resolveProfileRoots: %v", err)
+	}
+	var personal source.Source
+	for _, s := range srcs {
+		if s.Name == "personal" {
+			personal = s
+		}
+	}
+	if personal.Root == "" {
+		t.Fatal("personal source not found")
+	}
+
+	// Put an anchor in the source and re-apply so both harnesses hold it expanded.
+	srcFile := filepath.Join(personal.Root, "commands", "hello.md")
+	const anchored = "say hello\nsee {{weft.root}}/notes.md\n"
+	writeFile(t, srcFile, anchored)
+	if aErr := mergeAndApply(p, roots, srcs, cfgDir, false); aErr != nil {
+		t.Fatalf("re-apply: %v", aErr)
+	}
+
+	expanded := filepath.ToSlash(filepath.Join(personal.Root, "notes.md"))
+	for _, path := range []string{claudeCmd, codexCmd} {
+		if got := readFile(t, path); !strings.Contains(got, expanded) {
+			t.Fatalf("%s should hold the expanded path %q, got:\n%s", path, expanded, got)
+		}
+	}
+
+	// Diverge, then take one side.
+	writeFile(t, claudeCmd, "say hello loudly\nsee "+expanded+"/notes.md\n")
+	writeFile(t, codexCmd, "say hello quietly\nsee "+expanded+"\n")
+
+	held, err := collectHeldConflicts(cfgDir, "layered")
+	if err != nil {
+		t.Fatalf("collectHeldConflicts: %v", err)
+	}
+	h, err := findHeld(held, "commands/hello.md")
+	if err != nil {
+		t.Fatalf("finding the held file conflict: %v", err)
+	}
+	if sErr := settleHeld(&bytes.Buffer{}, h, "codex", nil); sErr != nil {
+		t.Fatalf("settleHeld: %v", sErr)
+	}
+
+	got := readFile(t, srcFile)
+	if !strings.Contains(got, "say hello quietly") {
+		t.Errorf("source did not take the codex copy, got:\n%s", got)
+	}
+	if strings.Contains(got, personal.Root) {
+		t.Errorf("source holds a hardcoded absolute path, so it is no longer portable:\n%s", got)
+	}
+	if !strings.Contains(got, "{{weft.root}}/notes.md") {
+		t.Errorf("source should have the anchor collapsed back, got:\n%s", got)
+	}
+	// The harness copies keep the expanded form — that is what they are for.
+	if got := readFile(t, codexCmd); !strings.Contains(got, expanded) {
+		t.Errorf("codex copy should keep the expanded path, got:\n%s", got)
+	}
+}

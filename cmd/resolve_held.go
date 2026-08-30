@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jophira/weft/internal/anchor"
 	"github.com/jophira/weft/internal/harness"
 	"github.com/jophira/weft/internal/locate"
 	"github.com/jophira/weft/internal/manifest"
@@ -83,6 +84,8 @@ func collectHeldConflicts(cfgDir, profileName string) ([]heldConflict, error) {
 		return nil, err
 	}
 
+	srcMap := buildSrcMap(srcs)
+
 	held := make([]heldConflict, 0, len(fileConflicts))
 	for _, c := range fileConflicts {
 		srcPath, srcName := resolveConflictSource(c.Canonical, p, srcs)
@@ -105,6 +108,11 @@ func collectHeldConflicts(cfgDir, profileName string) ([]heldConflict, error) {
 			settle: func(winner string, merged []byte) (settleReport, error) {
 				res, rErr := harness.Resolve(harness.ResolveRequest{
 					Conflict: c, Take: winner, Merged: merged, SourcePath: srcPath, CfgDir: cfgDir,
+					// The same normalisation the ordinary write-back applies, so a
+					// resolution leaves the source as portable as an edit would.
+					SourceContent: func(b []byte) []byte {
+						return anchor.Collapse(normalizeForSource(b), anchorsForSource(srcName, srcMap))
+					},
 				})
 				if rErr != nil {
 					return settleReport{}, rErr
