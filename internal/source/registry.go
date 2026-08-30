@@ -6,6 +6,8 @@ import (
 
 	"github.com/jophira/weft/internal/locate"
 	"github.com/jophira/weft/internal/yamlstore"
+
+	"github.com/jophira/weft/internal/collect"
 )
 
 // compile-time check: FileRegistry must satisfy Registry.
@@ -46,6 +48,11 @@ func (r *FileRegistry) Update(s Source) error {
 // write normalises a source before persisting it. Shared by Add (create) and
 // Update (overwrite).
 func (r *FileRegistry) write(s Source) error {
+	// Shared by create and overwrite, so an unusable instruction glob is refused
+	// at the point it is configured rather than on the next apply (#284).
+	if err := collect.ValidatePattern(s.Structure.InstructionGlob); err != nil {
+		return err
+	}
 	// Normalise root to ~/… for portability across machines.
 	s.Root = locate.Tilde(s.Root)
 	if s.Branch == "" {

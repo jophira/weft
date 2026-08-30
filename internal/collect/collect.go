@@ -6,6 +6,7 @@
 package collect
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,8 +22,13 @@ import (
 //     reads only root/<filename>. This is the backward-compatible default.
 //
 //   - Glob with wildcards (e.g. "**/*.md", "*.md", "**/*INSTRUCTIONS.md"):
-//     walks the full tree and matches each filename against the last path
-//     component of the pattern using filepath.Match.
+//     walks the full tree and matches each filename against the pattern using
+//     filepath.Match. The match is on the filename alone — a pattern selects
+//     files by what they are called, never by where they sit.
+//
+// A pattern that names a directory ("docs/**/*.md") is rejected rather than
+// silently widened, which is what the old filepath.Base call did to it (#284).
+// Use excludes to scope a broad pattern to part of the tree.
 //
 // excludes is an optional list of root-relative directory prefixes to skip
 // (e.g. "commands/", "skills/") so that managed subdirectory files are not
@@ -30,10 +36,37 @@ import (
 //
 // Returns nil, nil when no matching files are found.
 func Collect(root, pattern string, excludes ...string) ([]byte, error) {
+	if err := ValidatePattern(pattern); err != nil {
+		return nil, err
+	}
 	if !strings.Contains(pattern, "*") {
 		return readSingle(root, pattern)
 	}
 	return collectGlob(root, filepath.Base(pattern), normalizeExcludes(excludes))
+}
+
+// ValidatePattern reports whether pattern is one Collect can honour.
+//
+// Matching is by filename across the whole tree, so the only directory syntax
+// that means anything is the recursive "**/" prefix — and it is a no-op, since
+// the walk is recursive regardless. Anything else with a path component is a
+// pattern weft cannot honour: "docs/**/*.md" was silently read as "*.md" and
+// matched every .md in the source, including the ones the user meant to leave
+// out. Rejecting is the honest answer, and the error names the mechanism that
+// does do directory scoping.
+func ValidatePattern(pattern string) error {
+	if pattern == "" {
+		return nil // unset — the caller substitutes the default
+	}
+	p := strings.TrimPrefix(filepath.ToSlash(pattern), "./")
+	if !strings.Contains(strings.TrimPrefix(p, "**/"), "/") {
+		return nil
+	}
+	return fmt.Errorf(
+		"instruction glob %q names a directory, which weft cannot honour: patterns match on filename "+
+			"across the whole source tree, so %q would match every file called %q wherever it sits. "+
+			"Use a filename pattern (\"CLAUDE.md\", \"*.md\", \"**/*.md\") and scope it with instruction_exclude",
+		pattern, pattern, filepath.Base(p))
 }
 
 // readSingle reads a single exact-named file at the root level.

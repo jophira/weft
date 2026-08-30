@@ -451,7 +451,7 @@ func init() {
 	sourceAddCmd.Flags().StringVar(&addRemote, "remote", "", "git remote URL (inferred from repo origin when omitted)")
 	sourceAddCmd.Flags().StringVar(&addBranch, "branch", "main", "branch to track")
 	sourceAddCmd.Flags().BoolVar(&addAutoPull, "auto-pull", true, "pull on 'weft source sync'")
-	sourceAddCmd.Flags().StringVar(&addInstructionGlob, "instruction-glob", source.DefaultStructure().InstructionGlob, `glob pattern for instruction files: "CLAUDE.md" (root only) or "**/*.md" (full hierarchy)`)
+	sourceAddCmd.Flags().StringVar(&addInstructionGlob, "instruction-glob", source.DefaultStructure().InstructionGlob, `filename pattern for instruction files: "CLAUDE.md" (root only) or "**/*.md" (full hierarchy). Matches on filename anywhere in the tree — scope it with --instruction-exclude, not with a directory in the pattern`)
 	sourceAddCmd.Flags().StringVar(&addProjectDirNames, "project-dir-names", "", `comma-separated directory names to search anywhere in the source tree for project rule files (default: "projects,project-rules")`)
 	sourceAddCmd.Flags().StringVar(&addInstructionExclude, "instruction-exclude", "", `comma-separated root-relative prefixes to exclude from instruction assembly (e.g. "java/,tickets/,docs/") — lets a broad --instruction-glob inline only a subset`)
 	sourceAddCmd.Flags().IntVar(&addPriority, "priority", 0, "layering priority: higher numbers win on conflict (applied later); unset = 0 (lowest)")

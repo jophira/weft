@@ -189,3 +189,38 @@ func TestUpdate_absentReturnsError(t *testing.T) {
 		t.Fatal("Update on absent source: expected error, got nil")
 	}
 }
+
+// ── instruction glob validation (#284) ───────────────────────────────────────
+
+// A directory-bearing pattern is refused where it is configured, so the user
+// hears about it at `weft source add` rather than getting silently widened
+// instruction content on the next apply.
+func TestAddUpdate_rejectDirectoryInstructionGlob(t *testing.T) {
+	r := newReg(t)
+
+	bad := fixture("work")
+	bad.Structure.InstructionGlob = "docs/**/*.md"
+	if err := r.Add(bad); err == nil {
+		t.Fatal("Add accepted a directory-bearing instruction glob")
+	}
+	if _, err := r.Get("work"); err == nil {
+		t.Error("the rejected source was persisted anyway")
+	}
+
+	// Update goes through the same write path, so it must refuse too.
+	good := fixture("work")
+	good.Structure.InstructionGlob = "**/*.md"
+	if err := r.Add(good); err != nil {
+		t.Fatalf("Add with a supported glob: %v", err)
+	}
+	if err := r.Update(bad); err == nil {
+		t.Error("Update accepted a directory-bearing instruction glob")
+	}
+	saved, err := r.Get("work")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if saved.Structure.InstructionGlob != "**/*.md" {
+		t.Errorf("the rejected update overwrote the stored glob: %q", saved.Structure.InstructionGlob)
+	}
+}
