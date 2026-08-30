@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/jophira/weft/internal/locate"
@@ -110,6 +109,17 @@ type fileEntry struct {
 func applyWithManifest(stagedRoot, targetRoot, harnessName string, ctx ApplyCtx, renames map[string]string, filter func(rel string) bool, h Harness) error {
 	out := applyOut(ctx)
 
+	// Every read, write, mkdir and delete below goes through this root rather
+	// than through a joined absolute path. os.Root refuses any name that leaves
+	// the directory, including one that leaves through a symlink, so a link
+	// planted inside a harness tree can no longer redirect a projection, a
+	// backup or a prune somewhere else (#278).
+	root, err := os.OpenRoot(targetRoot)
+	if err != nil {
+		return fmt.Errorf("opening target root %s: %w", targetRoot, err)
+	}
+	defer root.Close() //nolint:errcheck // read-mostly fd; close failure cannot affect what was already written
+
 	m, err := manifest.Load(ctx.CfgDir, harnessName)
 	if err != nil {
 		return fmt.Errorf("loading manifest: %w", err)
@@ -170,14 +180,20 @@ func applyWithManifest(stagedRoot, targetRoot, harnessName string, ctx ApplyCtx,
 
 		fe := fileEntry{srcPath: path, dst: dst, stagedHash: stagedHash}
 
-		fullDst := filepath.Join(targetRoot, dst)
-		existing, readErr := os.ReadFile(fullDst)
+		existing, readErr := root.ReadFile(dst)
 		switch {
 		case os.IsNotExist(readErr):
 			// new file — nothing on disk yet; retain stagedData for write
 			fe.data = stagedData
 		case readErr != nil:
-			return fmt.Errorf("reading %s: %w", fullDst, readErr)
+			// Unlike the prune path, this one cannot resolve to "leave it alone":
+			// carrying on would report a successful apply while the user's rules
+			// never reached the file. Fail loudly and name the remedy.
+			return fmt.Errorf(
+				"reading %s under %s: %w\n"+
+					"weft will not write through a path that leaves the harness directory. "+
+					"If a symlink there is deliberate, point the harness at the real directory instead",
+				dst, targetRoot, readErr)
 		default:
 			existingHash := manifest.HashBytes(existing)
 			if knownHash, owned := m.Files[dst]; owned && existingHash == knownHash {
@@ -191,7 +207,7 @@ func applyWithManifest(stagedRoot, targetRoot, harnessName string, ctx ApplyCtx,
 				// not owned or externally modified
 				fe.conflict = true
 				fe.data = stagedData
-				conflicts = append(conflicts, conflictFile{rel: dst, abs: fullDst})
+				conflicts = append(conflicts, conflictFile{rel: dst, abs: filepath.Join(targetRoot, dst)})
 			}
 		}
 		entries = append(entries, fe)
@@ -227,11 +243,10 @@ func applyWithManifest(stagedRoot, targetRoot, harnessName string, ctx ApplyCtx,
 			fmt.Fprintf(out, logUnchanged, statusUnchanged, fe.dst)
 			continue
 		}
-		fullDst := filepath.Join(targetRoot, fe.dst)
-		if mkErr := os.MkdirAll(filepath.Dir(fullDst), 0o755); mkErr != nil {
+		if mkErr := root.MkdirAll(filepath.Dir(fe.dst), 0o755); mkErr != nil {
 			return fmt.Errorf("creating parent dir for %s: %w", fe.dst, mkErr)
 		}
-		if wErr := os.WriteFile(fullDst, fe.data, 0o644); wErr != nil { //nolint:gosec // path derived from harness config
+		if wErr := root.WriteFile(fe.dst, fe.data, 0o644); wErr != nil {
 			return fmt.Errorf("writing %s: %w", fe.dst, wErr)
 		}
 		fmt.Fprintf(out, logWrote, statusWrote, fe.dst)
@@ -240,7 +255,7 @@ func applyWithManifest(stagedRoot, targetRoot, harnessName string, ctx ApplyCtx,
 	// Remove files the previous apply staged but this one does not, so a profile
 	// switch leaves no orphans behind. Prunes Files entries for whatever it deletes;
 	// user-edited files it declines to delete keep their entry.
-	if err := pruneDropped(prevStaged, newHashes, targetRoot, m, out); err != nil {
+	if err := pruneDropped(prevStaged, newHashes, root, m, out); err != nil {
 		return err
 	}
 
@@ -284,7 +299,16 @@ func trackAndWriteFile(absPath, rel, harnessName string, content []byte, ctx App
 
 	contentHash := manifest.HashBytes(content)
 
-	existing, readErr := os.ReadFile(absPath)
+	// The parent is the harness's own directory; rel names the one file inside
+	// it. Going through a root means a symlink at that name cannot redirect the
+	// write out of the harness (#278).
+	root, err := os.OpenRoot(filepath.Dir(absPath))
+	if err != nil {
+		return fmt.Errorf("opening %s: %w", filepath.Dir(absPath), err)
+	}
+	defer root.Close() //nolint:errcheck // close failure cannot unwrite the file
+
+	existing, readErr := root.ReadFile(rel)
 	switch {
 	case os.IsNotExist(readErr):
 		// new file — fall through to write
@@ -312,7 +336,7 @@ func trackAndWriteFile(absPath, rel, harnessName string, content []byte, ctx App
 		}
 	}
 
-	if err := os.WriteFile(absPath, content, 0o644); err != nil { //nolint:gosec // path is resolved from harness config, not user input
+	if err := root.WriteFile(rel, content, 0o644); err != nil {
 		return fmt.Errorf("writing %s: %w", absPath, err)
 	}
 	fmt.Fprintf(out, logWrote, statusWrote, rel)
@@ -359,7 +383,7 @@ func applyToHomeDir(stagedRoot, dotSubdir string, h Harness, ctx ApplyCtx, renam
 func pruneDropped(
 	prevStaged map[string]struct{},
 	nowStaged map[string]string,
-	targetRoot string,
+	root *os.Root,
 	m *manifest.Manifest,
 	out io.Writer,
 ) error {
@@ -380,14 +404,18 @@ func pruneDropped(
 	slices.Sort(dropped)
 
 	for _, rel := range dropped {
-		full := filepath.Join(targetRoot, rel)
-		existing, readErr := os.ReadFile(full) //nolint:gosec // rel comes from the manifest weft itself wrote
+		existing, readErr := root.ReadFile(rel)
 		switch {
 		case os.IsNotExist(readErr):
 			delete(m.Files, rel) // already gone — just forget it
 
 		case readErr != nil:
-			return fmt.Errorf("reading dropped file %s: %w", rel, readErr)
+			// Anything else — a symlink escaping the root, a permission error, a
+			// broken link — means weft cannot establish that this file is the one
+			// it wrote. This is a delete path, so an uncertain answer resolves to
+			// keeping the file and its manifest entry, not to removing it and not
+			// to failing the whole apply over one dropped path (#278).
+			fmt.Fprintf(out, logKept, statusKept, rel)
 
 		default:
 			if knownHash, owned := m.Files[rel]; !owned || manifest.HashBytes(existing) != knownHash {
@@ -395,23 +423,27 @@ func pruneDropped(
 				fmt.Fprintf(out, logKept, statusKept, rel)
 				continue
 			}
-			if rmErr := os.Remove(full); rmErr != nil {
+			if rmErr := root.Remove(rel); rmErr != nil {
 				return fmt.Errorf("removing dropped file %s: %w", rel, rmErr)
 			}
 			delete(m.Files, rel)
 			fmt.Fprintf(out, logRemoved, statusRemoved, rel)
-			pruneEmptyDirs(filepath.Dir(full), targetRoot)
+			pruneEmptyDirs(root, filepath.Dir(rel))
 		}
 	}
 	return nil
 }
 
 // pruneEmptyDirs walks up from dir removing empty directories, stopping at (and
-// never removing) root. Non-empty directories abort the walk, as os.Remove fails
-// on them — the error is the signal to stop, not a fault.
-func pruneEmptyDirs(dir, root string) {
-	for dir != root && strings.HasPrefix(dir, root) {
-		if err := os.Remove(dir); err != nil {
+// never removing) the root itself. Non-empty directories abort the walk, as
+// Remove fails on them — the error is the signal to stop, not a fault.
+//
+// dir is relative to root, so "." is the root and the terminating case. The
+// containment that the old prefix comparison was reaching for is now the root's
+// own: it cannot delete anything outside, symlinked or otherwise.
+func pruneEmptyDirs(root *os.Root, dir string) {
+	for dir != "." && dir != string(filepath.Separator) {
+		if err := root.Remove(dir); err != nil {
 			return
 		}
 		dir = filepath.Dir(dir)
@@ -424,16 +456,27 @@ func backupConflicts(conflicts []conflictFile, harnessName, cfgDir string) (stri
 	ts := time.Now().Format("20060102-150405")
 	backupDir := filepath.Join(cfgDir, "backups", harnessName, ts)
 
+	if err := os.MkdirAll(backupDir, 0o755); err != nil {
+		return "", fmt.Errorf("creating backup dir: %w", err)
+	}
+	// rel is a harness-relative path that reached weft from the projection, so
+	// the backup copy is written through a root too: a backup must not be the
+	// thing that writes outside the config dir (#278).
+	root, err := os.OpenRoot(backupDir)
+	if err != nil {
+		return "", fmt.Errorf("opening backup dir: %w", err)
+	}
+	defer root.Close() //nolint:errcheck // failure to close cannot unwrite the backups
+
 	for _, c := range conflicts {
-		dst := filepath.Join(backupDir, c.rel)
-		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		if err := root.MkdirAll(filepath.Dir(c.rel), 0o755); err != nil {
 			return "", fmt.Errorf("creating backup dir for %s: %w", c.rel, err)
 		}
 		data, err := os.ReadFile(c.abs)
 		if err != nil {
 			return "", fmt.Errorf("reading %s for backup: %w", c.rel, err)
 		}
-		if err := os.WriteFile(dst, data, 0o644); err != nil { //nolint:gosec // dst is derived from config backup dir, not user input
+		if err := root.WriteFile(c.rel, data, 0o644); err != nil {
 			return "", fmt.Errorf("backing up %s: %w", c.rel, err)
 		}
 	}
