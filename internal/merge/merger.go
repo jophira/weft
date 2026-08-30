@@ -185,7 +185,10 @@ func (m *Merger) foldFile(rel string, roots []NamedRoot) ([]byte, []int, error) 
 		if err != nil {
 			return nil, nil, err
 		}
-		if data == nil {
+		// An empty or whitespace-only file is not a contribution. Without this
+		// the attribution wrapper below would turn it into a non-empty marker
+		// block, which then wins the cascade and erases the populated source.
+		if len(bytes.TrimSpace(data)) == 0 {
 			continue
 		}
 		contribs = append(contribs, contrib{i, data})
