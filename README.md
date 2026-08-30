@@ -567,7 +567,7 @@ letting any MCP-aware agent (Claude Code, Cursor, Codex, …) introspect and con
 | `weft_source_list` | List sources with basic git state |
 | `weft_source_status` | Detailed git status for one source |
 | `weft_source_sync` | Pull from remote (one source or all) |
-| `weft_source_push` | Stage → commit → push; `message` param is required |
+| `weft_source_push` | Stage → commit → push; `message` and `confirm: true` params are required |
 | `weft_doctor` | Health check: config dir, detected harnesses, target health |
 
 ### Resources
