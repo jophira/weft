@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -256,7 +257,7 @@ With a name:    syncs that source regardless of auto_pull.`,
 
 		var failures []string
 		for _, s := range toSync {
-			if _, err := runSync(s, os.Stdout); err != nil {
+			if _, err := runSync(cmd.Context(), s, os.Stdout); err != nil {
 				failures = append(failures, fmt.Sprintf("  %s: %v", s.Name, err))
 			}
 		}
@@ -272,8 +273,8 @@ With a name:    syncs that source regardless of auto_pull.`,
 // Pass io.Discard as out to suppress all progress messages (e.g. background auto-sync).
 //
 // cf. Java: static utility method — no receiver, pure function on the Source value.
-func runSync(s source.Source, out io.Writer) (bool, error) {
-	return sourcesync.SyncSource(s, out)
+func runSync(ctx context.Context, s source.Source, out io.Writer) (bool, error) {
+	return sourcesync.SyncSource(ctx, s, out)
 }
 
 var (

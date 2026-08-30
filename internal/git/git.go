@@ -1,6 +1,7 @@
 package git
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -20,11 +21,16 @@ const maxRetries = 3
 // Clone clones url into path, checking out branch.
 // auth may be nil for HTTPS repos that rely on system credential helpers.
 // progress receives git's transfer output; pass os.Stdout for interactive use or io.Discard to silence it.
-func Clone(url, path, branch string, auth transport.AuthMethod, progress io.Writer) error {
+//
+// ctx bounds the transfer. Cancelling it aborts the network operation and
+// releases the descriptors and agent slots it held, which is the whole point:
+// a deadline that left the transfer running would report a timeout while still
+// consuming the resources the caller was trying to reclaim (#281).
+func Clone(ctx context.Context, url, path, branch string, auth transport.AuthMethod, progress io.Writer) error {
 	if err := os.MkdirAll(path, 0o755); err != nil {
 		return fmt.Errorf("creating target directory: %w", err)
 	}
-	_, err := gogit.PlainClone(path, false, &gogit.CloneOptions{
+	_, err := gogit.PlainCloneContext(ctx, path, false, &gogit.CloneOptions{
 		URL:           url,
 		Auth:          auth,
 		Progress:      progress,
@@ -67,7 +73,7 @@ func Open(path string) (*Repo, error) {
 // Returns (true, nil) when new commits were pulled, (false, nil) when already up to date.
 // Transient network errors are retried up to maxRetries times with exponential back-off.
 // cf. Java: Spring Retry / Resilience4j Retry — backoff.Retry is the Go equivalent.
-func (r *Repo) Pull(branch string, auth transport.AuthMethod) (updated bool, err error) {
+func (r *Repo) Pull(ctx context.Context, branch string, auth transport.AuthMethod) (updated bool, err error) {
 	wt, err := r.repo.Worktree()
 	if err != nil {
 		return false, fmt.Errorf("getting worktree: %w", err)
@@ -76,7 +82,7 @@ func (r *Repo) Pull(branch string, auth transport.AuthMethod) (updated bool, err
 	// op is the operation passed to the retry loop.
 	// errors are values — returning nil stops the loop, any non-nil error triggers a retry.
 	op := func() error {
-		pullErr := wt.Pull(&gogit.PullOptions{
+		pullErr := wt.PullContext(ctx, &gogit.PullOptions{
 			RemoteName:    "origin",
 			ReferenceName: plumbing.NewBranchReferenceName(branch),
 			Auth:          auth,
@@ -93,7 +99,9 @@ func (r *Repo) Pull(branch string, auth transport.AuthMethod) (updated bool, err
 		}
 	}
 
-	bo := backoff.WithMaxRetries(backoff.NewExponentialBackOff(), maxRetries)
+	// WithContext stops the retry loop as well as the transfer: without it a
+	// cancelled pull would keep sleeping and retrying past its own deadline.
+	bo := backoff.WithContext(backoff.WithMaxRetries(backoff.NewExponentialBackOff(), maxRetries), ctx)
 	if retryErr := backoff.Retry(op, bo); retryErr != nil {
 		return false, retryErr
 	}

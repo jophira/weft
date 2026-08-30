@@ -127,7 +127,9 @@ func sourceSyncTool() mcplib.Tool {
 }
 
 func sourceSyncHandler(reg *source.FileRegistry) server.ToolHandlerFunc {
-	return func(_ context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
+	// The request context is honoured rather than dropped: a client that gives
+	// up on the call now aborts the transfer instead of leaving it running.
+	return func(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
 		name := mcplib.ParseString(req, "name", "")
 		var sources []source.Source
 		if name != "" {
@@ -146,7 +148,7 @@ func sourceSyncHandler(reg *source.FileRegistry) server.ToolHandlerFunc {
 		results := make([]syncResult, 0, len(sources))
 		for _, s := range sources {
 			r := syncResult{Name: s.Name}
-			updated, err := sourcesync.SyncSource(s, io.Discard)
+			updated, err := sourcesync.SyncSource(ctx, s, io.Discard)
 			if err != nil {
 				r.Error = err.Error()
 			} else {

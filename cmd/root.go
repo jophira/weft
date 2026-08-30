@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -238,8 +239,8 @@ func runAutoSync() {
 	if err != nil {
 		return
 	}
-	syncFn := func(s source.Source) (bool, error) {
-		return runSync(s, io.Discard)
+	syncFn := func(ctx context.Context, s source.Source) (bool, error) {
+		return runSync(ctx, s, io.Discard)
 	}
 	_ = autosync.Run(sources, stateFile, autosync.DefaultInterval, syncFn, os.Stderr)
 }
