@@ -2,15 +2,20 @@ package cmd
 
 import (
 	"archive/tar"
+	"bufio"
 	"compress/gzip"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/jophira/weft/internal/update"
 	"github.com/spf13/cobra"
@@ -103,6 +108,13 @@ func selfUpdate(latest string) error {
 		return fmt.Errorf("downloading release: %w", err)
 	}
 
+	// Verified before the archive is opened, not after: this replaces the binary
+	// the user is about to run, so nothing that failed its checksum should reach
+	// the tar reader, let alone the disk (#276).
+	if err := verifyChecksum(archivePath, update.ChecksumsURL(latest), path.Base(url)); err != nil {
+		return err
+	}
+
 	newBinary := filepath.Join(tmpDir, "weft")
 	if err := extractBinary(archivePath, newBinary); err != nil {
 		return fmt.Errorf("extracting binary: %w", err)
@@ -140,8 +152,95 @@ func releaseURL(version string) string {
 
 const maxDownloadBytes = 100 << 20 // 100 MB
 
+// downloadTimeout bounds the whole exchange, headers and body. http.Get uses
+// http.DefaultClient, which has no timeout at all: a remote that accepts the
+// connection and then stops sending would hang `weft update` forever.
+const downloadTimeout = 5 * time.Minute
+
+// maxChecksumsBytes caps checksums.txt. It is one short line per release
+// artifact; anything approaching this is not the file weft asked for.
+const maxChecksumsBytes = 1 << 20 // 1 MB
+
+// verifyChecksum fails the update unless archivePath hashes to the digest
+// checksums.txt records for assetName.
+//
+// What this does and does not buy: it catches a corrupted download, a truncated
+// transfer, and tampering anywhere between the release and this machine. It
+// does not defend against a compromise of the release itself — checksums.txt
+// comes from the same place as the archive, so whoever can replace one can
+// replace the other. Closing that gap needs the release to be signed, which is
+// a change to the release pipeline rather than to this client.
+func verifyChecksum(archivePath, checksumsURL, assetName string) error {
+	sums, err := fetchChecksums(checksumsURL)
+	if err != nil {
+		return fmt.Errorf("verifying the download: %w", err)
+	}
+	want, ok := sums[assetName]
+	if !ok {
+		return fmt.Errorf(
+			"verifying the download: %s publishes no checksum for %s — refusing to install an unverified binary",
+			checksumsURL, assetName)
+	}
+
+	f, err := os.Open(archivePath)
+	if err != nil {
+		return fmt.Errorf("verifying the download: %w", err)
+	}
+	defer func() { _ = f.Close() }()
+
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return fmt.Errorf("verifying the download: %w", err)
+	}
+	got := hex.EncodeToString(h.Sum(nil))
+	if !strings.EqualFold(got, want) {
+		return fmt.Errorf(
+			"checksum mismatch for %s:\n  expected %s\n  got      %s\n"+
+				"the download does not match what the release publishes — nothing was installed",
+			assetName, want, got)
+	}
+	return nil
+}
+
+// fetchChecksums reads a goreleaser checksums.txt into filename → digest. Its
+// lines are "<hex digest>  <filename>"; anything that does not parse is skipped
+// rather than failing the file, so an added header or blank line is harmless.
+func fetchChecksums(url string) (map[string]string, error) {
+	client := &http.Client{Timeout: downloadTimeout}
+	resp, err := client.Get(url) //nolint:gosec // URL is constructed from known constant owner/repo, not user input
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("fetching %s returned %s", url, resp.Status)
+	}
+
+	sums := map[string]string{}
+	sc := bufio.NewScanner(io.LimitReader(resp.Body, maxChecksumsBytes))
+	for sc.Scan() {
+		digest, name, found := strings.Cut(strings.TrimSpace(sc.Text()), " ")
+		if !found {
+			continue
+		}
+		name = strings.TrimSpace(name)
+		if digest == "" || name == "" {
+			continue
+		}
+		sums[name] = digest
+	}
+	if err := sc.Err(); err != nil {
+		return nil, err
+	}
+	if len(sums) == 0 {
+		return nil, fmt.Errorf("%s held no checksums", url)
+	}
+	return sums, nil
+}
+
 func downloadFile(url, dest string) (retErr error) {
-	resp, err := http.Get(url) //nolint:gosec // URL is constructed from known constant owner/repo, not user input
+	client := &http.Client{Timeout: downloadTimeout}
+	resp, err := client.Get(url) //nolint:gosec // URL is constructed from known constant owner/repo, not user input
 	if err != nil {
 		return err
 	}
