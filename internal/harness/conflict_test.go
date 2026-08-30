@@ -252,6 +252,7 @@ func TestResolve_TakeRewritesTheLosingCopy(t *testing.T) {
 	conflicts := f.detect(t)
 	res, err := Resolve(ResolveRequest{
 		Conflict: conflicts[0], Take: "claude-code", SourcePath: srcPath, CfgDir: f.cfgDir,
+		SourceContent: markSourceWrite,
 	})
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
@@ -266,8 +267,9 @@ func TestResolve_TakeRewritesTheLosingCopy(t *testing.T) {
 	if got := readFile(t, filepath.Join(f.claudeRoot, filepath.FromSlash(conflictRel))); got != conflictClaudeEdit {
 		t.Errorf("winning copy was modified: %q", got)
 	}
-	if got := readFile(t, srcPath); got != conflictClaudeEdit {
-		t.Errorf("source = %q, want the winner's content", got)
+	// The source gets the normalised form, the harness copies the raw one.
+	if got := readFile(t, srcPath); got != sourceMark+conflictClaudeEdit {
+		t.Errorf("source = %q, want the winner's content passed through SourceContent", got)
 	}
 	// Losing text is never simply gone: the user chose a winner, not the deletion
 	// of the other version.
@@ -348,6 +350,7 @@ func TestResolve_MergedContentReplacesEveryCopy(t *testing.T) {
 	src := filepath.Join(t.TempDir(), "review.md")
 	res, err := Resolve(ResolveRequest{
 		Conflict: f.detect(t)[0], Merged: []byte(merged), SourcePath: src, CfgDir: f.cfgDir,
+		SourceContent: markSourceWrite,
 	})
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
@@ -362,11 +365,15 @@ func TestResolve_MergedContentReplacesEveryCopy(t *testing.T) {
 	for _, p := range []string{
 		filepath.Join(f.claudeRoot, filepath.FromSlash(conflictRel)),
 		filepath.Join(f.codexRoot, filepath.FromSlash(conflictCodexRel)),
-		src,
 	} {
 		if got := readFile(t, p); got != merged {
 			t.Errorf("%s = %q, want the merged text", p, got)
 		}
+	}
+	// The merged branch normalises for the source too — the reviewed text was
+	// read out of a harness, so it carries the harness-side expansions.
+	if got := readFile(t, src); got != sourceMark+merged {
+		t.Errorf("source = %q, want the merged text passed through SourceContent", got)
 	}
 	// Both copies were replaced by text neither held, so both were backed up.
 	for _, name := range []string{"claude-code", "codex"} {
@@ -391,5 +398,38 @@ func TestResolve_MergedContentWithMarkersIsRefused(t *testing.T) {
 	// as instructions on the next turn, so a refused write leaves both copies be.
 	if got := readFile(t, filepath.Join(f.codexRoot, filepath.FromSlash(conflictCodexRel))); got != conflictCodexEdit {
 		t.Errorf("a refused merge must not write anything, codex copy = %q", got)
+	}
+}
+
+// ── the source write is normalised, never raw (#285) ─────────────────────────
+
+const sourceMark = "NORMALISED\n"
+
+// markSourceWrite stands in for the write-back normalisation package main
+// supplies. A visible prefix is enough to prove Resolve routed the source write
+// through the hook and the harness writes around it.
+func markSourceWrite(b []byte) []byte { return append([]byte(sourceMark), b...) }
+
+// Naming a SourcePath without a SourceContent is refused, and refused before
+// anything is written — a half-settled conflict is worse than an unsettled one.
+func TestResolve_SourcePathWithoutSourceContentIsRefused(t *testing.T) {
+	testenv.ClearPath(t)
+	f := newConflictFixture(t)
+	write(t, filepath.Join(f.claudeRoot, filepath.FromSlash(conflictRel)), conflictClaudeEdit)
+	write(t, filepath.Join(f.codexRoot, filepath.FromSlash(conflictCodexRel)), conflictCodexEdit)
+	srcPath := filepath.Join(t.TempDir(), "review.md")
+
+	_, err := Resolve(ResolveRequest{
+		Conflict: f.detect(t)[0], Take: "claude-code", SourcePath: srcPath, CfgDir: f.cfgDir,
+	})
+	if !errors.Is(err, ErrNoSourceContent) {
+		t.Fatalf("err = %v, want ErrNoSourceContent", err)
+	}
+	// Nothing was written: the losing copy still holds its own edit.
+	if got := readFile(t, filepath.Join(f.codexRoot, filepath.FromSlash(conflictCodexRel))); got != conflictCodexEdit {
+		t.Errorf("codex copy was modified before the guard fired: %q", got)
+	}
+	if _, sErr := os.Stat(srcPath); sErr == nil {
+		t.Error("the source file was written despite the guard")
 	}
 }

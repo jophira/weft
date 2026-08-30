@@ -252,6 +252,14 @@ var ErrConflictMarkers = fmt.Errorf(
 	"the merged text still contains conflict markers — resolve them in the editor before saving; " +
 		"nothing was written")
 
+// ErrNoSourceContent guards the source write. Writing raw harness bytes to a
+// source de-portablises it, so a caller that names a SourcePath without saying
+// how to normalise for it is refused outright rather than quietly writing the
+// expanded form.
+var ErrNoSourceContent = fmt.Errorf(
+	"internal: ResolveRequest.SourcePath was set without SourceContent — " +
+		"the source write would keep machine-specific absolute paths")
+
 // MergedMarkers reports whether content still carries merge markers.
 func MergedMarkers(content []byte) bool {
 	return merge.HasConflictMarkers(string(content))
@@ -271,6 +279,17 @@ type ResolveRequest struct {
 	// every diverged copy rather than one side winning, so no harness keeps a
 	// version the user did not approve, and Take is ignored.
 	Merged []byte
+	// SourceContent converts harness-side bytes into the form a source file
+	// should hold: placeholder blocks re-collapsed, attribution markers stripped,
+	// anchors collapsed back to {{weft.root}} and friends. The harness copies
+	// keep the expanded text — that is what they are for — but the source must
+	// not, or the absolute paths one machine expanded to travel with the repo
+	// and stop resolving anywhere else (#259, #285).
+	//
+	// Required whenever SourcePath is set. The write-back path in package main
+	// owns the transform, so Resolve takes it as a hook rather than reaching for
+	// it across the package boundary.
+	SourceContent func([]byte) []byte
 }
 
 // ResolveResult records what Resolve did, for the caller to report.
@@ -289,6 +308,12 @@ type ResolveResult struct {
 // other side's text, and a resolution they regret an hour later has to be
 // recoverable.
 func Resolve(req ResolveRequest) (ResolveResult, error) {
+	// Checked before anything is written: failing after the harness copies were
+	// rewritten would leave the conflict half-settled.
+	if req.SourcePath != "" && req.SourceContent == nil {
+		return ResolveResult{}, ErrNoSourceContent
+	}
+
 	var content []byte
 	var winnerName string
 	// A merge has no winner: every copy is replaced by text none of them held,
@@ -360,7 +385,7 @@ func Resolve(req ResolveRequest) (ResolveResult, error) {
 		if mkErr := os.MkdirAll(filepath.Dir(req.SourcePath), 0o755); mkErr != nil {
 			return ResolveResult{}, fmt.Errorf("creating source dir for %s: %w", req.Conflict.Canonical, mkErr)
 		}
-		if wErr := os.WriteFile(req.SourcePath, content, 0o644); wErr != nil { //nolint:gosec // SourcePath comes from the registered source root
+		if wErr := os.WriteFile(req.SourcePath, req.SourceContent(content), 0o644); wErr != nil { //nolint:gosec // SourcePath comes from the registered source root
 			return ResolveResult{}, fmt.Errorf("writing %s back to its source: %w", req.Conflict.Canonical, wErr)
 		}
 	}
