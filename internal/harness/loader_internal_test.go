@@ -204,3 +204,69 @@ func TestGenericHarness_Detect_noCandidates(t *testing.T) {
 		t.Error("Detect with no candidates: expected false")
 	}
 }
+
+// ── entry validation (#279) ──────────────────────────────────────────────────
+
+// writeHarnessesYAML points $HOME at a temp dir and puts doc in its
+// harnesses.yaml, so loadConfigHarnesses reads exactly that.
+func writeHarnessesYAML(t *testing.T, doc string) {
+	t.Helper()
+	tmp := t.TempDir()
+	testenv.SetHome(t, tmp)
+	cfgDir := filepath.Join(tmp, ".config", "weft")
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cfgDir, "harnesses.yaml"), []byte(doc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// config_dir and detect_path are joined onto $HOME, so anything that escapes it
+// turns a user-defined harness into a write primitive pointed wherever it likes.
+func TestLoadConfigHarnesses_rejectsEscapingPaths(t *testing.T) {
+	for _, tc := range []struct{ name, doc string }{
+		{"config_dir parent", "harnesses:\n  - name: bad\n    config_dir: ../../etc\n"},
+		{"config_dir absolute", "harnesses:\n  - name: bad\n    config_dir: /etc\n"},
+		{"config_dir sneaky", "harnesses:\n  - name: bad\n    config_dir: a/../../../etc\n"},
+		{"config_dir home itself", "harnesses:\n  - name: bad\n    config_dir: .\n"},
+		{"config_dir drive", `harnesses:` + "\n  - name: bad\n    config_dir: \"C:evil\"\n"},
+		{"detect_path parent", "harnesses:\n  - name: bad\n    config_dir: .ok\n    detect_path: ../../etc\n"},
+		{"detect_path absolute", "harnesses:\n  - name: bad\n    config_dir: .ok\n    detect_path: /etc\n"},
+		{"no name", "harnesses:\n  - config_dir: .mytool\n"},
+		{"no paths", "harnesses:\n  - name: bad\n"},
+		{"duplicate names", "harnesses:\n  - name: dup\n    config_dir: .a\n  - name: dup\n    config_dir: .b\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			writeHarnessesYAML(t, tc.doc)
+			got, err := loadConfigHarnesses()
+			if err == nil {
+				t.Fatalf("loadConfigHarnesses accepted the entry, returning %d harnesses", len(got))
+			}
+			if got != nil {
+				t.Errorf("a rejected load must return no harnesses, got %d", len(got))
+			}
+		})
+	}
+}
+
+// The ordinary shapes must keep loading — validation that rejects real configs
+// is worse than the hole it closes.
+func TestLoadConfigHarnesses_acceptsOrdinaryPaths(t *testing.T) {
+	for _, tc := range []struct{ name, doc string }{
+		{"dot dir", "harnesses:\n  - name: mytool\n    config_dir: .mytool\n"},
+		{"nested", "harnesses:\n  - name: mytool\n    config_dir: .config/mytool\n"},
+		{"dot segment inside", "harnesses:\n  - name: mytool\n    config_dir: .config/./mytool\n"},
+		{"up then back", "harnesses:\n  - name: mytool\n    config_dir: .config/x/../mytool\n"},
+		{"detect only", "harnesses:\n  - name: mytool\n    detect_path: .mytool\n"},
+		{"both differing", "harnesses:\n  - name: mytool\n    config_dir: .mytool\n    detect_path: .config/mytool\n"},
+		{"two harnesses", "harnesses:\n  - name: one\n    config_dir: .one\n  - name: two\n    config_dir: .two\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			writeHarnessesYAML(t, tc.doc)
+			if _, err := loadConfigHarnesses(); err != nil {
+				t.Fatalf("loadConfigHarnesses rejected an ordinary config: %v", err)
+			}
+		})
+	}
+}
