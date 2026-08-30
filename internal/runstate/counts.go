@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/jophira/weft/internal/privatefile"
 )
 
 // countsFileName is the counts cache's basename inside the config dir.
@@ -55,14 +57,11 @@ func countsPathFor(cfgDir string) string {
 // The write is atomic (temp file + rename) so a status line reading concurrently
 // never sees a half-written file.
 func WriteCounts(cfgDir string, c Counts) error {
-	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
-		return fmt.Errorf("runstate: creating dir: %w", err)
-	}
 	data, err := json.MarshalIndent(c, "", "  ")
 	if err != nil {
 		return fmt.Errorf("runstate: marshalling counts: %w", err)
 	}
-	return atomicWrite(cfgDir, countsFileName, data)
+	return privatefile.Write(filepath.Join(cfgDir, countsFileName), data)
 }
 
 // ReadCounts returns the cached counts for cfgDir, or nil when none have been

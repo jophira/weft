@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/jophira/weft/internal/source"
+
+	"github.com/jophira/weft/internal/privatefile"
 )
 
 // DefaultInterval is the minimum time between automatic pulls for a source.
@@ -55,14 +57,11 @@ func ReadState(path string) (State, error) {
 
 // WriteState persists s to path, creating parent directories as needed.
 func WriteState(path string, s State) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
 	data, err := json.Marshal(s)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0o644)
+	return privatefile.Write(path, data)
 }
 
 // ShouldSync reports whether source name is due for a pull as of now.

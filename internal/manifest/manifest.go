@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/jophira/weft/internal/privatefile"
 )
 
 // Manifest records every file weft last wrote for a given harness.
@@ -110,14 +112,13 @@ func (m *Manifest) StagedSet() map[string]struct{} {
 // Save writes m to cfgDir/manifests/<harness>.json, creating the directory if needed.
 func Save(cfgDir string, m *Manifest) error {
 	p := manifestPath(cfgDir, m.Harness)
-	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
-		return fmt.Errorf("creating manifests dir: %w", err)
-	}
 	data, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
 		return fmt.Errorf("serialising manifest: %w", err)
 	}
-	return os.WriteFile(p, data, 0o644) //nolint:gosec // path is derived from config dir, not user input
+	// A manifest torn by a crash is read back as weft's own record of what it
+	// projected, so this write is atomic as well as private.
+	return privatefile.Write(p, data)
 }
 
 // HashFile returns the sha256 hex digest of the file at path.
