@@ -3,6 +3,7 @@ package collect_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/jophira/weft/internal/collect"
@@ -259,5 +260,77 @@ func TestCollect_separatorNotDoubled(t *testing.T) {
 	}
 	if string(got) != "backend\nfrontend" {
 		t.Errorf("separator doubled: %q", string(got))
+	}
+}
+
+// ── pattern validation (#284) ────────────────────────────────────────────────
+
+// A pattern matches on filename, so the only directory syntax that means
+// anything is the recursive "**/" prefix. Anything else was silently reduced to
+// its base name and matched the whole tree (#284).
+func TestValidatePattern(t *testing.T) {
+	for _, tc := range []struct {
+		pattern string
+		wantErr bool
+	}{
+		{"", false},
+		{"CLAUDE.md", false},
+		{"*.md", false},
+		{"**/*.md", false},
+		{"**/*INSTRUCTIONS.md", false},
+		{"./CLAUDE.md", false},
+		{"docs/**/*.md", true},
+		{"**/docs/*.md", true},
+		{"docs/*.md", true},
+		{"a/b.md", true},
+		{"backend/java/JAVA.md", true},
+	} {
+		t.Run(tc.pattern, func(t *testing.T) {
+			err := collect.ValidatePattern(tc.pattern)
+			if tc.wantErr && err == nil {
+				t.Errorf("ValidatePattern(%q) = nil, want an error", tc.pattern)
+			}
+			if !tc.wantErr && err != nil {
+				t.Errorf("ValidatePattern(%q) = %v, want nil", tc.pattern, err)
+			}
+		})
+	}
+}
+
+// The reported behaviour: a directory-scoped pattern quietly matched every file
+// with that name anywhere in the tree. It must now fail instead of returning
+// content the user did not ask for.
+func TestCollect_directoryPatternIsRejectedNotWidened(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, filepath.Join("docs", "guide.md"), "wanted")
+	write(t, root, filepath.Join("secrets", "notes.md"), "not wanted")
+
+	got, err := collect.Collect(root, "docs/**/*.md")
+	if err == nil {
+		t.Fatalf("Collect accepted a directory pattern, returning %q", got)
+	}
+	if got != nil {
+		t.Errorf("a rejected pattern must return no content, got %q", got)
+	}
+	if !strings.Contains(err.Error(), "instruction_exclude") {
+		t.Errorf("the error should name the mechanism that does scope by directory, got: %v", err)
+	}
+}
+
+// The documented recursive form still works — validation that breaks the
+// supported pattern would be worse than the hole it closes.
+func TestCollect_recursiveFormStillWorks(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "a.md", "first")
+	write(t, root, filepath.Join("sub", "b.md"), "second")
+
+	got, err := collect.Collect(root, "**/*.md")
+	if err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	for _, want := range []string{"first", "second"} {
+		if !strings.Contains(string(got), want) {
+			t.Errorf("missing %q in:\n%s", want, got)
+		}
 	}
 }

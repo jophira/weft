@@ -51,6 +51,10 @@ type Structure struct {
 	// concatenates every matching file in parent-before-child order. Managed
 	// subdirectory files (commands, skills, etc.) are always excluded from
 	// assembly regardless of this pattern.
+	//
+	// The pattern matches on filename, never on location, so it cannot name a
+	// directory: use InstructionExclude to scope which parts of the tree are
+	// assembled. A directory-bearing pattern is rejected (#284).
 	InstructionGlob string `yaml:"instruction_glob" mapstructure:"instruction_glob"`
 	// InstructionExclude lists root-relative path prefixes (directories or
 	// files) excluded from instruction assembly, in addition to the always-
