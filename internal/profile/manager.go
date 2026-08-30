@@ -3,7 +3,6 @@ package profile
 import (
 	"errors"
 	"fmt"
-	"regexp"
 
 	"github.com/jophira/weft/internal/locate"
 	"github.com/jophira/weft/internal/yamlstore"
@@ -11,8 +10,6 @@ import (
 
 // compile-time check: FileManager must satisfy Manager.
 var _ Manager = (*FileManager)(nil)
-
-var validName = regexp.MustCompile(`^[a-z][a-z0-9_-]*$`)
 
 // FileManager persists each Profile as a YAML file under a directory.
 type FileManager struct {
@@ -25,11 +22,11 @@ func NewFileManager(dir string) *FileManager {
 
 // Create writes a new profile YAML file. Errors if the name already exists.
 func (m *FileManager) Create(p Profile) error {
-	if !validName.MatchString(p.Name) {
-		return fmt.Errorf(
-			"invalid name %q: must start with a letter and contain only lowercase letters, digits, hyphens or underscores",
-			p.Name,
-		)
+	// One definition of a valid name, in the package that turns it into a
+	// path. Checked here as well so the failure lands on the create call
+	// rather than on the write underneath it.
+	if err := yamlstore.ValidName(p.Name); err != nil {
+		return err
 	}
 	if len(p.Sources) == 0 {
 		return fmt.Errorf("profile must reference at least one source (use --sources)")
