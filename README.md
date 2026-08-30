@@ -63,7 +63,7 @@ Replace `linux_amd64` with your platform: `linux_arm64`, `darwin_amd64`, `darwin
 
 Download `weft_windows_amd64.zip` from the [releases page](https://github.com/jophira/weft/releases/latest), extract, and add to your `PATH`.
 
-**Build from source** (requires Go 1.24+)
+**Build from source** (requires Go 1.26.6+, matching the `go` directive in `go.mod`)
 ```bash
 git clone https://github.com/jophira/weft.git && cd weft
 make build        # binary at ./bin/weft
