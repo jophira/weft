@@ -1,6 +1,7 @@
 package merge
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -84,7 +85,11 @@ func (m *Merger) Inspect(roots []string) (*InspectReport, error) {
 					present = append(present, root)
 				}
 			} else {
-				if _, err := os.Stat(filepath.Join(root, rel)); err == nil {
+				// Emptiness, not existence: foldFile skips empty and
+				// whitespace-only files, so an existence check here would
+				// report a winner the apply never produces.
+				data, err := os.ReadFile(filepath.Join(root, rel))
+				if err == nil && len(bytes.TrimSpace(data)) > 0 {
 					present = append(present, root)
 				}
 			}

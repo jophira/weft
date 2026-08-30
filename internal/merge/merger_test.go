@@ -566,3 +566,83 @@ func TestMergeRoots_attributionMarkers_fileUniqueToOneRoot_noMarkers(t *testing.
 		t.Errorf("content should be unmodified, got %q", got)
 	}
 }
+
+// ── Empty higher-priority sources (#287) ──────────────────────────────────────
+
+// An empty or whitespace-only file in a higher-priority source must not erase a
+// populated lower-priority one. Before the fix, attribution wrapping turned the
+// empty contribution into a non-empty marker block that won the cascade.
+func TestMergeRoots_emptyHigherPrioritySource_keepsPopulated(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		overlay profile.Overlay
+		empty   string
+	}{
+		{"cascade/empty", profile.OverlayCascade, ""},
+		{"cascade/whitespace", profile.OverlayCascade, "\n  \n\t\n"},
+		{"lastWins/empty", profile.OverlayLastWins, ""},
+		{"lastWins/whitespace", profile.OverlayLastWins, "\n  \n"},
+		{"merge/empty", profile.OverlayMerge, ""},
+		{"merge/whitespace", profile.OverlayMerge, "   \n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := t.TempDir()
+			b := t.TempDir()
+			out := t.TempDir()
+			writeFile(t, a, "CLAUDE.md", "# Source A rules")
+			writeFile(t, a, "commands/deploy.md", "run the deploy")
+			writeFile(t, b, "CLAUDE.md", tc.empty)
+			writeFile(t, b, "commands/deploy.md", tc.empty)
+
+			roots := []merge.NamedRoot{
+				{Name: "source-a", Path: a},
+				{Name: "source-b", Path: b},
+			}
+			_, attr, err := merge.New(tc.overlay).MergeRoots(roots, out)
+			if err != nil {
+				t.Fatalf("MergeRoots: %v", err)
+			}
+			for _, rel := range []string{"CLAUDE.md", "commands/deploy.md"} {
+				got := readFile(t, out, rel)
+				if !strings.Contains(got, "Source A rules") && !strings.Contains(got, "run the deploy") {
+					t.Errorf("%s: source-a content lost, got %q", rel, got)
+				}
+				if strings.Contains(got, "weft:source:") {
+					t.Errorf("%s: empty source must not contribute a marker block, got %q", rel, got)
+				}
+				if _, ok := attr[rel]; ok {
+					t.Errorf("%s: empty source must not be recorded as a contributor, got %v", rel, attr[rel])
+				}
+			}
+		})
+	}
+}
+
+// Inspect is the dry-run for the same merge, so it must agree with the apply
+// about who wins: the empty source is not a contributor.
+func TestInspect_emptyHigherPrioritySource_notAContributor(t *testing.T) {
+	a := t.TempDir()
+	b := t.TempDir()
+	writeFile(t, a, "CLAUDE.md", "# Source A rules")
+	writeFile(t, b, "CLAUDE.md", "")
+
+	report, err := merge.New(profile.OverlayCascade).Inspect([]string{a, b})
+	if err != nil {
+		t.Fatalf("Inspect: %v", err)
+	}
+	var entry *merge.FileEntry
+	for i := range report.Entries {
+		if report.Entries[i].Rel == "CLAUDE.md" {
+			entry = &report.Entries[i]
+		}
+	}
+	if entry == nil {
+		t.Fatal("Inspect dropped CLAUDE.md entirely")
+	}
+	if len(entry.Roots) != 1 || entry.Roots[0] != a {
+		t.Errorf("Roots = %v, want only the populated root %s", entry.Roots, a)
+	}
+	if entry.WinnerRoot != a {
+		t.Errorf("WinnerRoot = %s, want the populated root %s", entry.WinnerRoot, a)
+	}
+}
