@@ -17,6 +17,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/jophira/weft/internal/privatefile"
 )
 
 // fileName is the sidecar's basename inside the config dir.
@@ -44,40 +46,14 @@ func pathFor(cfgDir string) string {
 // The write is atomic (temp file + rename) so a concurrent Read never observes
 // a half-written file. cf. Java: Files.move(tmp, dst, ATOMIC_MOVE).
 func Write(cfgDir string, rs RunState) error {
-	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+	if err := privatefile.MkdirAll(cfgDir); err != nil {
 		return fmt.Errorf("runstate: creating dir: %w", err)
 	}
 	data, err := json.MarshalIndent(rs, "", "  ")
 	if err != nil {
 		return fmt.Errorf("runstate: marshalling: %w", err)
 	}
-	return atomicWrite(cfgDir, fileName, data)
-}
-
-// atomicWrite writes data to cfgDir/name via a temp file and a rename, so a
-// concurrent read never observes a partial file. Shared by both sidecars this
-// package owns. cf. Java: Files.move(tmp, dst, ATOMIC_MOVE).
-func atomicWrite(cfgDir, name string, data []byte) error {
-	dst := filepath.Join(cfgDir, name)
-	tmp, err := os.CreateTemp(cfgDir, name+".*.tmp")
-	if err != nil {
-		return fmt.Errorf("runstate: temp file: %w", err)
-	}
-	tmpName := tmp.Name()
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		_ = os.Remove(tmpName)
-		return fmt.Errorf("runstate: writing: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		_ = os.Remove(tmpName)
-		return fmt.Errorf("runstate: closing: %w", err)
-	}
-	if err := os.Rename(tmpName, dst); err != nil {
-		_ = os.Remove(tmpName)
-		return fmt.Errorf("runstate: renaming: %w", err)
-	}
-	return nil
+	return privatefile.Write(filepath.Join(cfgDir, fileName), data)
 }
 
 // Clear removes the sidecar. A missing file is not an error — clearing is

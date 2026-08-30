@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/jophira/weft/internal/privatefile"
 )
 
 type Config struct {
@@ -178,8 +180,6 @@ func setKey(key string, value any) error {
 	if err != nil {
 		return err
 	}
-	dir := filepath.Dir(cfgPath)
-
 	raw := map[string]any{}
 	if data, err := os.ReadFile(cfgPath); err == nil {
 		if err := yaml.Unmarshal(data, &raw); err != nil {
@@ -192,8 +192,5 @@ func setKey(key string, value any) error {
 	if err != nil {
 		return fmt.Errorf("serialising config: %w", err)
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("creating config dir: %w", err)
-	}
-	return os.WriteFile(cfgPath, out, 0o644)
+	return privatefile.Write(cfgPath, out)
 }

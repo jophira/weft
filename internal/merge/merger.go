@@ -11,6 +11,8 @@ import (
 	"strings"
 
 	"github.com/jophira/weft/internal/profile"
+
+	"github.com/jophira/weft/internal/privatefile"
 )
 
 // Filter is a predicate applied to relative file paths. Return true to include.
@@ -127,7 +129,7 @@ func (m *Merger) MergeRoots(roots []NamedRoot, outputDir string) ([]string, map[
 		}
 	}
 
-	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+	if err := privatefile.MkdirAll(outputDir); err != nil {
 		return nil, nil, fmt.Errorf("creating output directory: %w", err)
 	}
 
@@ -148,10 +150,10 @@ func (m *Merger) MergeRoots(roots []NamedRoot, outputDir string) ([]string, map[
 			continue
 		}
 		dst := filepath.Join(outputDir, rel)
-		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		if err := privatefile.MkdirAll(filepath.Dir(dst)); err != nil {
 			return nil, nil, fmt.Errorf("creating parent dir for %s: %w", rel, err)
 		}
-		if err := os.WriteFile(dst, merged, 0o644); err != nil {
+		if err := privatefile.Write(dst, merged); err != nil {
 			return nil, nil, fmt.Errorf("writing %s: %w", rel, err)
 		}
 		manifest = append(manifest, rel)

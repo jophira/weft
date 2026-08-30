@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/jophira/weft/internal/privatefile"
 )
 
 // CacheFileName is the conventional name of the generated resolution cache,
@@ -164,7 +166,7 @@ func (c Cache) Save(path string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, append([]byte(cacheHeader), body...), 0o644) //nolint:gosec // non-secret generated index
+	return privatefile.Write(path, append([]byte(cacheHeader), body...))
 }
 
 // toMetas converts the cache into the ruleMeta slice the resolver consumes,

@@ -12,6 +12,8 @@ import (
 
 	"github.com/jophira/weft/internal/locate"
 	"github.com/jophira/weft/internal/manifest"
+
+	"github.com/jophira/weft/internal/privatefile"
 )
 
 // ApplyCtx carries per-apply metadata needed for manifest tracking and backups.
@@ -456,8 +458,10 @@ func backupConflicts(conflicts []conflictFile, harnessName, cfgDir string) (stri
 	ts := time.Now().Format("20060102-150405")
 	backupDir := filepath.Join(cfgDir, "backups", harnessName, ts)
 
-	if err := os.MkdirAll(backupDir, 0o755); err != nil {
-		return "", fmt.Errorf("creating backup dir: %w", err)
+	// A backup holds whole rule files verbatim, which is exactly the content
+	// that should not be world-readable (#280).
+	if err := privatefile.MkdirAll(backupDir); err != nil {
+		return "", err
 	}
 	// rel is a harness-relative path that reached weft from the projection, so
 	// the backup copy is written through a root too: a backup must not be the
@@ -469,14 +473,16 @@ func backupConflicts(conflicts []conflictFile, harnessName, cfgDir string) (stri
 	defer root.Close() //nolint:errcheck // failure to close cannot unwrite the backups
 
 	for _, c := range conflicts {
-		if err := root.MkdirAll(filepath.Dir(c.rel), 0o755); err != nil {
+		if err := root.MkdirAll(filepath.Dir(c.rel), privatefile.DirMode); err != nil {
 			return "", fmt.Errorf("creating backup dir for %s: %w", c.rel, err)
 		}
 		data, err := os.ReadFile(c.abs)
 		if err != nil {
 			return "", fmt.Errorf("reading %s for backup: %w", c.rel, err)
 		}
-		if err := root.WriteFile(c.rel, data, 0o644); err != nil {
+		// Written through the root, so it keeps the #278 containment; the mode
+		// is the only thing that changes here.
+		if err := root.WriteFile(c.rel, data, privatefile.FileMode); err != nil {
 			return "", fmt.Errorf("backing up %s: %w", c.rel, err)
 		}
 	}

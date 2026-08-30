@@ -18,6 +18,8 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/jophira/weft/internal/privatefile"
 )
 
 // ErrNotFound is returned by Get and Remove when no record exists for a name.
@@ -75,14 +77,11 @@ func (s *Store[T]) Write(name string, v T) error {
 	if err := ValidName(name); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(s.dir, 0o755); err != nil {
-		return fmt.Errorf("creating directory: %w", err)
-	}
 	data, err := yaml.Marshal(&v)
 	if err != nil {
 		return fmt.Errorf("serialising %q: %w", name, err)
 	}
-	return os.WriteFile(s.filePath(name), data, 0o644)
+	return privatefile.Write(s.filePath(name), data)
 }
 
 // Get reads and parses one record by name. Returns ErrNotFound if it doesn't exist.

@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/jophira/weft/internal/privatefile"
 )
 
 const checkInterval = 24 * time.Hour
@@ -71,14 +73,11 @@ func ReadCache(path string) (Cache, error) {
 }
 
 func WriteCache(path string, c Cache) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
 	data, err := json.Marshal(c)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0o644)
+	return privatefile.Write(path, data)
 }
 
 // LatestAPIURL is the endpoint the check reads. Exported so a test can pin it

@@ -7,6 +7,8 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+
+	"github.com/jophira/weft/internal/privatefile"
 )
 
 // weftLayout is the resolved ADR-0003 directory layout for this machine: the
@@ -94,19 +96,25 @@ pre-migration layout is left untouched — run 'weft migrate' to relocate it.`,
 		l := resolveLayout()
 		out := cmd.OutOrStdout()
 
-		dirs := []struct{ label, path string }{
+		// private marks the engine room, which is created owner-only (#280). The
+		// workbench above it is content the user authors, reads and often shares
+		// as a git repo, so it keeps ordinary permissions.
+		dirs := []struct {
+			label, path string
+			private     bool
+		}{
 			// Workbench (~/weft): consumer-facing content.
-			{"sources (content)", l.ContentSources},
-			{"templates", l.Templates},
-			{"work/projects", l.WorkProjects},
-			{"work/tickets", l.WorkTickets},
-			{"work/plans", l.WorkPlans},
-			{"work/inbox", l.WorkInbox},
+			{label: "sources (content)", path: l.ContentSources},
+			{label: "templates", path: l.Templates},
+			{label: "work/projects", path: l.WorkProjects},
+			{label: "work/tickets", path: l.WorkTickets},
+			{label: "work/plans", path: l.WorkPlans},
+			{label: "work/inbox", path: l.WorkInbox},
 			// Engine room (~/.config/weft): bookkeeping.
-			{"registry", l.Sources},
-			{"profiles", l.Profiles},
-			{"hooks", l.Hooks},
-			{"audit", l.Audit},
+			{label: "registry", path: l.Sources, private: true},
+			{label: "profiles", path: l.Profiles, private: true},
+			{label: "hooks", path: l.Hooks, private: true},
+			{label: "audit", path: l.Audit, private: true},
 		}
 		created := 0
 		for _, d := range dirs {
@@ -114,8 +122,12 @@ pre-migration layout is left untouched — run 'weft migrate' to relocate it.`,
 				continue
 			}
 			existed := dirExists(d.path)
-			if err := os.MkdirAll(d.path, 0o755); err != nil {
-				return fmt.Errorf("creating %s (%s): %w", d.label, d.path, err)
+			mkErr := os.MkdirAll(d.path, 0o755)
+			if d.private {
+				mkErr = privatefile.MkdirAll(d.path)
+			}
+			if mkErr != nil {
+				return fmt.Errorf("creating %s (%s): %w", d.label, d.path, mkErr)
 			}
 			if existed {
 				fmt.Fprintf(out, "  exists   %s\n", d.path)

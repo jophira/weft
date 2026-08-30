@@ -11,6 +11,8 @@ import (
 	"github.com/jophira/weft/internal/instruction"
 	"github.com/jophira/weft/internal/profile"
 	"github.com/jophira/weft/internal/source"
+
+	"github.com/jophira/weft/internal/privatefile"
 )
 
 // expandProjectsInContent replaces the weft:projects placeholder (or a stale
@@ -69,8 +71,8 @@ func stageInstructions(roots []string, srcs []source.Source, p *profile.Profile,
 	if err := os.RemoveAll(instrDir); err != nil {
 		return nil, fmt.Errorf("clearing instructions dir: %w", err)
 	}
-	if err := os.MkdirAll(instrDir, 0o755); err != nil {
-		return nil, fmt.Errorf("creating instructions dir: %w", err)
+	if err := privatefile.MkdirAll(instrDir); err != nil {
+		return nil, err
 	}
 
 	assembler := buildAssembler(roots, srcs)
@@ -92,10 +94,11 @@ func stageInstructions(roots []string, srcs []source.Source, p *profile.Profile,
 
 		fname := fmt.Sprintf("%02d-%s.md", i, s.Name)
 		path := filepath.Join(instrDir, fname)
-		// 0o444: read-only so an editor warns before an accidental edit is
-		// silently lost on the next apply (#261). instrDir was just recreated
-		// above, so there is no pre-existing read-only file to fight here.
-		if err := os.WriteFile(path, []byte(content), 0o444); err != nil { //nolint:gosec // path under weft's own config dir
+		// 0o400: read-only so an editor warns before an accidental edit is
+		// silently lost on the next apply (#261), and owner-only like the rest
+		// of the engine room (#280). privatefile.WriteMode renames into place,
+		// so a read-only file already there is replaced rather than fought.
+		if err := privatefile.WriteMode(path, []byte(content), 0o400); err != nil {
 			return nil, fmt.Errorf("writing instruction copy %s: %w", fname, err)
 		}
 		out = append(out, harness.SourceInstruction{Name: s.Name, Content: content, CopyPath: path})

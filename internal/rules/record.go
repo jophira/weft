@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/jophira/weft/internal/privatefile"
 )
 
 // maxLogBytes caps a resolve log before it is rotated to "<path>.1". The dedup
@@ -169,14 +171,11 @@ func AppendRecordIfChanged(path string, rec ResolveRecord) (bool, error) {
 
 // WriteLatest writes rec as an indented JSON snapshot, overwriting any prior one.
 func WriteLatest(path string, rec ResolveRecord) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
 	data, err := json.MarshalIndent(rec, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, append(data, '\n'), 0o644) //nolint:gosec // non-secret audit snapshot
+	return privatefile.Write(path, append(data, '\n'))
 }
 
 // lastRecordHash returns the ResolutionHash of the final non-empty line of the
@@ -215,14 +214,16 @@ func lastRecordHash(path string) (string, error) {
 
 // appendJSONLine appends rec as a single JSON line, creating parent dirs.
 func appendJSONLine(path string, rec ResolveRecord) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := privatefile.MkdirAll(filepath.Dir(path)); err != nil {
 		return err
 	}
 	data, err := json.Marshal(rec)
 	if err != nil {
 		return err
 	}
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644) //nolint:gosec // non-secret audit log
+	// Append-only, so this one cannot be a temp-file-and-rename. The mode is
+	// what changes: the log records which rules resolved for which repository.
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, privatefile.FileMode) //nolint:gosec // path derived from the audit dir, not user input
 	if err != nil {
 		return err
 	}
