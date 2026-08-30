@@ -5,6 +5,7 @@
 package sourcesync
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -17,10 +18,11 @@ import (
 // SyncSource clones (if missing) or pulls a single source.
 // Returns true when new commits were fetched.
 // out receives progress messages; pass io.Discard to suppress them.
+// ctx bounds the network transfer; pass context.Background() for an unbounded one.
 //
 // cf. Java: static utility method pattern — no receiver, pure function on the
 // Source value type.
-func SyncSource(s source.Source, out io.Writer) (bool, error) {
+func SyncSource(ctx context.Context, s source.Source, out io.Writer) (bool, error) {
 	if s.Remote == "" {
 		return false, fmt.Errorf("source %q has no remote configured — add one with 'weft source edit --remote <url>'", s.Name)
 	}
@@ -37,7 +39,7 @@ func SyncSource(s source.Source, out io.Writer) (bool, error) {
 	// Clone path: directory does not yet exist.
 	if _, err := os.Stat(expanded); os.IsNotExist(err) {
 		fmt.Fprintf(out, "Cloning %s from %s...\n", s.Name, s.Remote)
-		if err := git.Clone(s.Remote, expanded, s.Branch, auth, out); err != nil {
+		if err := git.Clone(ctx, s.Remote, expanded, s.Branch, auth, out); err != nil {
 			return false, fmt.Errorf("clone failed: %w", err)
 		}
 		fmt.Fprintf(out, "✓ %s cloned → %s\n", s.Name, s.Root)
@@ -56,7 +58,7 @@ func SyncSource(s source.Source, out io.Writer) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	updated, err := repo.Pull(s.Branch, auth)
+	updated, err := repo.Pull(ctx, s.Branch, auth)
 	if err != nil {
 		return false, fmt.Errorf("pull failed: %w", err)
 	}

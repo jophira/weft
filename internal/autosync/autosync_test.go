@@ -2,7 +2,9 @@ package autosync
 
 import (
 	"bytes"
+	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -26,9 +28,11 @@ func src(name string, autoPull bool) source.Source {
 	return source.Source{Name: name, Root: "/tmp/" + name, Remote: "git@example.com/" + name, Branch: "main", AutoPull: autoPull}
 }
 
-func noop(_ source.Source) (bool, error)    { return false, nil }
-func updated(_ source.Source) (bool, error) { return true, nil }
-func failing(_ source.Source) (bool, error) { return false, errors.New("pull failed") }
+func noop(_ context.Context, _ source.Source) (bool, error)    { return false, nil }
+func updated(_ context.Context, _ source.Source) (bool, error) { return true, nil }
+func failing(_ context.Context, _ source.Source) (bool, error) {
+	return false, errors.New("pull failed")
+}
 
 // ── ShouldSync ────────────────────────────────────────────────────────────────
 
@@ -176,7 +180,7 @@ func TestWriteState_createsParentDirs(t *testing.T) {
 func TestRun_skipsNonAutoPullSources(t *testing.T) {
 	path := stateFile(t)
 	called := false
-	syncFn := func(_ source.Source) (bool, error) { called = true; return false, nil }
+	syncFn := func(_ context.Context, _ source.Source) (bool, error) { called = true; return false, nil }
 
 	sources := []source.Source{src("work", false)}
 	_ = run(sources, path, 0, epoch, syncFn, &bytes.Buffer{})
@@ -194,7 +198,7 @@ func TestRun_skipsRecentlySyncedSource(t *testing.T) {
 	}
 
 	called := false
-	syncFn := func(_ source.Source) (bool, error) { called = true; return false, nil }
+	syncFn := func(_ context.Context, _ source.Source) (bool, error) { called = true; return false, nil }
 
 	sources := []source.Source{src("work", true)}
 	_ = run(sources, path, 5*time.Minute, epoch, syncFn, &bytes.Buffer{})
@@ -212,7 +216,7 @@ func TestRun_syncsStaleSource(t *testing.T) {
 	}
 
 	called := false
-	syncFn := func(_ source.Source) (bool, error) { called = true; return false, nil }
+	syncFn := func(_ context.Context, _ source.Source) (bool, error) { called = true; return false, nil }
 
 	sources := []source.Source{src("work", true)}
 	_ = run(sources, path, 5*time.Minute, epoch, syncFn, &bytes.Buffer{})
@@ -251,7 +255,7 @@ func TestRun_continuesAfterSyncError(t *testing.T) {
 	path := stateFile(t)
 	var mu sync.Mutex
 	calls := 0
-	syncFn := func(s source.Source) (bool, error) {
+	syncFn := func(_ context.Context, s source.Source) (bool, error) {
 		mu.Lock()
 		calls++
 		mu.Unlock()
@@ -321,7 +325,7 @@ func TestRun_multipleSourcesPartialStale(t *testing.T) {
 	}
 
 	var synced []string
-	syncFn := func(s source.Source) (bool, error) {
+	syncFn := func(_ context.Context, s source.Source) (bool, error) {
 		synced = append(synced, s.Name)
 		return false, nil
 	}
@@ -388,13 +392,13 @@ func TestRun_exported_noSources(t *testing.T) {
 	}
 }
 
-func syncFnNoop(_ source.Source) (bool, error) { return false, nil }
+func syncFnNoop(_ context.Context, _ source.Source) (bool, error) { return false, nil }
 
 func TestRun_mixedAutoPull(t *testing.T) {
 	path := stateFile(t)
 	var mu sync.Mutex
 	var synced []string
-	syncFn := func(s source.Source) (bool, error) {
+	syncFn := func(_ context.Context, s source.Source) (bool, error) {
 		mu.Lock()
 		synced = append(synced, s.Name)
 		mu.Unlock()
@@ -416,4 +420,165 @@ func TestRun_mixedAutoPull(t *testing.T) {
 	if len(synced) != 2 {
 		t.Errorf("expected 2 sources synced, got %d: %v", len(synced), synced)
 	}
+}
+
+// ── bounded concurrency and per-source deadlines (#281) ──────────────────────
+
+// The bound is the point of the change: however many sources are due, only
+// maxConcurrentSyncs of them may be touching the network at once.
+func TestRun_boundsConcurrentSyncs(t *testing.T) {
+	var mu sync.Mutex
+	inFlight, peak := 0, 0
+	release := make(chan struct{})
+
+	syncFn := func(_ context.Context, _ source.Source) (bool, error) {
+		mu.Lock()
+		inFlight++
+		if inFlight > peak {
+			peak = inFlight
+		}
+		mu.Unlock()
+
+		<-release // hold the slot until every goroutine has had its chance to start
+
+		mu.Lock()
+		inFlight--
+		mu.Unlock()
+		return false, nil
+	}
+
+	sources := make([]source.Source, 20)
+	for i := range sources {
+		sources[i] = src(fmt.Sprintf("s%02d", i), true)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		_ = run(sources, stateFile(t), 0, epoch, syncFn, &bytes.Buffer{})
+		close(done)
+	}()
+
+	// Give the pool time to saturate, then let everything through.
+	waitFor(t, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return inFlight == maxConcurrentSyncs
+	}, "pool never reached its bound")
+	close(release)
+	<-done
+
+	mu.Lock()
+	defer mu.Unlock()
+	if peak > maxConcurrentSyncs {
+		t.Errorf("peak concurrency = %d, want at most %d", peak, maxConcurrentSyncs)
+	}
+}
+
+// Every due source still runs — a bound that dropped work would be worse than
+// the unbounded fan-out it replaced.
+func TestRun_boundedPoolStillSyncsEverySource(t *testing.T) {
+	var mu sync.Mutex
+	seen := map[string]bool{}
+	syncFn := func(_ context.Context, s source.Source) (bool, error) {
+		mu.Lock()
+		seen[s.Name] = true
+		mu.Unlock()
+		return false, nil
+	}
+
+	sources := make([]source.Source, 3*maxConcurrentSyncs)
+	for i := range sources {
+		sources[i] = src(fmt.Sprintf("s%02d", i), true)
+	}
+	if err := run(sources, stateFile(t), 0, epoch, syncFn, &bytes.Buffer{}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if len(seen) != len(sources) {
+		t.Errorf("synced %d sources, want %d", len(seen), len(sources))
+	}
+}
+
+// Each source gets a live deadline, so a remote that accepts a connection and
+// then stalls cannot hold its slot — and with a bounded pool, block everything
+// queued behind it.
+func TestRun_passesADeadlineToEachSource(t *testing.T) {
+	var mu sync.Mutex
+	var deadlines []time.Time
+	syncFn := func(ctx context.Context, _ source.Source) (bool, error) {
+		d, ok := ctx.Deadline()
+		if !ok {
+			return false, errors.New("no deadline on the context")
+		}
+		mu.Lock()
+		deadlines = append(deadlines, d)
+		mu.Unlock()
+		return false, nil
+	}
+
+	sources := []source.Source{src("a", true), src("b", true)}
+	if err := run(sources, stateFile(t), 0, epoch, syncFn, &bytes.Buffer{}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if len(deadlines) != 2 {
+		t.Fatalf("got %d deadlines, want 2", len(deadlines))
+	}
+	for _, d := range deadlines {
+		if remaining := time.Until(d); remaining <= 0 || remaining > syncTimeout {
+			t.Errorf("deadline is %v away, want between 0 and %v", remaining, syncTimeout)
+		}
+	}
+}
+
+// A source that overruns its deadline is reported as a failure and does not
+// block the rest of the batch.
+func TestRun_slowSourceTimesOutWithoutBlockingTheBatch(t *testing.T) {
+	var mu sync.Mutex
+	completed := 0
+	syncFn := func(ctx context.Context, s source.Source) (bool, error) {
+		if s.Name == "stalled" {
+			<-ctx.Done() // never returns until the deadline fires
+			return false, ctx.Err()
+		}
+		mu.Lock()
+		completed++
+		mu.Unlock()
+		return false, nil
+	}
+
+	// A deadline the test can actually wait for.
+	sources := []source.Source{src("stalled", true), src("a", true), src("b", true)}
+	out := &bytes.Buffer{}
+	done := make(chan error, 1)
+	go func() { done <- runWithTimeout(sources, stateFile(t), 0, epoch, syncFn, out, 50*time.Millisecond) }()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Error("a timed-out source should be reported as an error")
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("run did not return — the stalled source blocked the batch")
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if completed != 2 {
+		t.Errorf("%d healthy sources completed, want 2", completed)
+	}
+	if !strings.Contains(out.String(), "stalled") {
+		t.Errorf("the timed-out source should be named in the output:\n%s", out.String())
+	}
+}
+
+// waitFor polls cond until it holds or the test times out.
+func waitFor(t *testing.T, cond func() bool, msg string) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal(msg)
 }
