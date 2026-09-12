@@ -1,8 +1,10 @@
 package runstate_test
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -92,5 +94,70 @@ func TestRead_corruptJSON_returnsNilAndClears(t *testing.T) {
 	}
 	if got != nil {
 		t.Errorf("Read on corrupt file = %+v, want nil", got)
+	}
+}
+
+// A sidecar written in another PID namespace must survive a read, even though
+// its pid looks dead here. This is the container/sandboxed-shell case: the
+// watcher is alive in the parent namespace and we simply cannot see it.
+func TestRead_foreignPIDNamespace_keepsSidecarAndReportsRunning(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("PID namespaces are a Linux interface")
+	}
+	dir := t.TempDir()
+	// Hand-rolled, because Write stamps the *current* namespace by design.
+	// Inode 0 is never a real namespace, so this cannot collide with the one
+	// the test process is actually in (a plausible-looking inode can).
+	const sidecar = `{
+  "pid": 2147483647,
+  "profile": "hybrid",
+  "config_dir": "x",
+  "started_at": "2026-09-12T09:55:47Z",
+  "pid_namespace": "pid:[0]"
+}`
+	path := filepath.Join(dir, "watcher.json")
+	if err := os.WriteFile(path, []byte(sidecar), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := runstate.Read(dir)
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if got == nil {
+		t.Fatal("Read across a namespace boundary = nil, want the recorded state")
+	}
+	if got.Profile != "hybrid" {
+		t.Errorf("Profile = %q, want %q", got.Profile, "hybrid")
+	}
+	if _, statErr := os.Stat(path); statErr != nil {
+		t.Errorf("sidecar from another namespace was removed: %v", statErr)
+	}
+}
+
+// Write must stamp the namespace, otherwise every sidecar looks foreign to its
+// own writer and a genuinely dead watcher is never cleaned up.
+func TestWrite_stampsCurrentPIDNamespace(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("PID namespaces are a Linux interface")
+	}
+	dir := t.TempDir()
+	if err := runstate.Write(dir, runstate.RunState{PID: os.Getpid(), ConfigDir: dir, StartedAt: time.Now()}); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "watcher.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got runstate.RunState
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	want, err := os.Readlink("/proc/self/ns/pid")
+	if err != nil {
+		t.Skipf("/proc/self/ns/pid unreadable: %v", err)
+	}
+	if got.PIDNamespace != want {
+		t.Errorf("PIDNamespace = %q, want %q", got.PIDNamespace, want)
 	}
 }
