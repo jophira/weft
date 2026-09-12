@@ -30,6 +30,11 @@ type RunState struct {
 	Profile   string    `json:"profile"`
 	ConfigDir string    `json:"config_dir"`
 	StartedAt time.Time `json:"started_at"`
+	// PIDNamespace identifies the namespace PID was allocated in. A reader in a
+	// different namespace cannot see that pid and must not read its absence as
+	// death. Empty means unknown: a platform without PID namespaces, or a
+	// sidecar written before this field existed.
+	PIDNamespace string `json:"pid_namespace,omitempty"`
 }
 
 // Uptime reports how long the watcher has been running.
@@ -46,6 +51,7 @@ func pathFor(cfgDir string) string {
 // The write is atomic (temp file + rename) so a concurrent Read never observes
 // a half-written file. cf. Java: Files.move(tmp, dst, ATOMIC_MOVE).
 func Write(cfgDir string, rs RunState) error {
+	rs.PIDNamespace = pidNamespace()
 	if err := privatefile.MkdirAll(cfgDir); err != nil {
 		return fmt.Errorf("runstate: creating dir: %w", err)
 	}
@@ -69,6 +75,8 @@ func Clear(cfgDir string) error {
 // Read returns the live watcher's state for cfgDir, or nil when no live watcher
 // owns it — the file is absent, unreadable, or the recorded process is gone.
 // A stale file (dead pid) is removed as a side effect so it does not linger.
+// The liveness check only runs when the caller shares the writer's PID
+// namespace; see the comment at the check for why.
 func Read(cfgDir string) (*RunState, error) {
 	data, err := os.ReadFile(pathFor(cfgDir))
 	if err != nil {
@@ -83,9 +91,26 @@ func Read(cfgDir string) (*RunState, error) {
 		_ = Clear(cfgDir)
 		return nil, nil
 	}
-	if !processAlive(rs.PID) {
+	// A pid only means something inside the namespace that allocated it. Read
+	// from another one (a container, a sandboxed shell) the watcher's pid is
+	// invisible, and processAlive would report a live watcher as dead and then
+	// delete its sidecar. Across that boundary the file is all we have, so
+	// trust it and leave it in place. The cost is that a crashed watcher reads
+	// as running until something in its own namespace clears the file.
+	//
+	// Both ids have to be known for the boundary to be real. An empty one is a
+	// legacy sidecar or a platform without namespaces, and there the pid check
+	// is the best answer available.
+	if !crossesNamespace(rs.PIDNamespace, pidNamespace()) && !processAlive(rs.PID) {
 		_ = Clear(cfgDir) // stale — the watcher crashed or was killed
 		return nil, nil
 	}
 	return &rs, nil
+}
+
+// crossesNamespace reports whether recorded and current name two different,
+// known PID namespaces. Either one empty means unknown, which is not a
+// boundary we can act on.
+func crossesNamespace(recorded, current string) bool {
+	return recorded != "" && current != "" && recorded != current
 }
