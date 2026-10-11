@@ -153,7 +153,13 @@ func (m *Merger) MergeRoots(roots []NamedRoot, outputDir string) ([]string, map[
 		if err := privatefile.MkdirAll(filepath.Dir(dst)); err != nil {
 			return nil, nil, fmt.Errorf("creating parent dir for %s: %w", rel, err)
 		}
-		if err := privatefile.Write(dst, merged); err != nil {
+		// The staged copy carries the source's execute bit, so apply can pass
+		// it on to the harness and a skill script stays runnable by path (#309).
+		mode := privatefile.FileMode
+		if anyExecutable(rel, roots, contributors) {
+			mode = 0o700
+		}
+		if err := privatefile.WriteMode(dst, merged, mode); err != nil {
 			return nil, nil, fmt.Errorf("writing %s: %w", rel, err)
 		}
 		manifest = append(manifest, rel)
@@ -220,6 +226,18 @@ func (m *Merger) foldFile(rel string, roots []NamedRoot) ([]byte, []int, error) 
 		}
 	}
 	return acc, contributors, nil
+}
+
+// anyExecutable reports whether any contributing root's copy of rel has an
+// execute bit set. A missing or unreadable file (an assembled instruction file
+// has none on disk) counts as not executable.
+func anyExecutable(rel string, roots []NamedRoot, contributors []int) bool {
+	for _, i := range contributors {
+		if info, err := os.Stat(filepath.Join(roots[i].Path, rel)); err == nil && info.Mode().Perm()&0o111 != 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // wrapWithAttribution surrounds content with HTML comment markers identifying

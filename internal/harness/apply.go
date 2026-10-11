@@ -84,6 +84,7 @@ type fileEntry struct {
 	data       []byte // staged file bytes; nil for skip=true entries (no write needed)
 	skip       bool   // content identical — no write needed
 	conflict   bool   // externally modified — back up before writing
+	exec       bool   // staged file has an execute bit — the target must keep one (#309)
 }
 
 // applyWithManifest is the manifest-aware apply for all harnesses that copy a
@@ -180,7 +181,11 @@ func applyWithManifest(stagedRoot, targetRoot, harnessName string, ctx ApplyCtx,
 		stagedHash := manifest.HashBytes(stagedData)
 		newHashes[dst] = stagedHash
 
-		fe := fileEntry{srcPath: path, dst: dst, stagedHash: stagedHash}
+		info, infoErr := d.Info()
+		if infoErr != nil {
+			return fmt.Errorf("reading staged %s: %w", dst, infoErr)
+		}
+		fe := fileEntry{srcPath: path, dst: dst, stagedHash: stagedHash, exec: info.Mode().Perm()&0o111 != 0}
 
 		existing, readErr := root.ReadFile(dst)
 		switch {
@@ -242,6 +247,9 @@ func applyWithManifest(stagedRoot, targetRoot, harnessName string, ctx ApplyCtx,
 	// Write each file; skip unchanged ones.
 	for _, fe := range entries {
 		if fe.skip {
+			if xErr := ensureExecutable(root, fe); xErr != nil {
+				return xErr
+			}
 			fmt.Fprintf(out, logUnchanged, statusUnchanged, fe.dst)
 			continue
 		}
@@ -250,6 +258,9 @@ func applyWithManifest(stagedRoot, targetRoot, harnessName string, ctx ApplyCtx,
 		}
 		if wErr := root.WriteFile(fe.dst, fe.data, 0o644); wErr != nil {
 			return fmt.Errorf("writing %s: %w", fe.dst, wErr)
+		}
+		if xErr := ensureExecutable(root, fe); xErr != nil {
+			return xErr
 		}
 		fmt.Fprintf(out, logWrote, statusWrote, fe.dst)
 	}
@@ -286,6 +297,30 @@ func applyWithManifest(stagedRoot, targetRoot, harnessName string, ctx ApplyCtx,
 		m.SourceFiles = nil
 	}
 	return manifest.Save(ctx.CfgDir, m)
+}
+
+// ensureExecutable gives the target an execute bit wherever it has a read bit,
+// as chmod +x would, when the staged file is executable. WriteFile applies its
+// mode only when it creates a file, so without this an existing script stays
+// unrunnable and a source that gains the bit later never passes it on (#309).
+// Unchanged content still goes through here for that second case.
+func ensureExecutable(root *os.Root, fe fileEntry) error {
+	if !fe.exec {
+		return nil
+	}
+	info, err := root.Stat(fe.dst)
+	if err != nil {
+		return fmt.Errorf("checking mode of %s: %w", fe.dst, err)
+	}
+	perm := info.Mode().Perm()
+	want := perm | (perm&0o444)>>2
+	if want == perm {
+		return nil
+	}
+	if err := root.Chmod(fe.dst, want); err != nil {
+		return fmt.Errorf("making %s executable: %w", fe.dst, err)
+	}
+	return nil
 }
 
 // trackAndWriteFile handles manifest check/backup/write for harnesses that write

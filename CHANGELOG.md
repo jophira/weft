@@ -9,6 +9,13 @@ from, so keep entries written for someone deciding whether to upgrade.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Projected scripts keep their execute bit** (#309). A skill script that is
+  executable in its source now arrives executable in the harness, whether it is
+  new or its source gained the bit after an earlier apply. Before, it arrived as
+  `-rw-r--r--` and failed with `Permission denied` when run by path.
+
 ## [0.2.1] - 2026-08-15
 
 **No code change since v0.2.0.** The binaries are the same build; there is
