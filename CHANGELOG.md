@@ -9,6 +9,20 @@ from, so keep entries written for someone deciding whether to upgrade.
 
 ## [Unreleased]
 
+### Added
+
+- **A source can own Claude Code `settings.json` keys** (#307). Put the keys in
+  `harness/claude-code/settings.json` in a source and every apply sets them in
+  `~/.claude/settings.json`, leaving every other key alone. `weft adopt claude-code
+  settings.json --into <source>` brings an existing file under a source.
+
+### Fixed
+
+- **Projected scripts keep their execute bit** (#309). A skill script that is
+  executable in its source now arrives executable in the harness, whether it is
+  new or its source gained the bit after an earlier apply. Before, it arrived as
+  `-rw-r--r--` and failed with `Permission denied` when run by path.
+
 ## [0.2.1] - 2026-08-15
 
 **No code change since v0.2.0.** The binaries are the same build; there is

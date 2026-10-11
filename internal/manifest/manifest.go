@@ -38,6 +38,12 @@ type Manifest struct {
 	// outside it is the user's. Write-back compares the on-disk block to this
 	// hash to detect external edits.
 	InstructionBlock string `json:"instruction_block,omitempty"`
+	// Settings records, per settings file (absolute path), the top-level keys weft
+	// owns there and the source each came from. A key present here but absent from
+	// the next apply's sources is removed from the live file; a key not listed is
+	// never touched. Sidecar to Files, which holds the file's hash under
+	// "settings:<path>".
+	Settings map[string]map[string]string `json:"settings,omitempty"`
 }
 
 func manifestPath(cfgDir, harnessName string) string {
@@ -49,7 +55,7 @@ func manifestPath(cfgDir, harnessName string) string {
 func Load(cfgDir, harnessName string) (*Manifest, error) {
 	data, err := os.ReadFile(manifestPath(cfgDir, harnessName))
 	if os.IsNotExist(err) {
-		return &Manifest{Harness: harnessName, Files: map[string]string{}}, nil
+		return &Manifest{Harness: harnessName, Files: map[string]string{}, Settings: map[string]map[string]string{}}, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("reading manifest for %s: %w", harnessName, err)
@@ -60,6 +66,9 @@ func Load(cfgDir, harnessName string) (*Manifest, error) {
 	}
 	if m.Files == nil {
 		m.Files = map[string]string{}
+	}
+	if m.Settings == nil {
+		m.Settings = map[string]map[string]string{}
 	}
 	return &m, nil
 }

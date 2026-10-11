@@ -22,6 +22,11 @@ func (c *ClaudeCode) Apply(stagedRoot string, ctx ApplyCtx) error {
 	return applyToHomeDir(stagedRoot, ".claude", c, ctx, nil)
 }
 
+// SettingsPath: the live ~/.claude/settings.json.
+func (c *ClaudeCode) SettingsPath() (string, error) {
+	return homeJoin(".claude", "settings.json")
+}
+
 // ClassSupport: Claude Code is weft's reference layout — every class has a native
 // home at the same path the staged tree uses.
 func (c *ClaudeCode) ClassSupport(cl Class) ClassSupport {

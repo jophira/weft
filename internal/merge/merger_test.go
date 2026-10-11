@@ -3,6 +3,7 @@ package merge_test
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -644,5 +645,31 @@ func TestInspect_emptyHigherPrioritySource_notAContributor(t *testing.T) {
 	}
 	if entry.WinnerRoot != a {
 		t.Errorf("WinnerRoot = %s, want the populated root %s", entry.WinnerRoot, a)
+	}
+}
+
+// TestMergeRoots_keepsExecuteBit: the staged copy of an executable source file
+// stays executable, so apply can pass the bit on to the harness (#309).
+func TestMergeRoots_keepsExecuteBit(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("no execute bits on Windows")
+	}
+	src, out := t.TempDir(), t.TempDir()
+	writeFile(t, src, "skills/x/run.sh", "#!/bin/sh\n")
+	writeFile(t, src, "skills/x/SKILL.md", "skill")
+	if err := os.Chmod(filepath.Join(src, "skills", "x", "run.sh"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := merge.New(profile.OverlayCascade).MergeRoots(nr(src), out); err != nil {
+		t.Fatal(err)
+	}
+	for rel, wantExec := range map[string]bool{"skills/x/run.sh": true, "skills/x/SKILL.md": false} {
+		info, err := os.Stat(filepath.Join(out, rel))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := info.Mode().Perm()&0o100 != 0; got != wantExec {
+			t.Errorf("%s staged as %v, want executable=%v", rel, info.Mode().Perm(), wantExec)
+		}
 	}
 }

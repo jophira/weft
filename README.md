@@ -300,6 +300,27 @@ The guards:
 Adopting also records weft's ownership of the harness copy in the manifest, so the next
 apply reports `· unchanged` rather than treating the file as an external edit.
 
+### Claude Code `settings.json`
+
+A source can own keys of `~/.claude/settings.json` (hooks, permissions, env, status line) by
+carrying `harness/claude-code/settings.json`. Every apply sets each of its top-level keys in
+the live file; every other live key is left as it is, so what `/config` and plugin installs
+write survives.
+
+- **Per top-level key.** A source owning `hooks` replaces every live hook. A key dropped from
+  the source is removed from the live file on the next apply; a key weft never wrote is
+  never removed.
+- **Several sources.** The later (higher-priority) source wins per key. `weft resolve
+  ~/.claude/settings.json` lists which source owns which keys.
+- **Adopting.** `weft adopt claude-code settings.json --into <source>` copies the live file
+  to `harness/claude-code/settings.json`. It takes **every** key, including ones Claude Code
+  manages itself (`enabledPlugins`, `model`, ...): trim those from the source copy, or
+  `/config` and plugin installs are reverted on the next apply. The confirmation lists the
+  keys. Literal credentials and non-object JSON are refused.
+- **Output.** The live file is rewritten with two-space indent and sorted keys only when its
+  meaning differs; an equivalent file is left alone.
+- `settings.local.json` stays unmanaged. `harness_sync` can withhold the `settings` class.
+
 ## Coverage — what weft manages, and what it does not
 
 `weft target list --files` audits every detected harness against its config root:

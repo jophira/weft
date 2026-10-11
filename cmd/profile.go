@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -181,6 +182,11 @@ func stageProfile(p *profile.Profile, roots []string, srcs []source.Source, outp
 		WithAssembler(capturingAssembler).
 		WithTransform(anchorTransform(srcs)).
 		WithSkipLogger(func(rel string) {
+			// harness/<name>/ holds per-harness files projected out-of-band
+			// (settings.json); they are deliberately not staged.
+			if strings.HasPrefix(filepath.ToSlash(rel), "harness/") {
+				return
+			}
 			slog.Debug("source file not synced — not in a managed directory",
 				"file", rel,
 				"hint", "configure project_dir_names in source structure, or move to a managed dir (commands/, skills/, etc.)")
@@ -216,6 +222,42 @@ func anchorTransform(srcs []source.Source) func(root string, data []byte) []byte
 	return func(root string, data []byte) []byte {
 		return anchor.Expand(data, anchor.Anchors{Root: root, Home: home, Docs: docs, ByName: byName})
 	}
+}
+
+// settingsSources reads each source's harness/<name>/settings.json, in profile
+// order, expanding path anchors. A source without the file contributes nothing.
+// Any other read error stops the apply: skipping the source would read as the
+// source having dropped its keys, and they would be removed from the live file.
+func settingsSources(roots []string, srcs []source.Source, harnessName string) ([]harness.SettingsSource, error) {
+	// Anchors land inside JSON strings, so each path is JSON-escaped first: a
+	// Windows path's backslashes would otherwise make the document unparseable.
+	byName := sourceRootMap(srcs)
+	for name, root := range byName {
+		byName[name] = jsonEscape(root)
+	}
+	home, docs := globalAnchors()
+	var out []harness.SettingsSource
+	for i, root := range roots {
+		path := harness.SettingsSourcePath(root, harnessName)
+		data, err := os.ReadFile(path) //nolint:gosec // path is under a registered source root
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("reading %s: %w", path, err)
+		}
+		data = anchor.Expand(data, anchor.Anchors{
+			Root: jsonEscape(root), Home: jsonEscape(home), Docs: jsonEscape(docs), ByName: byName,
+		})
+		out = append(out, harness.SettingsSource{Name: srcs[i].Name, Path: path, Data: data})
+	}
+	return out, nil
+}
+
+// jsonEscape returns s as it must appear between the quotes of a JSON string.
+func jsonEscape(s string) string {
+	b, _ := json.Marshal(s) //nolint:errchkjson // marshalling a string cannot fail
+	return string(b[1 : len(b)-1])
 }
 
 // namedRoots pairs each root path with the corresponding source name so the
@@ -604,6 +646,18 @@ func applyProfile(p *profile.Profile, roots []string, srcs []source.Source, cfgD
 		// than writing a file of weft's own.
 		if err := harness.ProjectMCP(h, mcpCfg, ctx); err != nil {
 			return fmt.Errorf("projecting mcp config to %s: %w", target, err)
+		}
+		// Merge the sources' settings.json keys into the tool's own settings file.
+		// Read straight from each source root, never staged, so the merger's
+		// attribution comments cannot reach JSON.
+		if _, ok := h.(harness.SettingsOwner); ok {
+			settingsSrcs, sErr := settingsSources(roots, srcs, h.Name())
+			if sErr != nil {
+				return fmt.Errorf("projecting settings to %s: %w", target, sErr)
+			}
+			if err := harness.ProjectSettings(h, settingsSrcs, ctx); err != nil {
+				return fmt.Errorf("projecting settings to %s: %w", target, err)
+			}
 		}
 		// Point the tool at what was just written, for harnesses that load no
 		// well-known path. Runs last: it records a manifest key of its own, and
