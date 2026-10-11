@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -228,7 +229,13 @@ func anchorTransform(srcs []source.Source) func(root string, data []byte) []byte
 // Any other read error stops the apply: skipping the source would read as the
 // source having dropped its keys, and they would be removed from the live file.
 func settingsSources(roots []string, srcs []source.Source, harnessName string) ([]harness.SettingsSource, error) {
-	expand := anchorTransform(srcs)
+	// Anchors land inside JSON strings, so each path is JSON-escaped first: a
+	// Windows path's backslashes would otherwise make the document unparseable.
+	byName := sourceRootMap(srcs)
+	for name, root := range byName {
+		byName[name] = jsonEscape(root)
+	}
+	home, docs := globalAnchors()
 	var out []harness.SettingsSource
 	for i, root := range roots {
 		path := harness.SettingsSourcePath(root, harnessName)
@@ -239,9 +246,18 @@ func settingsSources(roots []string, srcs []source.Source, harnessName string) (
 		if err != nil {
 			return nil, fmt.Errorf("reading %s: %w", path, err)
 		}
-		out = append(out, harness.SettingsSource{Name: srcs[i].Name, Path: path, Data: expand(root, data)})
+		data = anchor.Expand(data, anchor.Anchors{
+			Root: jsonEscape(root), Home: jsonEscape(home), Docs: jsonEscape(docs), ByName: byName,
+		})
+		out = append(out, harness.SettingsSource{Name: srcs[i].Name, Path: path, Data: data})
 	}
 	return out, nil
+}
+
+// jsonEscape returns s as it must appear between the quotes of a JSON string.
+func jsonEscape(s string) string {
+	b, _ := json.Marshal(s) //nolint:errchkjson // marshalling a string cannot fail
+	return string(b[1 : len(b)-1])
 }
 
 // namedRoots pairs each root path with the corresponding source name so the

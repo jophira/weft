@@ -97,3 +97,27 @@ func TestApplyProjectsSettings(t *testing.T) {
 		t.Errorf("anchor not expanded: got %q want %q", sl["command"], want)
 	}
 }
+
+// TestSettingsSourcesEscapesAnchorPaths: an anchor expands inside a JSON string,
+// so a root holding a backslash (every Windows path) must stay valid JSON.
+func TestSettingsSourcesEscapesAnchorPaths(t *testing.T) {
+	root := t.TempDir() + string(filepath.Separator) + `a\b`
+	path := filepath.Join(root, "harness", "claude-code", "settings.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(`{"cmd":"{{weft.root}}/x.sh"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := settingsSources([]string{root}, []source.Source{{Name: "s", Root: root}}, "claude-code")
+	if err != nil || len(got) != 1 {
+		t.Fatalf("settingsSources = %v, %v", got, err)
+	}
+	var doc map[string]string
+	if err := json.Unmarshal(got[0].Data, &doc); err != nil {
+		t.Fatalf("expanded settings are not valid JSON: %v\n%s", err, got[0].Data)
+	}
+	if doc["cmd"] != root+"/x.sh" {
+		t.Errorf("cmd = %q, want %q", doc["cmd"], root+"/x.sh")
+	}
+}
