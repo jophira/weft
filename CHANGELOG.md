@@ -9,6 +9,13 @@ from, so keep entries written for someone deciding whether to upgrade.
 
 ## [Unreleased]
 
+### Added
+
+- **A source can own Claude Code `settings.json` keys** (#307). Put the keys in
+  `harness/claude-code/settings.json` in a source and every apply sets them in
+  `~/.claude/settings.json`, leaving every other key alone. `weft adopt claude-code
+  settings.json --into <source>` brings an existing file under a source.
+
 ### Fixed
 
 - **Projected scripts keep their execute bit** (#309). A skill script that is

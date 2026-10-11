@@ -90,7 +90,7 @@ func DetectConflicts(stagedRoot string, targets []ConflictTarget) ([]Conflict, e
 // conflictFor resolves one staged path against every target.
 func conflictFor(rel string, targets []ConflictTarget) (Conflict, bool, error) {
 	switch stagedClass(rel) {
-	case ClassInstructions, ClassMCP:
+	case ClassInstructions, ClassMCP, ClassSettings:
 		// Neither travels as a copied file. The instruction file is a managed block
 		// inside a document whose surrounding prose belongs to the user, and MCP
 		// config is merged key-by-key into a file holding unrelated tool state. Both

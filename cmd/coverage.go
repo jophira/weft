@@ -69,6 +69,11 @@ func managedPaths(cfgDir, name string) map[string]bool {
 		}
 		out[filepath.ToSlash(rel)] = true
 	}
+	for path := range m.Settings {
+		if rel, relErr := filepath.Rel(m.TargetRoot, path); relErr == nil && !strings.HasPrefix(rel, "..") {
+			out[filepath.ToSlash(rel)] = true
+		}
+	}
 	if m.InstructionPath != "" {
 		if rel, relErr := filepath.Rel(m.TargetRoot, m.InstructionPath); relErr == nil &&
 			!strings.HasPrefix(rel, "..") {

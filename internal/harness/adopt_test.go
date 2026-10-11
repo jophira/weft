@@ -1,6 +1,7 @@
 package harness
 
 import (
+	"bytes"
 	"errors"
 	"os"
 	"path/filepath"
@@ -240,4 +241,97 @@ func TestCheckNoSecrets_allowsOrdinaryProse(t *testing.T) {
 	if err := checkNoSecrets("agents/reviewer.md", []byte(body)); err != nil {
 		t.Errorf("checkNoSecrets flagged ordinary prose: %v", err)
 	}
+}
+
+func TestAdoptSettings(t *testing.T) {
+	// Deliberately unsorted, with a realistic hook and permission globs.
+	const realistic = `{
+  "permissions": {"allow": ["Bash(git status:*)", "Read(~/docs/**)"]},
+  "hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "~/.claude/hooks/guard.sh"}]}]},
+  "env": {"EDITOR": "vim"},
+  "alwaysThinkingEnabled": true
+}`
+	setup := func(t *testing.T, live string) (AdoptRequest, string) {
+		t.Helper()
+		home := t.TempDir()
+		withHarnessHome(t, home)
+		path := filepath.Join(home, ".claude", "settings.json")
+		writeAdoptFile(t, path, live)
+		srcRoot := filepath.Join(t.TempDir(), "source")
+		cfgDir := filepath.Join(t.TempDir(), "cfg")
+		return AdoptRequest{
+			Target:    ScanTarget{Harness: "claude-code", Root: filepath.Join(home, ".claude"), Owned: map[string]string{}, H: &ClaudeCode{}, CfgDir: cfgDir},
+			Rels:      []string{"settings.json"},
+			Layout:    layoutFor(srcRoot),
+			Confirmed: true,
+		}, path
+	}
+
+	t.Run("copies to the source and records ownership so the next apply writes nothing", func(t *testing.T) {
+		req, live := setup(t, realistic)
+		entries, err := Adopt(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		dest := filepath.Join(req.Layout.Root, "harness", "claude-code", "settings.json")
+		got, rdErr := os.ReadFile(dest)
+		if rdErr != nil || string(got) != realistic {
+			t.Fatalf("dest = %q, %v", got, rdErr)
+		}
+		if len(entries) != 1 || entries[0].Class != ClassSettings || len(entries[0].Keys) != 4 {
+			t.Errorf("entries = %+v", entries)
+		}
+		var out bytes.Buffer
+		ctx := ApplyCtx{ProfileName: "p", CfgDir: req.Target.CfgDir, Out: &out}
+		if err := ProjectSettings(&ClaudeCode{}, []SettingsSource{{Name: "personal", Path: dest, Data: got}}, ctx); err != nil {
+			t.Fatal(err)
+		}
+		if b, _ := os.ReadFile(live); string(b) != realistic {
+			t.Error("live file rewritten after adopt")
+		}
+		if !strings.Contains(out.String(), "unchanged") || backupCount(t, ctx.CfgDir) != 0 {
+			t.Errorf("want unchanged and no backup, got %q", out.String())
+		}
+	})
+
+	t.Run("refuses a literal credential", func(t *testing.T) {
+		req, _ := setup(t, `{"env": {"GITHUB_TOKEN": "ghp_abcdefghijklmnopqrstuvwxyz0123456789"}}`)
+		if _, err := Adopt(req); err == nil || !strings.Contains(err.Error(), "credential") {
+			t.Fatalf("err = %v", err)
+		}
+	})
+
+	t.Run("refuses non-object JSON", func(t *testing.T) {
+		req, _ := setup(t, `[1, 2]`)
+		if _, err := Adopt(req); err == nil || !strings.Contains(err.Error(), "JSON object") {
+			t.Fatalf("err = %v", err)
+		}
+	})
+
+	t.Run("refuses invalid JSON", func(t *testing.T) {
+		req, _ := setup(t, `{nope`)
+		if _, err := Adopt(req); err == nil {
+			t.Fatal("want error")
+		}
+	})
+
+	t.Run("refuses a file weft already owns", func(t *testing.T) {
+		req, live := setup(t, realistic)
+		req.Target.Owned = map[string]string{settingsManifestKey(live): "sha256:x"}
+		if _, err := Adopt(req); err == nil || !strings.Contains(err.Error(), "already managed") {
+			t.Fatalf("err = %v", err)
+		}
+	})
+
+	t.Run("secret check does not false-positive on a realistic file", func(t *testing.T) {
+		if err := checkSettingsSecrets("settings.json", []byte(realistic)); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("the line-based check does trip on a camelCase key, which is why values are checked instead", func(t *testing.T) {
+		if err := checkNoSecrets("settings.json", []byte(realistic)); err == nil {
+			t.Skip("heuristic changed; checkSettingsSecrets may be replaceable by checkNoSecrets")
+		}
+	})
 }

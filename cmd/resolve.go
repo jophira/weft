@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -81,6 +82,14 @@ what is held and exits non-zero instead of asking.`,
 			return fmt.Errorf("resolving config directory")
 		}
 
+		// settings.json is merged key by key and is not in Files, so it is
+		// looked up first.
+		if found, sErr := resolveSettings(cmd.OutOrStdout(), cfgDir, targetPath); sErr != nil {
+			return sErr
+		} else if found {
+			return nil
+		}
+
 		m, rel, err := findManifest(cfgDir, targetPath)
 		if err != nil {
 			return err
@@ -112,6 +121,47 @@ what is held and exits non-zero instead of asking.`,
 		}
 		return nil
 	},
+}
+
+// resolveSettings reports the sources owning keys in a merged settings file.
+// It returns false when no manifest records ownership for targetPath.
+func resolveSettings(out io.Writer, cfgDir, targetPath string) (bool, error) {
+	entries, err := os.ReadDir(filepath.Join(cfgDir, "manifests"))
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("reading manifests dir: %w", err)
+	}
+	for _, e := range entries {
+		if e.IsDir() || filepath.Ext(e.Name()) != ".json" {
+			continue
+		}
+		m, err := manifest.Load(cfgDir, strings.TrimSuffix(e.Name(), ".json"))
+		if err != nil {
+			continue
+		}
+		owned := m.Settings[targetPath]
+		if len(owned) == 0 {
+			continue
+		}
+		bySource := map[string][]string{}
+		for k, src := range owned {
+			bySource[src] = append(bySource[src], k)
+		}
+		names := make([]string, 0, len(bySource))
+		for n := range bySource {
+			names = append(names, n)
+		}
+		sort.Strings(names)
+		fmt.Fprintf(out, "%s\n  harness: %s\n  profile: %s\n", locate.Tilde(targetPath), m.Harness, m.Profile)
+		for _, n := range names {
+			sort.Strings(bySource[n])
+			fmt.Fprintf(out, "  source:  %s (keys: %s)\n", n, strings.Join(bySource[n], ", "))
+		}
+		return true, nil
+	}
+	return false, nil
 }
 
 // expandAndAbs expands ~ and resolves to an absolute path.

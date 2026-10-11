@@ -260,6 +260,10 @@ func printAdoptPlan(out io.Writer, harnessName string, layout harness.SourceLayo
 			note = "  (overwrites existing)"
 		}
 		fmt.Fprintf(out, "  %-9s %s → %s%s\n", e.Class, e.Rel, e.DestRel, note)
+		if len(e.Keys) > 0 {
+			fmt.Fprintf(out, "            takes every key: %s\n", strings.Join(e.Keys, ", "))
+			fmt.Fprintln(out, "            remove keys Claude Code manages itself (enabledPlugins, model, ...) from the source copy, or /config reverts on the next apply")
+		}
 	}
 	fmt.Fprintln(out, "Once adopted, weft overwrites these files in every harness on each apply.")
 }

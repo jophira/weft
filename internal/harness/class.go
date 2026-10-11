@@ -22,13 +22,14 @@ const (
 	ClassAgents       Class = "agents"       // subagent persona definitions
 	ClassSkills       Class = "skills"       // progressive-disclosure skill bundles
 	ClassMCP          Class = "mcp"          // MCP server definitions
+	ClassSettings     Class = "settings"     // harness settings.json, merged key by key
 	ClassOther        Class = "other"        // anything weft does not classify
 )
 
 // Classes lists every class weft routes, in a stable order suitable for logs
 // and for validating user config.
 func Classes() []Class {
-	return []Class{ClassInstructions, ClassCommands, ClassAgents, ClassSkills, ClassMCP, ClassOther}
+	return []Class{ClassInstructions, ClassCommands, ClassAgents, ClassSkills, ClassMCP, ClassSettings, ClassOther}
 }
 
 // ParseClass converts a config string to a Class, reporting whether it is known.

@@ -1,11 +1,13 @@
 package harness
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/jophira/weft/internal/manifest"
@@ -201,7 +203,7 @@ func (l SourceLayout) dirFor(c Class) string {
 		dir = l.Agents
 	case ClassSkills:
 		dir = l.Skills
-	case ClassInstructions, ClassMCP, ClassOther:
+	case ClassInstructions, ClassMCP, ClassSettings, ClassOther:
 		dir = ""
 	}
 	if dir = strings.Trim(strings.TrimSpace(dir), "/"); dir == "" {
@@ -230,6 +232,9 @@ type AdoptEntry struct {
 	To        string // absolute path in the source
 	DestRel   string // path relative to the source root
 	Overwrite bool   // destination already exists (only reachable with Force)
+	// Keys lists the top-level keys a settings entry hands to the source, sorted.
+	// Empty for every other class.
+	Keys []string
 }
 
 // PlanAdopt validates a request and returns what Adopt would do, without
@@ -257,6 +262,9 @@ func planOne(raw string, req AdoptRequest) (AdoptEntry, error) {
 	}
 	if _, owned := req.Target.Owned[rel]; owned {
 		return AdoptEntry{}, fmt.Errorf("%s is already managed by weft — edit it in its source, or use write-back", rel)
+	}
+	if e, ok, err := planSettings(rel, req); ok || err != nil {
+		return e, err
 	}
 	if !strings.EqualFold(filepath.Ext(rel), adoptableExt) {
 		return AdoptEntry{}, fmt.Errorf("%s is not adoptable — only %s files are", rel, adoptableExt)
@@ -299,6 +307,94 @@ func planOne(raw string, req AdoptRequest) (AdoptEntry, error) {
 	return AdoptEntry{Rel: rel, Class: c, From: from, To: to, DestRel: destRel, Overwrite: overwrite}, nil
 }
 
+// planSettings plans the adoption of a harness's settings.json, reporting
+// ok=false when rel is not that file. It is the one non-markdown file weft
+// adopts: JSON, checked for a literal credential, copied to
+// harness/<harness>/settings.json in the source.
+func planSettings(rel string, req AdoptRequest) (AdoptEntry, bool, error) {
+	owner, isOwner := req.Target.H.(SettingsOwner)
+	if !isOwner {
+		return AdoptEntry{}, false, nil
+	}
+	live, err := owner.SettingsPath()
+	if err != nil {
+		return AdoptEntry{}, false, err
+	}
+	from := filepath.Join(req.Target.Root, rel)
+	if filepath.Clean(from) != filepath.Clean(live) {
+		return AdoptEntry{}, false, nil
+	}
+	if _, owned := req.Target.Owned[settingsManifestKey(live)]; owned {
+		return AdoptEntry{}, true, fmt.Errorf("%s is already managed by weft — edit it in its source", rel)
+	}
+	data, err := os.ReadFile(from) //nolint:gosec // from is confined to the harness root by containedRel
+	if err != nil {
+		return AdoptEntry{}, true, fmt.Errorf("reading %s: %w", rel, err)
+	}
+	var doc map[string]json.RawMessage
+	if err := json.Unmarshal(data, &doc); err != nil || doc == nil {
+		return AdoptEntry{}, true, fmt.Errorf("%s is not a JSON object, weft will not adopt it: %v", rel, err)
+	}
+	if err := checkSettingsSecrets(rel, data); err != nil {
+		return AdoptEntry{}, true, err
+	}
+	keys := make([]string, 0, len(doc))
+	for k := range doc {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	destRel := filepath.Join("harness", req.Target.Harness, settingsFileName)
+	to := filepath.Join(req.Layout.Root, destRel)
+	overwrite := false
+	if _, statErr := os.Stat(to); statErr == nil {
+		if !req.Force {
+			return AdoptEntry{}, true, fmt.Errorf(
+				"%s already exists in source %q (%s) — pass --force to overwrite it",
+				destRel, req.Layout.Name, to)
+		}
+		overwrite = true
+	}
+	return AdoptEntry{Rel: rel, Class: ClassSettings, From: from, To: to, DestRel: destRel, Overwrite: overwrite, Keys: keys}, true, nil
+}
+
+// checkSettingsSecrets is checkNoSecrets for JSON: it inspects string values
+// only. Key names such as "alwaysThinkingEnabled" look like opaque tokens to the
+// entropy heuristic and would block adopting any ordinary settings file.
+func checkSettingsSecrets(rel string, data []byte) error {
+	var doc any
+	if err := json.Unmarshal(data, &doc); err != nil {
+		return err
+	}
+	var walk func(v any) error
+	walk = func(v any) error {
+		switch t := v.(type) {
+		case string:
+			for _, tok := range strings.FieldsFunc(t, secretDelimiters) {
+				if mcpconfig.LooksSecret(tok) {
+					return fmt.Errorf(
+						"%s holds a value that looks like a literal credential (%s…) — sources are pushable, so weft will not adopt it; remove the secret or reference it as ${env:NAME}",
+						rel, redact(tok))
+				}
+			}
+		case []any:
+			for _, e := range t {
+				if err := walk(e); err != nil {
+					return err
+				}
+			}
+		case map[string]any:
+			for _, e := range t {
+				if err := walk(e); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}
+	return walk(doc)
+}
+
 // Adopt copies the planned files into the source and records weft's ownership of
 // the harness copy in the manifest.
 //
@@ -332,6 +428,17 @@ func Adopt(req AdoptRequest) ([]AdoptEntry, error) {
 		}
 		if wErr := os.WriteFile(e.To, data, 0o644); wErr != nil { //nolint:gosec // e.To is under the registered source root
 			return nil, fmt.Errorf("writing %s: %w", e.DestRel, wErr)
+		}
+		if e.Class == ClassSettings {
+			// Own every key, so the next apply finds the live file equal to the
+			// source and writes nothing.
+			owned := make(map[string]string, len(e.Keys))
+			for _, k := range e.Keys {
+				owned[k] = req.Layout.Name
+			}
+			m.Settings[e.From] = owned
+			m.Files[settingsManifestKey(e.From)] = manifest.HashBytes(data)
+			continue
 		}
 		m.Files[e.Rel] = manifest.HashBytes(data)
 	}
