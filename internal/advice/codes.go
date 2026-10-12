@@ -49,6 +49,9 @@ const (
 	// CodeProjectExcludeFailed: weft's repo-local state could not be excluded
 	// from git, so it will show up in git status.
 	CodeProjectExcludeFailed = "W403"
+	// CodeProjectFileForeign: a harness taking import delivery is in use here,
+	// but its instruction file already exists and weft did not create it.
+	CodeProjectFileForeign = "W404"
 
 	// CodeConfigHomeNotIsolated: --config was given, but harness writes still go
 	// to the real home directory.

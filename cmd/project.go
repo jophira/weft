@@ -216,11 +216,14 @@ Everything weft writes goes under .weft, which is excluded from git via
 reached by the cheapest mechanism each supports:
 
   hook     a session-start hook in a gitignored settings file (no tracked diff)
-  import   one import line in the tracked instruction file, written once
+  import   one import line; a file weft creates is excluded from git, an
+           existing one needs project-write
   inline   the content itself, rewritten whenever rules change (opt-in)
 
-Inline delivery is off until you enable it per harness, because it is the only
-one that puts a recurring diff in a tracked file.`,
+Inline delivery, and any edit to an instruction file weft did not create, stay
+off until you enable them per harness with 'weft config set project-write
+<harness> true'. A file weft creates stays out of git, so text you add to it is
+not shared until you remove its line from .git/info/exclude and commit it.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		out := cmd.OutOrStdout()

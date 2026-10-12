@@ -17,14 +17,17 @@ import (
 	"github.com/jophira/weft/internal/rules"
 )
 
-// projectWriteKey is the config map gating inline delivery per harness, e.g.
+// projectWriteKey is the config map letting weft edit a project file it does not
+// own, per harness, e.g.
 //
 //	project_write:
 //	  codex: true
 //
-// Only inline delivery consults it. Hook and import delivery cost either no
-// tracked diff or a single line that never changes again, so gating them would
-// be friction without a matching risk.
+// Inline delivery always consults it, because it rewrites the file whenever
+// rules change. Import delivery consults it only when the instruction file
+// already exists and weft did not create it: a file weft made is excluded from
+// git and needs no permission, but editing a file the repository's owners wrote
+// does. Hook delivery never consults it, because its settings file is excluded.
 const projectWriteKey = "project_write"
 
 // syncProject delivers the project bundle for one repository.
@@ -95,38 +98,72 @@ func deliverTo(root, name string, spec harness.ProjectSpec, written []project.Wr
 		if len(paths) == 0 {
 			return nil, nil
 		}
-		wrote, err := project.DeliverImport(root, spec.Path, spec.ImportTemplate, paths)
+		owned := project.Owned(root, spec.Path)
+		if !owned && !projectWriteAllowed(name) {
+			// The watcher reaches here without ever calling reportDelivery, so
+			// the log is the only trace that a file was left alone.
+			slog.Info("project.sync.gated", slog.String("harness", name), slog.String("path", spec.Path))
+			return nil, nil
+		}
+		wrote, created, err := project.DeliverImport(root, spec.Path, spec.ImportTemplate, paths)
 		if err != nil {
 			return nil, err
 		}
+		excludeCreated(root, spec.Path, created)
 		return &project.Delivered{
 			Harness: name, How: spec.Delivery.String(), Path: spec.Path,
-			Wrote: wrote, TrackedByGit: true,
+			Wrote: wrote, TrackedByGit: !owned,
 		}, nil
 
 	case harness.ProjectInline:
-		if !inlineWriteAllowed(name) {
+		if !projectWriteAllowed(name) {
 			return nil, nil
 		}
 		parts := project.PartsFor(written, spec.Inputs)
 		if len(parts) == 0 {
 			return nil, nil
 		}
-		wrote, err := project.DeliverInline(root, spec.Path, spec.Preamble, parts)
+		owned := project.Owned(root, spec.Path)
+		wrote, created, err := project.DeliverInline(root, spec.Path, spec.Preamble, parts)
 		if err != nil {
 			return nil, err
 		}
+		excludeCreated(root, spec.Path, created)
 		return &project.Delivered{
 			Harness: name, How: spec.Delivery.String(), Path: spec.Path,
-			Wrote: wrote, TrackedByGit: true,
+			Wrote: wrote, TrackedByGit: !owned,
 		}, nil
 	}
 	return nil, nil
 }
 
-// inlineWriteAllowed reports whether the user opted this harness into writing a
-// tracked project file that is rewritten whenever rules change.
-func inlineWriteAllowed(name string) bool {
+// excludeCreated keeps a file weft has just created out of git status, which is
+// the whole point of creating it: an untracked GEMINI.md in somebody else's
+// repository is a change they never asked for.
+//
+// The exclusion is written only at creation, never on later syncs. A line the
+// user removed by hand is a decision, and restoring it would undo it. The file
+// then counts as not owned, so the next sync asks for project-write instead.
+func excludeCreated(root, path string, created bool) {
+	if !created {
+		return
+	}
+	if _, err := project.EnsureExcluded(root, path); err != nil {
+		// The file stays: deleting it would lose what was just delivered, and
+		// doctor lists it as an orphan so it does not go unnoticed.
+		advice.Add(advice.Advice{
+			Code:     advice.CodeProjectExcludeFailed,
+			Severity: advice.Warn,
+			Message:  fmt.Sprintf("could not exclude %s from git: %v", path, err),
+			Fix:      fmt.Sprintf("add /%s to .git/info/exclude by hand, or delete it", path),
+		})
+	}
+}
+
+// projectWriteAllowed reports whether the user opted this harness into editing a
+// project file weft did not create. One switch with one meaning, for inline and
+// import delivery alike.
+func projectWriteAllowed(name string) bool {
 	return viper.GetStringMapString(projectWriteKey)[name] == "true" ||
 		viper.GetBool(projectWriteKey+"."+name)
 }
@@ -270,11 +307,14 @@ func reportDelivery(out io.Writer, root string, delivered []project.Delivered, d
 
 	// Name the harnesses in use here that inline delivery would reach, so the
 	// choice to accept a recurring diff is offered rather than assumed.
-	var waiting []string
+	var waiting, foreign []string
 	for _, h := range detected {
 		spec := harness.ProjectSupportOf(h)
-		if spec.Delivery == harness.ProjectInline && !inlineWriteAllowed(h.Name()) {
+		if spec.Delivery == harness.ProjectInline && !projectWriteAllowed(h.Name()) {
 			waiting = append(waiting, h.Name())
+		}
+		if spec.Delivery == harness.ProjectImport && !projectWriteAllowed(h.Name()) && !project.Owned(root, spec.Path) {
+			foreign = append(foreign, h.Name())
 		}
 	}
 	if len(waiting) > 0 {
@@ -289,6 +329,24 @@ func reportDelivery(out io.Writer, root string, delivered []project.Delivered, d
 			Message: fmt.Sprintf("%s %s a tracked file written to receive project rules here, currently off",
 				strings.Join(waiting, ", "), verb),
 			Fix: fmt.Sprintf("enable per harness: weft config set project-write %s true", waiting[0]),
+		})
+	}
+
+	// A separate advice from the inline one, under its own code: the cause is
+	// different (a file that already exists and is not weft's), so is the remedy,
+	// and the bus keeps only the first advice per code.
+	if len(foreign) > 0 {
+		sort.Strings(foreign)
+		verb := "needs"
+		if len(foreign) > 1 {
+			verb = "need"
+		}
+		advice.Add(advice.Advice{
+			Code:     advice.CodeProjectFileForeign,
+			Severity: advice.Info,
+			Message: fmt.Sprintf("%s %s to edit a file weft did not create, currently off",
+				strings.Join(foreign, ", "), verb),
+			Fix: fmt.Sprintf("if weft made it, run 'weft doctor --fix'; to edit the repo's own file: weft config set project-write %s true", foreign[0]),
 		})
 	}
 

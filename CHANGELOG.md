@@ -18,6 +18,16 @@ from, so keep entries written for someone deciding whether to upgrade.
 
 ### Fixed
 
+- **Project sync no longer leaves an untracked `GEMINI.md` in your repositories**
+  (#313). A `GEMINI.md` that weft creates is now added to `.git/info/exclude` at
+  once, so it never appears in `git status`. Weft also stops editing a
+  `GEMINI.md` that already exists and that it did not create, until you run
+  `weft config set project-write gemini-cli true`. Codex and Cursor files are
+  excluded the same way when you have enabled them. Upgrading: files created by
+  earlier versions are untracked and not excluded, so sync now leaves them
+  alone; run `weft doctor --fix` once to delete the ones holding only weft's
+  block, and the next sync recreates and excludes them.
+
 - **Projected scripts keep their execute bit** (#309). A skill script that is
   executable in its source now arrives executable in the harness, whether it is
   new or its source gained the bit after an earlier apply. Before, it arrived as

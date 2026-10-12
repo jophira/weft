@@ -1,15 +1,20 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 
 	"github.com/jophira/weft/internal/harness"
+	"github.com/jophira/weft/internal/instruction"
 	"github.com/jophira/weft/internal/locate"
 	"github.com/jophira/weft/internal/pathlint"
+	"github.com/jophira/weft/internal/project"
 	"github.com/spf13/cobra"
 )
 
@@ -24,13 +29,18 @@ var doctorCmd = &cobra.Command{
 	Long: `Check system health, discover AI rule folders, and lint source path
 references. Reports hardcoded, stale, broken, and dead path references in your
 sources. Pass --fix to rewrite the healable ones to the portable {{weft.root}}
-and {{weft.source:NAME}} anchors.`,
+and {{weft.source:NAME}} anchors, and to delete project files that weft created
+before it excluded them from git and that hold nothing but its own block.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		runDoctor(os.Stdout)
-		if doctorFix {
-			return fixPaths(os.Stdout)
+		// Not part of runDoctor: that output is also the body of 'weft bug-report',
+		// which people paste into public issues, and a list of paths inside
+		// their private repositories does not belong there.
+		orphans := reportProjectOrphans(os.Stdout)
+		if !doctorFix {
+			return nil
 		}
-		return nil
+		return errors.Join(removeProjectOrphans(os.Stdout, orphans), fixPaths(os.Stdout))
 	},
 }
 
@@ -88,6 +98,158 @@ func runDoctor(w io.Writer) {
 	reportProfileIntegrity(w)
 	reportRuleHealth(w)
 	reportPaths(w)
+}
+
+// projectTarget is one delivery-target file in one registered repository.
+type projectTarget struct {
+	root string
+	rel  string
+	spec harness.ProjectSpec
+}
+
+func (t projectTarget) abs() string { return filepath.Join(t.root, filepath.FromSlash(t.rel)) }
+
+// projectTargets lists the delivery-target files that exist in each root.
+//
+// Every harness is considered, not only detected ones: the leftovers of a
+// harness that has since been uninstalled are exactly what this looks for.
+func projectTargets(roots []string, harnesses []harness.Harness) []projectTarget {
+	var out []projectTarget
+	seen := map[string]bool{}
+	for _, root := range roots {
+		for _, h := range harnesses {
+			spec := harness.ProjectSupportOf(h)
+			if !spec.Delivery.TracksGit() || spec.Path == "" {
+				continue
+			}
+			t := projectTarget{root: root, rel: spec.Path, spec: spec}
+			if seen[t.abs()] {
+				continue // two harnesses sharing a target, e.g. AGENTS.md
+			}
+			if _, err := os.Stat(t.abs()); err == nil {
+				seen[t.abs()] = true
+				out = append(out, t)
+			}
+		}
+	}
+	return out
+}
+
+// orphanProjectFiles returns the absolute paths of delivery targets that git
+// does not track, that info/exclude does not list, and that hold weft's block
+// and nothing else.
+//
+// Those are what project sync left behind before it learned to exclude the
+// files it creates. An ignored one counts too: a repository's own .gitignore
+// can hide such a file, and sync still treats it as foreign. A file with no
+// block, or anything besides it, is somebody's; an excluded or tracked one is
+// live. None of those are listed.
+func orphanProjectFiles(roots []string, harnesses []harness.Harness) []string {
+	var out []string
+	for _, t := range projectTargets(roots, harnesses) {
+		data, err := os.ReadFile(t.abs())
+		if err != nil {
+			continue
+		}
+		if _, found := instruction.Extract(data); !found {
+			continue // weft never wrote this file
+		}
+		rest := string(instruction.Strip(data))
+		if t.spec.Preamble != "" {
+			rest = strings.TrimPrefix(rest, t.spec.Preamble)
+		}
+		if strings.TrimSpace(rest) != "" {
+			continue
+		}
+		if project.IsExcluded(t.root, t.rel) {
+			continue // weft's live delivery target
+		}
+		// -uall so a file inside an untracked directory is reported as itself;
+		// --ignored so one a .gitignore hides is reported as "!!".
+		status, err := exec.Command("git", "-C", t.root, "status", "--porcelain", "--ignored", "-uall", "--", t.rel).Output() //nolint:gosec // root is a registered repository, rel a harness spec
+		if code := string(status); err != nil || (!strings.HasPrefix(code, "??") && !strings.HasPrefix(code, "!!")) {
+			continue
+		}
+		out = append(out, t.abs())
+	}
+	return out
+}
+
+// trackedExcludedFiles returns delivery targets that info/exclude lists but git
+// tracks. Weft treats such a file as the repository's, so sync stops updating
+// it, and the exclude line is what hides that from git status.
+func trackedExcludedFiles(roots []string, harnesses []harness.Harness) []string {
+	var out []string
+	for _, t := range projectTargets(roots, harnesses) {
+		if !project.IsExcluded(t.root, t.rel) {
+			continue
+		}
+		// Asked directly rather than through project.Owned, which also returns
+		// false when git fails, and that is not the same diagnosis.
+		if exec.Command("git", "-C", t.root, "ls-files", "--error-unmatch", "--", t.rel).Run() == nil { //nolint:gosec // root is a registered repository, rel a harness spec
+			out = append(out, t.abs())
+		}
+	}
+	return out
+}
+
+// reportProjectOrphans lists project files weft left untracked in registered
+// repositories, and returns them for --fix to delete.
+func reportProjectOrphans(w io.Writer) []string {
+	cfgDir := configDir()
+	if cfgDir == "" {
+		return nil
+	}
+	reg, err := project.Load(cfgDir)
+	if err != nil || len(reg.Projects) == 0 {
+		return nil
+	}
+	if _, err := exec.LookPath("git"); err != nil {
+		fmt.Fprintln(w, "\nProject files: git not found, skipping the check for leftover files")
+		return nil
+	}
+	roots := make([]string, 0, len(reg.Projects))
+	for _, p := range reg.Projects {
+		roots = append(roots, p.Root)
+	}
+	hs := harness.Instances()
+
+	orphans := orphanProjectFiles(roots, hs)
+	if len(orphans) > 0 {
+		fmt.Fprintf(w, "\nProject files weft left untracked (%d):\n", len(orphans))
+		for _, o := range orphans {
+			fmt.Fprintf(w, "  ✗ %s\n", o)
+		}
+		if !doctorFix {
+			fmt.Fprintln(w, "  Run 'weft doctor --fix' to delete them; the next 'weft project sync' recreates each one and keeps it out of git.")
+		}
+	}
+	if tracked := trackedExcludedFiles(roots, hs); len(tracked) > 0 {
+		fmt.Fprintf(w, "\nProject files git tracks but .git/info/exclude also lists (%d). Weft no longer updates them:\n", len(tracked))
+		for _, tf := range tracked {
+			fmt.Fprintf(w, "  • %s\n", tf)
+		}
+		fmt.Fprintln(w, "  Remove the line from .git/info/exclude, or 'weft config set project-write <harness> true' to let weft edit the file.")
+	}
+	return orphans
+}
+
+// removeProjectOrphans deletes the files reportProjectOrphans listed. --fix is
+// the confirmation, as it is for the path heals.
+func removeProjectOrphans(w io.Writer, orphans []string) error {
+	var errs []error
+	removed := 0
+	for _, o := range orphans {
+		if err := os.Remove(o); err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		removed++
+	}
+	if len(orphans) > 0 {
+		fmt.Fprintf(w, "\n✓ Removed %d project file(s) weft had left untracked.\n", removed)
+	}
+	return errors.Join(errs...)
 }
 
 // reportProfileIntegrity flags profiles that reference a source name which is
@@ -287,7 +449,7 @@ func scanHarnesses(w io.Writer) {
 }
 
 func init() {
-	doctorCmd.Flags().BoolVar(&doctorFix, "fix", false, "rewrite healable path references to weft anchors")
+	doctorCmd.Flags().BoolVar(&doctorFix, "fix", false, "rewrite healable path references to weft anchors, and delete untracked project files holding only weft's block")
 	doctorCmd.Flags().BoolVar(&doctorAll, "all", false, "also list informational external/dead path references")
 	rootCmd.AddCommand(doctorCmd)
 }
