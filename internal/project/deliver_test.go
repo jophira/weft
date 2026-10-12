@@ -308,12 +308,12 @@ func TestDeliverImport_writesRepoRelativeLines(t *testing.T) {
 	root := t.TempDir()
 	paths := []string{filepath.Join(root, ".weft", "instructions", "00-weft-rules.md")}
 
-	wrote, err := DeliverImport(root, "GEMINI.md", "@{path}", paths)
+	wrote, created, err := DeliverImport(root, "GEMINI.md", "@{path}", paths)
 	if err != nil {
 		t.Fatalf("DeliverImport: %v", err)
 	}
-	if !wrote {
-		t.Error("reported no write")
+	if !wrote || !created {
+		t.Errorf("wrote=%v created=%v, want both true for a new file", wrote, created)
 	}
 	body := read(t, filepath.Join(root, "GEMINI.md"))
 	// Repo-relative so the line survives the repository moving, and stays inside
@@ -330,8 +330,12 @@ func TestDeliverImport_preservesAuthoredContent(t *testing.T) {
 	root := t.TempDir()
 	write(t, filepath.Join(root, "GEMINI.md"), "# Mine\n\nDo not touch this.\n")
 
-	if _, err := DeliverImport(root, "GEMINI.md", "@{path}", []string{filepath.Join(root, "x.md")}); err != nil {
+	wrote, created, err := DeliverImport(root, "GEMINI.md", "@{path}", []string{filepath.Join(root, "x.md")})
+	if err != nil {
 		t.Fatalf("DeliverImport: %v", err)
+	}
+	if !wrote || created {
+		t.Errorf("wrote=%v created=%v, want a write into an existing file", wrote, created)
 	}
 	body := read(t, filepath.Join(root, "GEMINI.md"))
 	if !strings.Contains(body, "Do not touch this.") {
@@ -344,10 +348,10 @@ func TestDeliverImport_preservesAuthoredContent(t *testing.T) {
 func TestDeliverImport_secondCallWritesNothing(t *testing.T) {
 	root := t.TempDir()
 	paths := []string{filepath.Join(root, ".weft", "instructions", "00-weft-rules.md")}
-	if _, err := DeliverImport(root, "GEMINI.md", "@{path}", paths); err != nil {
+	if _, _, err := DeliverImport(root, "GEMINI.md", "@{path}", paths); err != nil {
 		t.Fatalf("first: %v", err)
 	}
-	wrote, err := DeliverImport(root, "GEMINI.md", "@{path}", paths)
+	wrote, _, err := DeliverImport(root, "GEMINI.md", "@{path}", paths)
 	if err != nil {
 		t.Fatalf("second: %v", err)
 	}
@@ -362,7 +366,7 @@ func TestDeliverInline_writesContentWithAttribution(t *testing.T) {
 	root := t.TempDir()
 	parts := []Part{{Name: "CLAUDE.md", Origin: OriginInput, Content: "Be brief."}}
 
-	if _, err := DeliverInline(root, "AGENTS.md", "", parts); err != nil {
+	if _, _, err := DeliverInline(root, "AGENTS.md", "", parts); err != nil {
 		t.Fatalf("DeliverInline: %v", err)
 	}
 	body := read(t, filepath.Join(root, "AGENTS.md"))
@@ -379,7 +383,7 @@ func TestDeliverInline_seedsPreambleOnFirstCreate(t *testing.T) {
 	preamble := "---\nalwaysApply: true\n---\n"
 	parts := []Part{{Name: "x", Content: "content"}}
 
-	if _, err := DeliverInline(root, ".cursor/rules/weft.mdc", preamble, parts); err != nil {
+	if _, _, err := DeliverInline(root, ".cursor/rules/weft.mdc", preamble, parts); err != nil {
 		t.Fatalf("DeliverInline: %v", err)
 	}
 	body := read(t, filepath.Join(root, ".cursor", "rules", "weft.mdc"))

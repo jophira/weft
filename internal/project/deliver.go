@@ -113,12 +113,13 @@ func addHook(doc map[string]any) {
 }
 
 // DeliverImport writes a managed block of import lines into the project's
-// instruction file, returning whether the file changed.
+// instruction file, returning whether the file changed and whether this call
+// created it.
 //
 // One line per bundle part, pointing inside <repo>/.weft. The lines only change
 // when the set of parts changes, so a repository whose rules are stable sees a
 // single commit-sized diff once and nothing after that.
-func DeliverImport(root, relPath, template string, paths []string) (bool, error) {
+func DeliverImport(root, relPath, template string, paths []string) (wrote, created bool, err error) {
 	if template == "" {
 		template = "@{path}"
 	}
@@ -137,8 +138,9 @@ func DeliverImport(root, relPath, template string, paths []string) (bool, error)
 }
 
 // DeliverInline writes the bundle content itself into the project's instruction
-// file, for harnesses with neither a hook nor an include directive.
-func DeliverInline(root, relPath, preamble string, parts []Part) (bool, error) {
+// file, for harnesses with neither a hook nor an include directive. Like
+// DeliverImport, it reports whether this call created the file.
+func DeliverInline(root, relPath, preamble string, parts []Part) (wrote, created bool, err error) {
 	sc := make([]instruction.SourceContent, 0, len(parts))
 	for _, p := range parts {
 		sc = append(sc, instruction.SourceContent{Name: p.Name, Content: p.Content})
@@ -150,29 +152,33 @@ func DeliverInline(root, relPath, preamble string, parts []Part) (bool, error) {
 // everything outside it byte for byte, and skipping the write when the result
 // is identical.
 //
-// The no-op check matters more here than in the global plane: this file is
+// The no-op check matters more here than in the global plane: this file may be
 // tracked, so an unchanged rewrite would still show as a modified file in git
 // status and train the user to ignore weft's diffs.
-func writeManagedBlock(root, relPath, body, preamble string) (bool, error) {
+//
+// created is true when the file did not exist, so the caller can exclude it from
+// git before anyone sees an untracked file.
+func writeManagedBlock(root, relPath, body, preamble string) (wrote, created bool, err error) {
 	path := filepath.Join(root, filepath.FromSlash(relPath))
 
 	existing, err := os.ReadFile(path) //nolint:gosec // path is inside the repository
 	switch {
 	case os.IsNotExist(err):
 		existing = []byte(preamble)
+		created = true
 	case err != nil:
-		return false, fmt.Errorf("project: reading %s: %w", path, err)
+		return false, false, fmt.Errorf("project: reading %s: %w", path, err)
 	}
 
 	updated := instruction.Upsert(existing, body)
 	if string(updated) == string(existing) {
-		return false, nil
+		return false, false, nil
 	}
 	if mkErr := os.MkdirAll(filepath.Dir(path), 0o755); mkErr != nil {
-		return false, fmt.Errorf("project: creating dir for %s: %w", path, mkErr)
+		return false, false, fmt.Errorf("project: creating dir for %s: %w", path, mkErr)
 	}
 	if wErr := os.WriteFile(path, updated, 0o644); wErr != nil { //nolint:gosec // instruction files are user-readable by design
-		return false, fmt.Errorf("project: writing %s: %w", path, wErr)
+		return false, false, fmt.Errorf("project: writing %s: %w", path, wErr)
 	}
-	return true, nil
+	return true, created, nil
 }

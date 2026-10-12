@@ -24,9 +24,10 @@ const (
 	ProjectHook
 
 	// ProjectImport: the harness resolves an include directive itself, so one
-	// line in the tracked instruction file is enough. The line is written once
-	// and never changes, because everything that varies lives in the file it
-	// points at.
+	// line in the instruction file is enough. The line is written once and never
+	// changes, because everything that varies lives in the file it points at.
+	// A file weft creates is excluded from git; an existing one is the
+	// repository's, and is edited only when the user opts in.
 	ProjectImport
 
 	// ProjectInline: the harness has no include directive, so the content must
@@ -55,8 +56,9 @@ func (d ProjectDelivery) String() string {
 	return "none"
 }
 
-// TracksGit reports whether this delivery writes a file normally kept in git.
-// Used to decide what needs the user's explicit go-ahead.
+// TracksGit reports whether this delivery writes a file normally kept in git,
+// which may be one weft created and excluded, or one the repository owns. Used
+// to decide which files fan-in must not read back and which doctor inspects.
 func (d ProjectDelivery) TracksGit() bool {
 	return d == ProjectImport || d == ProjectInline
 }

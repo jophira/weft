@@ -1,8 +1,10 @@
 package project
 
 import (
+	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -82,6 +84,54 @@ func EnsureExcluded(root string, extra ...string) (bool, error) {
 		return false, fmt.Errorf("project: writing %s: %w", path, err)
 	}
 	return true, nil
+}
+
+// IsExcluded reports whether rel is listed in the repository's
+// .git/info/exclude, in any spelling git treats as the same pattern.
+//
+// Weft writes that entry when it creates a delivery target, so "excluded" is the
+// record that weft made the file. A repository that is not a git checkout, or
+// has no info/exclude yet, excludes nothing.
+func IsExcluded(root, rel string) bool {
+	gitDir, ok := gitDirFor(root)
+	if !ok {
+		return false
+	}
+	data, err := os.ReadFile(filepath.Join(gitDir, "info", "exclude")) //nolint:gosec // path is a resolved .git/info/exclude
+	if err != nil {
+		return false
+	}
+	patterns := normalisePatterns([]string{rel})
+	return len(patterns) == 1 && hasExcludeEntry(string(data), patterns[0])
+}
+
+// Owned reports whether weft may write rel without anyone having opted in: the
+// file does not exist yet, the directory is not a git checkout (so there is no
+// teammate to surprise), or weft made it earlier and nobody has tracked it since.
+//
+// The last case needs two facts. The file is listed in info/exclude, which weft
+// writes when it creates a delivery target. And git does not track it, because
+// info/exclude is shared across worktrees and says nothing about a file a
+// teammate has since committed upstream. Git is run only in that one case.
+//
+// Anything uncertain counts as not owned. A refused write is a reversible
+// inconvenience; an edit to someone else's file is not.
+func Owned(root, rel string) bool {
+	if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(rel))); os.IsNotExist(err) {
+		return true
+	}
+	if _, ok := gitDirFor(root); !ok {
+		return true
+	}
+	if !IsExcluded(root, rel) {
+		return false
+	}
+	// --error-unmatch exits 1 when the path is untracked. Any other failure
+	// (git missing, not a repository, a fatal error) tells us nothing about
+	// tracking, so it is not read as "untracked".
+	err := exec.Command("git", "-C", root, "ls-files", "--error-unmatch", "--", rel).Run() //nolint:gosec // root and rel come from the registry and harness specs
+	var exitErr *exec.ExitError
+	return errors.As(err, &exitErr) && exitErr.ExitCode() == 1
 }
 
 // normalisePatterns anchors each repo-relative path at the repository root, so

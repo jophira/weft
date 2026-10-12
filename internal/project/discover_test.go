@@ -2,6 +2,7 @@ package project
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -278,5 +279,86 @@ func TestEnsureExcluded_outsideRepositoryIsNotAnError(t *testing.T) {
 	}
 	if wrote {
 		t.Error("wrote an exclude where there is no git repository")
+	}
+}
+
+// ── Owned ─────────────────────────────────────────────────────────────────────
+
+// gitInit makes a real repository, because Owned asks git whether a file is
+// tracked and a hand-built .git directory cannot answer that.
+func gitInit(t *testing.T) string {
+	t.Helper()
+	// The developer's own global config (signing, hooks, excludes) must not leak in.
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	root := t.TempDir()
+	runGit(t, root, "init", "-q")
+	return root
+}
+
+func runGit(t *testing.T, root string, args ...string) {
+	t.Helper()
+	full := append([]string{"-C", root, "-c", "user.name=t", "-c", "user.email=t@example.com"}, args...)
+	if out, err := exec.Command("git", full...).CombinedOutput(); err != nil { //nolint:gosec // test helper, args are literals
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+}
+
+func TestOwned_absent(t *testing.T) {
+	root := gitInit(t)
+	if !Owned(root, "GEMINI.md") {
+		t.Error("an absent file is not owned, so weft could never create it")
+	}
+}
+
+func TestOwned_foreign(t *testing.T) {
+	root := gitInit(t)
+	write(t, filepath.Join(root, "GEMINI.md"), "# Theirs\n")
+	if Owned(root, "GEMINI.md") {
+		t.Error("an existing file that is not excluded was treated as weft's")
+	}
+}
+
+func TestOwned_excluded(t *testing.T) {
+	root := gitInit(t)
+	write(t, filepath.Join(root, "GEMINI.md"), "# Mine\n")
+	if _, err := EnsureExcluded(root, "GEMINI.md"); err != nil {
+		t.Fatalf("EnsureExcluded: %v", err)
+	}
+	if !Owned(root, "GEMINI.md") {
+		t.Error("an excluded, untracked file should count as weft's")
+	}
+}
+
+func TestOwned_noGit(t *testing.T) {
+	root := t.TempDir()
+	write(t, filepath.Join(root, "GEMINI.md"), "# Anyone's\n")
+	if !Owned(root, "GEMINI.md") {
+		t.Error("outside a git checkout there is nobody to surprise, so the file is ownable")
+	}
+}
+
+func TestOwned_trackedAndExcluded(t *testing.T) {
+	root := gitInit(t)
+	write(t, filepath.Join(root, "GEMINI.md"), "# Committed\n")
+	runGit(t, root, "add", "GEMINI.md")
+	runGit(t, root, "commit", "-q", "-m", "add")
+	if _, err := EnsureExcluded(root, "GEMINI.md"); err != nil {
+		t.Fatalf("EnsureExcluded: %v", err)
+	}
+	if Owned(root, "GEMINI.md") {
+		t.Error("a tracked file is the repository's, however it is listed in info/exclude")
+	}
+}
+
+func TestOwned_gitMissing(t *testing.T) {
+	root := gitInit(t)
+	write(t, filepath.Join(root, "GEMINI.md"), "# Mine\n")
+	if _, err := EnsureExcluded(root, "GEMINI.md"); err != nil {
+		t.Fatalf("EnsureExcluded: %v", err)
+	}
+	t.Setenv("PATH", "")
+	if Owned(root, "GEMINI.md") {
+		t.Error("with git unrunnable, tracking is unknown, so the file must not count as owned")
 	}
 }
