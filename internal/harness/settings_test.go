@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -488,7 +489,8 @@ func TestProjectSettingsWriteBack(t *testing.T) {
 		if got := readFile(t, orig.Path); !strings.Contains(got, `"k":5`) {
 			t.Errorf("orig file not updated: %s", got)
 		}
-		if fi, _ := os.Stat(dir); fi.Mode().Perm() != 0o755 {
+		// Windows reports no Unix permission bits, so only the symlink half applies there.
+		if fi, _ := os.Stat(dir); runtime.GOOS != "windows" && fi.Mode().Perm() != 0o755 {
 			t.Errorf("source dir mode = %v", fi.Mode().Perm())
 		}
 	})
