@@ -38,6 +38,11 @@ from, so keep entries written for someone deciding whether to upgrade.
   superproject's, so a file weft created in a submodule is excluded there and its
   `origin` remote is found.
 
+- **Text you write in `GEMINI.md`, `AGENTS.md` or a Cursor rule now reaches the
+  other harnesses** (#316). Anything outside weft's block in a file weft delivers
+  to is read as project input, like text in `CLAUDE.md` already was. Before, weft
+  skipped those files whole, so your own lines there never fanned out.
+
 ## [0.2.1] - 2026-08-15
 
 **No code change since v0.2.0.** The binaries are the same build; there is

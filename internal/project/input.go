@@ -1,6 +1,7 @@
 package project
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"sort"
@@ -19,7 +20,7 @@ type Input struct {
 }
 
 // ReadInputs collects the project instruction files matching patterns under
-// root, skipping anything weft itself writes.
+// root.
 //
 // Reading is deliberately unconstrained while writing is not. A tracked
 // CLAUDE.md that weft will never modify is still a perfectly good statement of
@@ -27,16 +28,13 @@ type Input struct {
 // that a rule written for one harness reaches the others working in the same
 // repository.
 //
-// exclude holds repo-relative paths weft delivers to. They are skipped outright
-// rather than relying on block-stripping alone, because an inline delivery
-// target also carries a preamble (Cursor's .mdc frontmatter) that is weft's
-// output, not the user's input.
-func ReadInputs(root string, patterns, exclude []string) ([]Input, error) {
-	skip := make(map[string]bool, len(exclude))
-	for _, e := range exclude {
-		skip[normaliseRel(e)] = true
-	}
-
+// That includes the files weft delivers to. Text a user writes in GEMINI.md
+// outside weft's block is theirs and belongs in the bundle; instruction.Strip
+// removes the block, and preambles (repo-relative path to the text weft seeds
+// before the block, e.g. Cursor's .mdc frontmatter) are trimmed first so weft's
+// own header is not read back as the user's text. A harness is kept from
+// importing its own input by ImportPathsFor and PartsFor, not here.
+func ReadInputs(root string, patterns []string, preambles map[string]string) ([]Input, error) {
 	seen := map[string]bool{}
 	var out []Input
 	for _, pattern := range patterns {
@@ -50,7 +48,7 @@ func ReadInputs(root string, patterns, exclude []string) ([]Input, error) {
 				continue
 			}
 			key := normaliseRel(rel)
-			if seen[key] || skip[key] {
+			if seen[key] {
 				continue
 			}
 			seen[key] = true
@@ -58,6 +56,9 @@ func ReadInputs(root string, patterns, exclude []string) ([]Input, error) {
 			data, readErr := os.ReadFile(abs) //nolint:gosec // abs is matched under the repository root
 			if readErr != nil {
 				continue // unreadable input contributes nothing; never fatal
+			}
+			if pre := preambles[key]; pre != "" {
+				data = bytes.TrimPrefix(data, []byte(pre))
 			}
 			content := strings.TrimSpace(string(instruction.Strip(data)))
 			if content == "" {

@@ -5,6 +5,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -185,8 +186,7 @@ func projectParts(root string, harnesses []harness.Harness) ([]project.Part, err
 		parts = append(parts, project.Part{Name: "weft-rules", Origin: project.OriginRules, Content: bundle})
 	}
 
-	exclude := deliveryPaths(harnesses)
-	inputs, err := project.ReadInputs(root, harness.ProjectInputs(harnesses), exclude)
+	inputs, err := project.ReadInputs(root, harness.ProjectInputs(harnesses), deliveryPreambles(harnesses))
 	if err != nil {
 		return nil, err
 	}
@@ -209,16 +209,16 @@ func hookPaths(harnesses []harness.Harness) []string {
 	return out
 }
 
-// deliveryPaths lists the repo-relative files weft writes, so fan-in never reads
-// back weft's own output as if the user had written it.
-func deliveryPaths(harnesses []harness.Harness) []string {
-	var out []string
+// deliveryPreambles maps each repo-relative file weft writes to the text weft
+// seeds before its block, so fan-in reads the user's own text in a delivery
+// target but never weft's header.
+func deliveryPreambles(harnesses []harness.Harness) map[string]string {
+	out := map[string]string{}
 	for _, h := range harnesses {
 		if spec := harness.ProjectSupportOf(h); spec.Delivery.TracksGit() {
-			out = append(out, spec.Path)
+			out[filepath.ToSlash(filepath.Clean(spec.Path))] = spec.Preamble
 		}
 	}
-	sort.Strings(out)
 	return out
 }
 
@@ -254,7 +254,7 @@ func projectInputBundle(root string) (string, error) {
 	if len(detected) == 0 {
 		return "", nil
 	}
-	inputs, err := project.ReadInputs(root, harness.ProjectInputs(detected), deliveryPaths(detected))
+	inputs, err := project.ReadInputs(root, harness.ProjectInputs(detected), deliveryPreambles(detected))
 	if err != nil {
 		return "", err
 	}

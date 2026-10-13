@@ -13,6 +13,7 @@ import (
 
 	"github.com/jophira/weft/internal/advice"
 	"github.com/jophira/weft/internal/harness"
+	"github.com/jophira/weft/internal/instruction"
 	"github.com/jophira/weft/internal/project"
 )
 
@@ -240,5 +241,34 @@ func TestSyncProject_trackedExcludedFileIsForeign(t *testing.T) {
 	got, _ := os.ReadFile(filepath.Join(root, "GEMINI.md"))
 	if string(got) != "# Committed\n" {
 		t.Errorf("tracked GEMINI.md was edited:\n%s", got)
+	}
+}
+
+func TestProjectParts_deliveryTargetIsAnInput(t *testing.T) {
+	root := gitRepoT(t)
+	viper.Set("active_profile", "")
+	gemini := harnessesT(t, "gemini-cli")
+	body := instruction.Upsert([]byte("# Mine\n\nuser line\n"), "WEFT BLOCK")
+	writeFileT(t, filepath.Join(root, "GEMINI.md"), string(body))
+
+	parts, err := projectParts(root, gemini)
+	if err != nil {
+		t.Fatalf("projectParts: %v", err)
+	}
+	var written []project.WrittenPart
+	found := false
+	for _, p := range parts {
+		written = append(written, project.WrittenPart{Part: p, Path: p.Name})
+		if p.Name == "GEMINI.md" && strings.Contains(p.Content, "user line") && !strings.Contains(p.Content, "WEFT BLOCK") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("parts = %+v, want GEMINI.md's user text as an input part", parts)
+	}
+	for _, path := range project.ImportPathsFor(written, harness.ProjectSupportOf(gemini[0]).Inputs) {
+		if path == "GEMINI.md" {
+			t.Error("GEMINI.md would be imported back into itself")
+		}
 	}
 }

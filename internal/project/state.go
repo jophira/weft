@@ -3,6 +3,7 @@ package project
 import (
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -78,12 +79,12 @@ func WriteParts(root string, parts []Part) ([]WrittenPart, error) {
 	written := make([]WrittenPart, 0, len(parts))
 	for i, p := range parts {
 		name := fmt.Sprintf("%02d-%s.md", i*10, slug(p.Name))
-		path := filepath.Join(dir, name)
+		partPath := filepath.Join(dir, name)
 		body := generatedHeader + "\n\n" + strings.TrimSpace(p.Content) + "\n"
-		if err := os.WriteFile(path, []byte(body), 0o644); err != nil { //nolint:gosec // path is inside the repository's own weft dir
-			return nil, fmt.Errorf("project: writing %s: %w", path, err)
+		if err := os.WriteFile(partPath, []byte(body), 0o644); err != nil { //nolint:gosec // path is inside the repository's own weft dir
+			return nil, fmt.Errorf("project: writing %s: %w", partPath, err)
 		}
-		written = append(written, WrittenPart{Part: p, Path: path})
+		written = append(written, WrittenPart{Part: p, Path: partPath})
 	}
 	return written, nil
 }
@@ -126,13 +127,9 @@ func slug(name string) string {
 // twice. Rules the resolver selected are always included: they come from weft's
 // sources, so no harness has them already.
 func ImportPathsFor(written []WrittenPart, ownInputs []string) []string {
-	skip := make(map[string]bool, len(ownInputs))
-	for _, in := range ownInputs {
-		skip[normaliseRel(in)] = true
-	}
 	out := make([]string, 0, len(written))
 	for _, w := range written {
-		if w.Origin == OriginInput && skip[normaliseRel(w.Name)] {
+		if w.Origin == OriginInput && isOwnInput(ownInputs, w.Name) {
 			continue
 		}
 		out = append(out, w.Path)
@@ -143,18 +140,32 @@ func ImportPathsFor(written []WrittenPart, ownInputs []string) []string {
 // PartsFor returns the parts a harness should receive inline, using the same
 // exclusion rule as ImportPathsFor.
 func PartsFor(written []WrittenPart, ownInputs []string) []Part {
-	skip := make(map[string]bool, len(ownInputs))
-	for _, in := range ownInputs {
-		skip[normaliseRel(in)] = true
-	}
 	out := make([]Part, 0, len(written))
 	for _, w := range written {
-		if w.Origin == OriginInput && skip[normaliseRel(w.Name)] {
+		if w.Origin == OriginInput && isOwnInput(ownInputs, w.Name) {
 			continue
 		}
 		out = append(out, w.Part)
 	}
 	return out
+}
+
+// isOwnInput reports whether name is one of ownInputs. An entry holding glob
+// metacharacters (Cursor's .cursor/rules/*.mdc) matches as a pattern; any other
+// entry matches exactly.
+func isOwnInput(ownInputs []string, name string) bool {
+	name = normaliseRel(name)
+	for _, in := range ownInputs {
+		in = normaliseRel(in)
+		if strings.ContainsAny(in, "*?[") {
+			if ok, _ := path.Match(in, name); ok {
+				return true
+			}
+		} else if in == name {
+			return true
+		}
+	}
+	return false
 }
 
 // SortInputs orders inputs by path for a stable bundle.
