@@ -246,10 +246,11 @@ func settingsSources(roots []string, srcs []source.Source, harnessName string) (
 		if err != nil {
 			return nil, fmt.Errorf("reading %s: %w", path, err)
 		}
-		data = anchor.Expand(data, anchor.Anchors{
+		anchors := anchor.Anchors{
 			Root: jsonEscape(root), Home: jsonEscape(home), Docs: jsonEscape(docs), ByName: byName,
-		})
-		out = append(out, harness.SettingsSource{Name: srcs[i].Name, Path: path, Data: data})
+		}
+		data = anchor.Expand(data, anchors)
+		out = append(out, harness.SettingsSource{Name: srcs[i].Name, Path: path, Data: data, Anchors: anchors})
 	}
 	return out, nil
 }
