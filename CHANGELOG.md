@@ -33,6 +33,11 @@ from, so keep entries written for someone deciding whether to upgrade.
   new or its source gained the bit after an earlier apply. Before, it arrived as
   `-rw-r--r--` and failed with `Permission denied` when run by path.
 
+- **Project sync works in a git submodule** (#314). Weft now reads and writes the
+  submodule's own `info/exclude` and `config`, where it used to touch the
+  superproject's, so a file weft created in a submodule is excluded there and its
+  `origin` remote is found.
+
 ## [0.2.1] - 2026-08-15
 
 **No code change since v0.2.0.** The binaries are the same build; there is

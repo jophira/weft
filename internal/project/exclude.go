@@ -34,7 +34,8 @@ const excludeHeader = "# added by weft: repo-local rule state, never committed"
 // status. Excluding what weft writes is what makes the promise true.
 //
 // Worktrees share the main checkout's info/exclude, since gitDirFor resolves the
-// pointer. That is the behaviour we want: one entry covers every worktree.
+// pointer. That is the behaviour we want: one entry covers every worktree. A
+// submodule is its own repository, so it gets its own info/exclude.
 func EnsureExcluded(root string, extra ...string) (bool, error) {
 	gitDir, ok := gitDirFor(root)
 	if !ok {
