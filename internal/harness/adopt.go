@@ -437,6 +437,17 @@ func Adopt(req AdoptRequest) ([]AdoptEntry, error) {
 				owned[k] = req.Layout.Name
 			}
 			m.Settings[e.From] = owned
+			// Record each key's value so an edit made in the harness after this is
+			// told apart from what adoption just brought under the source.
+			var doc map[string]json.RawMessage
+			if err := json.Unmarshal(data, &doc); err != nil {
+				return nil, fmt.Errorf("parsing %s: %w", e.Rel, err)
+			}
+			values := make(map[string]string, len(e.Keys))
+			for _, k := range e.Keys {
+				values[k] = settingValueHash(doc[k])
+			}
+			m.SettingsValues[e.From] = values
 			m.Files[settingsManifestKey(e.From)] = manifest.HashBytes(data)
 			continue
 		}

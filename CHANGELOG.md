@@ -33,6 +33,27 @@ from, so keep entries written for someone deciding whether to upgrade.
   new or its source gained the bit after an earlier apply. Before, it arrived as
   `-rw-r--r--` and failed with `Permission denied` when run by path.
 
+- **Project sync works in a git submodule** (#314). Weft now reads and writes the
+  submodule's own `info/exclude` and `config`, where it used to touch the
+  superproject's, so a file weft created in a submodule is excluded there and its
+  `origin` remote is found.
+
+- **Text you write in `GEMINI.md`, `AGENTS.md` or a Cursor rule now reaches the
+  other harnesses** (#316). Anything outside weft's block in a file weft delivers
+  to is read as project input, like text in `CLAUDE.md` already was. Before, weft
+  skipped those files whole, so your own lines there never fanned out.
+
+- **Edits Claude Code makes to your `settings.json` now reach your source**
+  (#312). Adding a rule in `/permissions` to a key a source owns is written back
+  to that source's `harness/claude-code/settings.json` at the next apply instead
+  of being reverted. If both the source and Claude Code changed the same key,
+  weft keeps both values and warns (W205) until you make them match. A `/config`
+  change to a key no source owns no longer triggers a "changed outside weft"
+  backup. Replacing a value edits only that value in your file; removing a key
+  rewrites the file with 2-space indentation. A settings file that has lost
+  every key weft wrote (deleted, reset or emptied) is treated as a reset and
+  restored from the sources, never written back as deletions.
+
 ## [0.2.1] - 2026-08-15
 
 **No code change since v0.2.0.** The binaries are the same build; there is

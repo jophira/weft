@@ -292,6 +292,10 @@ func TestAdoptSettings(t *testing.T) {
 		if !strings.Contains(out.String(), "unchanged") || backupCount(t, ctx.CfgDir) != 0 {
 			t.Errorf("want unchanged and no backup, got %q", out.String())
 		}
+		m, mErr := manifest.Load(ctx.CfgDir, "claude-code")
+		if mErr != nil || len(m.SettingsValues[live]) != 4 {
+			t.Errorf("settings values after adopt then apply = %v, %v", m.SettingsValues, mErr)
+		}
 	})
 
 	t.Run("refuses a literal credential", func(t *testing.T) {

@@ -38,10 +38,34 @@ func newWorktree(t *testing.T, mainRoot, name string) string {
 	if err := os.MkdirAll(target, 0o755); err != nil {
 		t.Fatalf("mkdir worktrees entry: %v", err)
 	}
+	// git writes commondir (relative to the worktree's gitdir) into every linked
+	// worktree; gitDirFor follows it to the main .git.
+	if err := os.WriteFile(filepath.Join(target, "commondir"), []byte("../..\n"), 0o644); err != nil {
+		t.Fatalf("write commondir: %v", err)
+	}
 	if err := os.WriteFile(filepath.Join(wt, ".git"), []byte("gitdir: "+target+"\n"), 0o644); err != nil {
 		t.Fatalf("write .git pointer: %v", err)
 	}
 	return wt
+}
+
+// newSubmodule makes a submodule checkout of super: .git is a pointer file to
+// <super>/.git/modules/<name>, which has no commondir because it is its own
+// repository.
+func newSubmodule(t *testing.T, super, name string) string {
+	t.Helper()
+	sub := filepath.Join(super, name)
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatalf("mkdir submodule: %v", err)
+	}
+	gitDir := filepath.Join(super, ".git", "modules", name)
+	if err := os.MkdirAll(gitDir, 0o755); err != nil {
+		t.Fatalf("mkdir modules entry: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sub, ".git"), []byte("gitdir: ../.git/modules/"+name+"\n"), 0o644); err != nil {
+		t.Fatalf("write .git pointer: %v", err)
+	}
+	return sub
 }
 
 // ── FindRoot ──────────────────────────────────────────────────────────────────
@@ -272,6 +296,22 @@ func TestEnsureExcluded_worktreeUsesTheMainCheckout(t *testing.T) {
 	}
 }
 
+func TestEnsureExcluded_SubmoduleUsesItsOwnGitDir(t *testing.T) {
+	super := newRepo(t, "")
+	sub := newSubmodule(t, super, "sub")
+
+	if _, err := EnsureExcluded(sub); err != nil {
+		t.Fatalf("EnsureExcluded on a submodule: %v", err)
+	}
+	got := readExclude(t, filepath.Join(super, ".git", "modules", "sub"))
+	if !hasExcludeEntry(got, ExcludeEntry) {
+		t.Errorf("submodule exclude = %q, want weft's entry", got)
+	}
+	if _, err := os.Stat(filepath.Join(super, ".git", "info", "exclude")); !os.IsNotExist(err) {
+		t.Errorf("superproject info/exclude was touched (stat err = %v)", err)
+	}
+}
+
 func TestEnsureExcluded_outsideRepositoryIsNotAnError(t *testing.T) {
 	wrote, err := EnsureExcluded(t.TempDir())
 	if err != nil {
@@ -327,6 +367,22 @@ func TestOwned_excluded(t *testing.T) {
 	}
 	if !Owned(root, "GEMINI.md") {
 		t.Error("an excluded, untracked file should count as weft's")
+	}
+}
+
+func TestOwned_SubmoduleIgnoresSuperprojectExclude(t *testing.T) {
+	super := newRepo(t, "")
+	sub := newSubmodule(t, super, "sub")
+	write(t, filepath.Join(sub, "GEMINI.md"), "# Theirs\n")
+	// Only the superproject excludes the file; the submodule is a separate repo.
+	if _, err := EnsureExcluded(super, "GEMINI.md"); err != nil {
+		t.Fatalf("EnsureExcluded: %v", err)
+	}
+	if IsExcluded(sub, "GEMINI.md") {
+		t.Error("the superproject's exclude entry was read for the submodule")
+	}
+	if Owned(sub, "GEMINI.md") {
+		t.Error("a file excluded only in the superproject was treated as weft's in the submodule")
 	}
 }
 

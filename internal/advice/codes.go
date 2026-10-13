@@ -39,6 +39,9 @@ const (
 	CodeWriteBackFailed = "W203"
 	// CodeConflictScanFailed: the conflict scan could not run.
 	CodeConflictScanFailed = "W204"
+	// CodeSettingsKeyHeld: a settings key changed in both its source and the
+	// harness, so weft kept both values.
+	CodeSettingsKeyHeld = "W205"
 
 	// CodeNoProjectInstructions: the repository has no instruction file any
 	// detected harness would read, so there is nothing project-scoped to fan in.

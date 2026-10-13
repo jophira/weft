@@ -70,17 +70,43 @@ func TestReadInputs_stripsWeftsOwnBlock(t *testing.T) {
 	}
 }
 
-func TestReadInputs_skipsFilesWeftDeliversTo(t *testing.T) {
+func TestReadInputs_readsDeliveryTargetOutsideBlock(t *testing.T) {
 	root := t.TempDir()
-	write(t, filepath.Join(root, "CLAUDE.md"), "# Keep\n\nkeep me\n")
-	write(t, filepath.Join(root, "AGENTS.md"), "# Written by weft\n\nweft output\n")
+	body := string(instruction.Upsert([]byte("# Mine\n\nuser line\n"), "WEFT BLOCK"))
+	write(t, filepath.Join(root, "AGENTS.md"), body)
 
-	got, err := ReadInputs(root, []string{"CLAUDE.md", "AGENTS.md"}, []string{"AGENTS.md"})
+	got, err := ReadInputs(root, []string{"AGENTS.md"}, map[string]string{"AGENTS.md": ""})
 	if err != nil {
 		t.Fatalf("ReadInputs: %v", err)
 	}
-	if len(got) != 1 || got[0].Rel != "CLAUDE.md" {
-		t.Errorf("inputs = %+v, want only CLAUDE.md", got)
+	if len(got) != 1 || !strings.Contains(got[0].Content, "user line") || strings.Contains(got[0].Content, "WEFT BLOCK") {
+		t.Errorf("inputs = %+v, want the user's line without weft's block", got)
+	}
+}
+
+func TestReadInputs_stripsPreamble(t *testing.T) {
+	root := t.TempDir()
+	const pre = "---\nalwaysApply: true\n---\n"
+	rel := ".cursor/rules/weft.mdc"
+	write(t, filepath.Join(root, rel), string(instruction.Upsert([]byte(pre), "WEFT BLOCK")))
+
+	got, err := ReadInputs(root, []string{".cursor/rules/*.mdc"}, map[string]string{rel: pre})
+	if err != nil {
+		t.Fatalf("ReadInputs: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("inputs = %+v, want none from a weft-created file", got)
+	}
+}
+
+func TestPartsFor_skipsGlobbedOwnInput(t *testing.T) {
+	written := []WrittenPart{
+		{Part: Part{Name: ".cursor/rules/weft.mdc", Origin: OriginInput, Content: "x"}},
+		{Part: Part{Name: "CLAUDE.md", Origin: OriginInput, Content: "y"}},
+	}
+	got := PartsFor(written, []string{".cursor/rules/*.mdc"})
+	if len(got) != 1 || got[0].Name != "CLAUDE.md" {
+		t.Errorf("parts = %+v, want only CLAUDE.md", got)
 	}
 }
 

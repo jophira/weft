@@ -53,8 +53,14 @@ func Identity(root string) (repo, remote string) {
 	return repo, remote
 }
 
-// gitDirFor resolves the directory holding the repository's config, following a
-// worktree pointer to the main checkout when needed.
+// gitDirFor resolves the directory holding the repository's config and
+// info/exclude, following a worktree pointer to the main checkout when needed.
+//
+// It resolves the common dir the way git does: a gitdir with a "commondir"
+// file (a linked worktree) shares the directory that file names, and one
+// without (a plain clone or a submodule) is its own common dir. A submodule's
+// gitdir is <super>/.git/modules/<name>, which holds its own config and
+// info/exclude.
 func gitDirFor(root string) (string, bool) {
 	path := filepath.Join(root, ".git")
 	info, err := os.Stat(path)
@@ -65,8 +71,7 @@ func gitDirFor(root string) (string, bool) {
 		return path, true
 	}
 
-	// A pointer file. Its target is <main>/.git/worktrees/<name>; the config
-	// lives two levels up, in <main>/.git.
+	// A pointer file: "gitdir: <path>" to a worktree's or submodule's gitdir.
 	data, err := os.ReadFile(path) //nolint:gosec // path is <root>/.git
 	if err != nil {
 		return "", false
@@ -78,11 +83,18 @@ func gitDirFor(root string) (string, bool) {
 	if !filepath.IsAbs(target) {
 		target = filepath.Join(root, target)
 	}
-	// .../\.git/worktrees/<name> → .../\.git
-	if parent := filepath.Dir(filepath.Dir(target)); filepath.Base(parent) == ".git" {
-		return parent, true
+	common, err := os.ReadFile(filepath.Join(target, "commondir")) //nolint:gosec // path is a resolved gitdir
+	if err != nil {
+		return target, true
 	}
-	return target, true
+	rel := strings.TrimSpace(string(common))
+	if rel == "" {
+		return target, true
+	}
+	if filepath.IsAbs(rel) {
+		return rel, true
+	}
+	return filepath.Join(target, rel), true
 }
 
 // originFromConfig extracts the [remote "origin"] url from a git config file,

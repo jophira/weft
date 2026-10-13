@@ -44,6 +44,12 @@ type Manifest struct {
 	// never touched. Sidecar to Files, which holds the file's hash under
 	// "settings:<path>".
 	Settings map[string]map[string]string `json:"settings,omitempty"`
+	// SettingsValues records, per settings file and owned key, the sha256 of the
+	// key's compact JSON as weft last left it live. A live value that no longer
+	// hashes to this is an edit the harness made, which is what lets the next
+	// apply write it back to its source instead of reverting it. Absent for
+	// manifests written before write-back existed.
+	SettingsValues map[string]map[string]string `json:"settings_values,omitempty"`
 }
 
 func manifestPath(cfgDir, harnessName string) string {
@@ -55,7 +61,7 @@ func manifestPath(cfgDir, harnessName string) string {
 func Load(cfgDir, harnessName string) (*Manifest, error) {
 	data, err := os.ReadFile(manifestPath(cfgDir, harnessName))
 	if os.IsNotExist(err) {
-		return &Manifest{Harness: harnessName, Files: map[string]string{}, Settings: map[string]map[string]string{}}, nil
+		return &Manifest{Harness: harnessName, Files: map[string]string{}, Settings: map[string]map[string]string{}, SettingsValues: map[string]map[string]string{}}, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("reading manifest for %s: %w", harnessName, err)
@@ -69,6 +75,9 @@ func Load(cfgDir, harnessName string) (*Manifest, error) {
 	}
 	if m.Settings == nil {
 		m.Settings = map[string]map[string]string{}
+	}
+	if m.SettingsValues == nil {
+		m.SettingsValues = map[string]map[string]string{}
 	}
 	return &m, nil
 }
