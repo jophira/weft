@@ -282,7 +282,7 @@ func TestGenerateProjectsSnippet_EmptyWhenNoProjects(t *testing.T) {
 
 func TestGenerateProjectsSnippet_GroupedByProjectRoot(t *testing.T) {
 	root := t.TempDir()
-	phpSlug := filepath.Join(root, "php", "project-rules", "keyinvest")
+	phpSlug := filepath.Join(root, "php", "project-rules", "billing-api")
 	javaSlug := filepath.Join(root, "java", "project-rules", "svc")
 	if err := os.MkdirAll(phpSlug, 0o755); err != nil {
 		t.Fatal(err)
@@ -290,7 +290,7 @@ func TestGenerateProjectsSnippet_GroupedByProjectRoot(t *testing.T) {
 	if err := os.MkdirAll(javaSlug, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	writeFile(t, filepath.Join(phpSlug, "keyinvest.md"), "# PHP")
+	writeFile(t, filepath.Join(phpSlug, "billing-api.md"), "# PHP")
 	writeFile(t, filepath.Join(javaSlug, "svc.md"), "# Java")
 
 	srcs := []source.Source{{Name: "s", Root: root}}
@@ -305,7 +305,7 @@ func TestGenerateProjectsSnippet_GroupedByProjectRoot(t *testing.T) {
 	if javaRootIdx >= phpRootIdx {
 		t.Errorf("expected java group before php group (alphabetical); java=%d php=%d", javaRootIdx, phpRootIdx)
 	}
-	if !strings.Contains(snippet, "keyinvest.md") || !strings.Contains(snippet, "svc.md") {
+	if !strings.Contains(snippet, "billing-api.md") || !strings.Contains(snippet, "svc.md") {
 		t.Errorf("expected both project files in snippet; got:\n%s", snippet)
 	}
 }
@@ -338,26 +338,26 @@ func TestGenerateProjectsSnippet_AlphabeticalOrder(t *testing.T) {
 }
 
 func TestGenerateProjectsSnippet_AutoDiscoversNestedProjectRoot(t *testing.T) {
-	// Structure: work-tech-private/php/project-rules/ubs-keyinvest/ubs-keyinvest.md
+	// Structure: work-tech-private/php/project-rules/billing-api/billing-api.md
 	root := t.TempDir()
-	slugDir := filepath.Join(root, "work-tech-private", "php", "project-rules", "ubs-keyinvest")
+	slugDir := filepath.Join(root, "work-tech-private", "php", "project-rules", "billing-api")
 	if err := os.MkdirAll(slugDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	writeFile(t, filepath.Join(slugDir, "ubs-keyinvest.md"), "# UBS KeyInvest rules")
+	writeFile(t, filepath.Join(slugDir, "billing-api.md"), "# Billing API rules")
 
 	srcs := []source.Source{{Name: "s", Root: root}}
 	snippet := generateProjectsSnippet(srcs)
 
-	if !strings.Contains(snippet, "ubs-keyinvest.md") {
-		t.Errorf("expected ubs-keyinvest.md discovered via default name 'project-rules'; got:\n%s", snippet)
+	if !strings.Contains(snippet, "billing-api.md") {
+		t.Errorf("expected billing-api.md discovered via default name 'project-rules'; got:\n%s", snippet)
 	}
 }
 
 func TestGenerateProjectsSnippet_MultipleProjectRoots(t *testing.T) {
 	// Two language dirs, each with their own project-rules.
 	root := t.TempDir()
-	phpSlug := filepath.Join(root, "php", "project-rules", "keyinvest")
+	phpSlug := filepath.Join(root, "php", "project-rules", "billing-api")
 	javaSlug := filepath.Join(root, "java", "project-rules", "instrument-service")
 	if err := os.MkdirAll(phpSlug, 0o755); err != nil {
 		t.Fatal(err)
@@ -365,14 +365,14 @@ func TestGenerateProjectsSnippet_MultipleProjectRoots(t *testing.T) {
 	if err := os.MkdirAll(javaSlug, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	writeFile(t, filepath.Join(phpSlug, "keyinvest.md"), "# PHP rules")
+	writeFile(t, filepath.Join(phpSlug, "billing-api.md"), "# PHP rules")
 	writeFile(t, filepath.Join(javaSlug, "instrument-service.md"), "# Java rules")
 
 	srcs := []source.Source{{Name: "s", Root: root}}
 	snippet := generateProjectsSnippet(srcs)
 
-	if !strings.Contains(snippet, "keyinvest.md") {
-		t.Errorf("expected keyinvest.md in snippet; got:\n%s", snippet)
+	if !strings.Contains(snippet, "billing-api.md") {
+		t.Errorf("expected billing-api.md in snippet; got:\n%s", snippet)
 	}
 	if !strings.Contains(snippet, "instrument-service.md") {
 		t.Errorf("expected instrument-service.md in snippet; got:\n%s", snippet)
