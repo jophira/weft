@@ -191,6 +191,20 @@ func TestResolveMerge_OverlappingEditsAreMarkedWithHarnessNames(t *testing.T) {
 		t.Fatalf("expected the merge to be abandoned, got %v", err)
 	}
 
+	// The work file holds whole rule files, so it is private state (#327).
+	if runtime.GOOS != "windows" {
+		path := mergeWorkFile(w.cfgDir, h.Label)
+		for p, want := range map[string]os.FileMode{path: 0o600, filepath.Dir(path): 0o700} {
+			info, sErr := os.Stat(p)
+			if sErr != nil {
+				t.Fatalf("stat %s: %v", p, sErr)
+			}
+			if got := info.Mode().Perm(); got != want {
+				t.Errorf("%s: mode %o, want %o", p, got, want)
+			}
+		}
+	}
+
 	work := readFile(t, mergeWorkFile(w.cfgDir, h.Label))
 	if !merge.HasConflictMarkers(work) {
 		t.Fatalf("overlapping edits must be marked in the work file:\n%s", work)

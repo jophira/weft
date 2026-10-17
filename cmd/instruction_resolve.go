@@ -10,6 +10,7 @@ import (
 	"github.com/jophira/weft/internal/harness"
 	"github.com/jophira/weft/internal/instruction"
 	"github.com/jophira/weft/internal/manifest"
+	"github.com/jophira/weft/internal/privatefile"
 	"github.com/jophira/weft/internal/profile"
 	"github.com/jophira/weft/internal/source"
 )
@@ -147,10 +148,7 @@ func backupInstructionSections(cfgDir string, c instructionConflict, keep string
 			continue
 		}
 		dst := filepath.Join(dir, d.Harness, "instructions", c.Source+".md")
-		if mkErr := os.MkdirAll(filepath.Dir(dst), 0o755); mkErr != nil {
-			return "", fmt.Errorf("creating backup dir for %s: %w", d.Harness, mkErr)
-		}
-		if wErr := os.WriteFile(dst, []byte(d.Content+"\n"), 0o644); wErr != nil { //nolint:gosec // dst is under weft's own backup dir
+		if wErr := privatefile.Write(dst, []byte(d.Content+"\n")); wErr != nil {
 			return "", fmt.Errorf("backing up the %s instructions for %q: %w", d.Harness, c.Source, wErr)
 		}
 	}
@@ -203,21 +201,17 @@ func rewriteHarnessSection(hReg *harness.Registry, cfgDir, harnessName, sourceNa
 }
 
 // writeInstrBase updates the staged per-source copy readInstrBase reads. The
-// copies are written read-only (#261), so the mode is lifted for the write and
-// restored after.
+// copies are read-only (#261); the atomic replace swaps the file rather than
+// writing into it, so the mode does not need lifting first.
 func writeInstrBase(instrDir, sourceName, resolved string) error {
 	matches, err := filepath.Glob(filepath.Join(instrDir, "*-"+sourceName+".md"))
 	if err != nil || len(matches) == 0 {
 		return nil // no base staged (e.g. right after a profile switch) — nothing to keep in step
 	}
-	path := matches[0]
-	if cErr := os.Chmod(path, 0o644); cErr != nil {
-		return fmt.Errorf("unlocking the staged copy of %q: %w", sourceName, cErr)
-	}
-	if wErr := os.WriteFile(path, []byte(resolved+"\n"), 0o644); wErr != nil { //nolint:gosec // path under weft's own config dir
+	if wErr := privatefile.WriteMode(matches[0], []byte(resolved+"\n"), 0o400); wErr != nil {
 		return fmt.Errorf("updating the staged copy of %q: %w", sourceName, wErr)
 	}
-	return os.Chmod(path, 0o444)
+	return nil
 }
 
 // writeInstructionSource writes the resolved section back to its owning source,

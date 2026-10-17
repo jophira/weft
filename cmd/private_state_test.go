@@ -117,3 +117,59 @@ func TestApply_leavesNoWorldReadableStateInTheConfigDir(t *testing.T) {
 		t.Error("no conflict backup was written, so its permissions went unchecked")
 	}
 }
+
+// The backup and staged-copy writers outside the apply path go through the
+// same owner-only writer (#327). The staged copy keeps its read-only 0400,
+// the mode stageInstructions gives it.
+func TestBackupAndStagedWrites_areOwnerOnly(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix permission bits are not meaningful on Windows")
+	}
+	cfgDir := t.TempDir()
+
+	target := filepath.Join(t.TempDir(), "CLAUDE.md")
+	if err := os.WriteFile(target, []byte("rules\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	startup, err := backupStartupFile("CLAUDE.md", target, "claude", cfgDir)
+	if err != nil {
+		t.Fatalf("backupStartupFile: %v", err)
+	}
+	resolveDir, err := backupInstructionSections(cfgDir, instructionConflict{
+		Source:   "pers",
+		Diverged: []instructionDivergence{{Harness: "codex", Content: "theirs"}, {Harness: "claude", Content: "ours"}},
+	}, "claude")
+	if err != nil {
+		t.Fatalf("backupInstructionSections: %v", err)
+	}
+	instrDir := filepath.Join(cfgDir, "instructions")
+	staged := filepath.Join(instrDir, "00-pers.md")
+	if err := os.MkdirAll(instrDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(staged, []byte("old\n"), 0o400); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeInstrBase(instrDir, "pers", "new"); err != nil {
+		t.Fatalf("writeInstrBase: %v", err)
+	}
+
+	for path, want := range map[string]os.FileMode{
+		startup: 0o600,
+		filepath.Join(resolveDir, "codex", "instructions", "pers.md"): 0o600,
+		staged:                0o400,
+		filepath.Dir(startup): 0o700,
+		resolveDir:            0o700,
+	} {
+		info, sErr := os.Stat(path)
+		if sErr != nil {
+			t.Fatalf("stat %s: %v", path, sErr)
+		}
+		if got := info.Mode().Perm(); got != want {
+			t.Errorf("%s: mode %o, want %o", path, got, want)
+		}
+	}
+	if got, _ := os.ReadFile(staged); string(got) != "new\n" {
+		t.Errorf("staged copy = %q, want %q", got, "new\n")
+	}
+}

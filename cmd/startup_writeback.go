@@ -10,6 +10,7 @@ import (
 
 	"github.com/jophira/weft/internal/locate"
 	"github.com/jophira/weft/internal/manifest"
+	"github.com/jophira/weft/internal/privatefile"
 	"github.com/jophira/weft/internal/profile"
 	"github.com/jophira/weft/internal/source"
 	"github.com/jophira/weft/internal/watch"
@@ -150,14 +151,11 @@ func resolvedSourceName(rel string, p *profile.Profile, srcs []source.Source, m 
 func backupStartupFile(rel, absTarget, harnessName, cfgDir string) (string, error) {
 	ts := time.Now().Format("20060102-150405")
 	dst := filepath.Join(cfgDir, "backups", harnessName, ts, rel)
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-		return "", fmt.Errorf("creating backup dir: %w", err)
-	}
 	data, err := os.ReadFile(absTarget)
 	if err != nil {
 		return "", fmt.Errorf("reading %s for backup: %w", rel, err)
 	}
-	if err := os.WriteFile(dst, data, 0o644); err != nil { //nolint:gosec // dst is derived from config backup dir
+	if err := privatefile.Write(dst, data); err != nil {
 		return "", fmt.Errorf("writing backup for %s: %w", rel, err)
 	}
 	return dst, nil
