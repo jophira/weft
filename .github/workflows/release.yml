@@ -38,3 +38,18 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASES_GITHUB_TOKEN }}
           HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+
+      # weft-releases is where users land from the tap and the install links, so
+      # its README is this one at the released tag. Copying it by hand drifted
+      # for months. Pre-release tags leave it on the last stable README.
+      - name: Publish README to weft-releases
+        if: ${{ !contains(github.ref_name, '-') }}
+        run: |
+          scripts/release-readme.sh "${GITHUB_REF_NAME}" > /tmp/README.md
+          sha=$(gh api repos/jophira/weft-releases/contents/README.md --jq .sha)
+          gh api -X PUT repos/jophira/weft-releases/contents/README.md \
+            -f message="docs: sync README from weft ${GITHUB_REF_NAME}" \
+            -f content="$(base64 -w0 /tmp/README.md)" \
+            -f sha="$sha"
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_GITHUB_TOKEN }}
