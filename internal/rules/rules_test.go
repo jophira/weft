@@ -327,3 +327,33 @@ func contains(s []string, v string) bool {
 	}
 	return false
 }
+
+// A rule detecting on `interactive` loads in a person's session and drops out of
+// a headless conductor step, which sets CONDUCTOR_RUN_ID (#322).
+func TestResolve_InteractiveRuleSkippedUnderConductor(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "common.md", "---\nlabel: common\ndetect: \"true\"\n---\nCOMMON")
+	writeFile(t, root, "interactive.md", "---\nlabel: interactive\ndetect: \"interactive\"\npriority: 1\n---\nTIMESTAMPS")
+	repo := t.TempDir()
+
+	for _, tc := range []struct {
+		runID string
+		want  []string
+	}{
+		{"", []string{"common", "interactive"}},
+		{"run-42", []string{"common"}},
+	} {
+		t.Setenv(conductorRunEnv, tc.runID)
+		ctx, err := BuildContext(repo)
+		if err != nil {
+			t.Fatalf("BuildContext: %v", err)
+		}
+		res, err := Resolve(root, ctx, newEvaluator(t))
+		if err != nil {
+			t.Fatalf("Resolve: %v", err)
+		}
+		if got := loadedLabels(res); !equalStrings(got, tc.want) {
+			t.Errorf("CONDUCTOR_RUN_ID=%q: loaded %v, want %v", tc.runID, got, tc.want)
+		}
+	}
+}

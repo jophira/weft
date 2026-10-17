@@ -31,6 +31,7 @@ const (
 	varDeps   = "deps"
 	varRepo   = "repo"
 	varRemote = "remote"
+	varInter  = "interactive"
 )
 
 // hasFileFunc is the CEL function name for nested-manifest globbing. It is not
@@ -62,7 +63,7 @@ type celEvaluator struct {
 }
 
 // NewCELEvaluator builds an Evaluator whose predicates may reference the
-// `files`, `deps`, `repo` and `remote` variables of a Context, plus the
+// `files`, `deps`, `repo`, `remote` and `interactive` variables of a Context, plus the
 // hasFile(glob) function for nested-manifest detection.
 func NewCELEvaluator() (Evaluator, error) {
 	e := &celEvaluator{cache: make(map[string]cel.Program), globCache: make(map[string][]string)}
@@ -71,6 +72,7 @@ func NewCELEvaluator() (Evaluator, error) {
 		cel.Variable(varDeps, cel.ListType(cel.StringType)),
 		cel.Variable(varRepo, cel.StringType),
 		cel.Variable(varRemote, cel.StringType),
+		cel.Variable(varInter, cel.BoolType),
 		cel.Function(hasFileFunc,
 			cel.Overload("has_file_string", []*cel.Type{cel.StringType}, cel.BoolType,
 				cel.UnaryBinding(func(arg ref.Val) ref.Val {
@@ -109,6 +111,7 @@ func (e *celEvaluator) Eval(detect string, ctx Context) (bool, error) {
 		varDeps:   ctx.Deps,
 		varRepo:   ctx.Repo,
 		varRemote: ctx.Remote,
+		varInter:  ctx.Interactive,
 	})
 	if err != nil {
 		return false, fmt.Errorf("evaluating predicate %q: %w", detect, err)

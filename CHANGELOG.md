@@ -9,6 +9,13 @@ from, so keep entries written for someone deciding whether to upgrade.
 
 ## [Unreleased]
 
+### Added
+
+- **Rules can load only in interactive sessions** (#322). A rule's `detect`
+  predicate can read `interactive`, which is false when `CONDUCTOR_RUN_ID` is
+  set. A rule with `detect: interactive` is left out of headless slick-conductor
+  steps, so they stop paying for rules written for a person watching.
+
 ### Security
 
 - **Conflict backups and the merge work file are written owner-only** (#327).
