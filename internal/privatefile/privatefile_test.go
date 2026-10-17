@@ -89,7 +89,6 @@ func TestWriteMode_honoursAnExplicitMode(t *testing.T) {
 // Replacing a read-only file is the case that broke the naive implementation:
 // os.WriteFile cannot reopen a 0400 file, but a rename over it succeeds.
 func TestWriteMode_replacesAReadOnlyFile(t *testing.T) {
-	skipOnWindows(t)
 	path := filepath.Join(t.TempDir(), "staged.md")
 	if err := WriteMode(path, []byte("v1"), 0o400); err != nil {
 		t.Fatalf("first WriteMode: %v", err)

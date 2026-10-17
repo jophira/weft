@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 )
 
 // FileMode and DirMode are the permissions engine-room state is written with:
@@ -77,7 +78,15 @@ func WriteMode(path string, data []byte, mode os.FileMode) error {
 		_ = os.Remove(tmpName)
 		return fmt.Errorf("closing %s: %w", path, err)
 	}
-	if err := os.Rename(tmpName, path); err != nil {
+	err = os.Rename(tmpName, path)
+	if err != nil && runtime.GOOS == "windows" {
+		// Windows refuses to rename over a file with the read-only attribute,
+		// which a 0400/0444 staged copy has. Clear it and try once more.
+		if os.Chmod(path, FileMode) == nil {
+			err = os.Rename(tmpName, path)
+		}
+	}
+	if err != nil {
 		_ = os.Remove(tmpName)
 		return fmt.Errorf("renaming into %s: %w", path, err)
 	}
