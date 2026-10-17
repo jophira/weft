@@ -9,6 +9,20 @@ from, so keep entries written for someone deciding whether to upgrade.
 
 ## [Unreleased]
 
+### Added
+
+- **Rules can load only in interactive sessions** (#322). A rule's `detect`
+  predicate can read `interactive`, which is false when `CONDUCTOR_RUN_ID` is
+  set. A rule with `detect: interactive` is left out of headless slick-conductor
+  steps, so they stop paying for rules written for a person watching.
+
+### Security
+
+- **Conflict backups and the merge work file are written owner-only** (#327).
+  Write-back and resolve backups, the `--take merge` work file and the staged
+  instruction copies now go through the same atomic owner-only writer as the
+  rest of `~/.config/weft`, instead of `0644` files in `0755` directories.
+
 ## [0.3.0] - 2026-10-17
 
 Weft now knows which repositories you work in and delivers project rules into

@@ -30,6 +30,10 @@ type Context struct {
 	// Remote is the origin URL from <repo>/.git/config, or empty when there is
 	// no parseable origin. Enables detect: remote.contains("jophira/weft").
 	Remote string
+	// Interactive is false in a headless run started by slick-conductor, which
+	// sets CONDUCTOR_RUN_ID. A rule written for a person watching the session
+	// (reply timestamps, progress lines) detects on it: detect: interactive.
+	Interactive bool
 	// Root is the repository root path. It is not exposed as a detect variable;
 	// it is the base the has() CEL function globs against for nested-manifest
 	// detection (e.g. has("**/pom.xml")). Empty Root makes has() match nothing.
@@ -41,6 +45,9 @@ const (
 	packageJSONFile = "package.json"
 	pomXMLFile      = "pom.xml"
 )
+
+// conductorRunEnv is set by slick-conductor on every headless step it runs.
+const conductorRunEnv = "CONDUCTOR_RUN_ID"
 
 // BuildContext inspects repoRoot and returns the signals available for
 // detection. It is resilient: unreadable or malformed manifests contribute no
@@ -69,11 +76,12 @@ func BuildContext(repoRoot string) (Context, error) {
 	}
 
 	return Context{
-		Files:  files,
-		Deps:   dedupeSorted(deps),
-		Repo:   filepath.Base(repoRoot),
-		Remote: gitOriginRemote(repoRoot),
-		Root:   repoRoot,
+		Files:       files,
+		Deps:        dedupeSorted(deps),
+		Repo:        filepath.Base(repoRoot),
+		Remote:      gitOriginRemote(repoRoot),
+		Interactive: os.Getenv(conductorRunEnv) == "",
+		Root:        repoRoot,
 	}, nil
 }
 

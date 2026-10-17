@@ -14,6 +14,7 @@ import (
 	"github.com/jophira/weft/internal/harness"
 	"github.com/jophira/weft/internal/locate"
 	"github.com/jophira/weft/internal/merge"
+	"github.com/jophira/weft/internal/privatefile"
 )
 
 // A merge is never applied silently.
@@ -109,11 +110,8 @@ func mergeAndReview(out io.Writer, cfgDir string, h heldConflict, now time.Time)
 	merged, conflicted := merge.ThreeWay(h.Base, sides)
 
 	path := mergeWorkFile(cfgDir, h.Label)
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return nil, fmt.Errorf("creating the merge work dir: %w", err)
-	}
 	body := mergeHeader(h, conflicted, now) + ensureTrailingNL(merged)
-	if err := os.WriteFile(path, []byte(body), 0o644); err != nil { //nolint:gosec // path under weft's own config dir
+	if err := privatefile.Write(path, []byte(body)); err != nil {
 		return nil, fmt.Errorf("writing the merge for review: %w", err)
 	}
 
