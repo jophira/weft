@@ -9,9 +9,102 @@ from, so keep entries written for someone deciding whether to upgrade.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-17
+
+Weft now knows which repositories you work in and delivers project rules into
+them. Conflicting edits can be merged rather than only picked. Five security
+fixes harden self-update, path handling and private state. Read **Upgrading**
+before you install: some inputs that used to be accepted are now refused, and
+one change asks you to run a command once.
+
+### Upgrading
+
+- **`instruction_glob` patterns that name a directory are refused** (#284). A
+  pattern such as `docs/**/*.md` was silently read as `*.md` across the whole
+  tree. It now fails with an error, and so does an exact nested path such as
+  `docs/CLAUDE.md`. Use `**/*.md` together with `--instruction-exclude` to
+  leave directories out.
+- **User-defined harnesses in `harnesses.yaml` must use paths relative to
+  `$HOME`** (#279). An absolute `config_dir` or `detect_path`, a `..`
+  component, a missing or duplicate name, or an entry with neither
+  `config_dir` nor `detect_path` is now a load error.
+- **Staged instruction copies are read-only** (#261). The per-source copies
+  under `~/.config/weft/profiles/<profile>/instructions/` are written `0444`
+  with a generated-file header. Edit the source, or the harness file, instead.
+- **Source, profile and hook names are checked on every operation** (#277).
+  The rule is the one `create` always applied: a lowercase letter first, then
+  lowercase letters, digits, `-` or `_`. A YAML file you named by hand outside
+  that rule can no longer be read or removed by name. Rename it.
+- **Run `weft doctor --fix` once after upgrading if you use project sync**
+  (#313). `GEMINI.md` files created by earlier versions are untracked and not
+  excluded, so sync now leaves them alone. `--fix` deletes the ones holding only
+  weft's block, and the next sync recreates and excludes them. Weft also stops
+  editing a `GEMINI.md` it did not create until you run
+  `weft config set project-write gemini-cli true`.
+- **`~/.config/weft` becomes owner-only** (#280). The directory is tightened to
+  `0700` the next time weft saves its config, which puts everything under it out
+  of reach of other accounts. Run `weft profile use <name> --no-watch` once, or
+  `chmod 700 ~/.config/weft`, to do it straight away.
+
+### Security
+
+- **`weft update` verifies the download before replacing the binary** (#276,
+  PR #296). The archive must match its sha256 in the release's
+  `checksums.txt`, or the update stops. Downloads have a 5-minute timeout where
+  before they had none. This guards against a corrupted or swapped asset, not
+  against a compromised release.
+- **Harness projection cannot be redirected by a symlink** (#278). A symlink
+  inside a harness tree no longer sends writes, backups or pruning outside the
+  managed root.
+- **Paths in user-defined harnesses are validated on load** (#279). See
+  Upgrading.
+- **Source, profile and hook names are validated on every read, write and
+  delete** (#277). A name with path separators or `..`, including one passed
+  through the MCP server, can no longer reach outside weft's storage
+  directories.
+- **Private state is written atomically and owner-only** (#280). The config,
+  manifests, apply-time backups, the audit log and caches are written `0600`
+  through a temp file, fsync and rename, so a crash cannot leave a half-written
+  manifest that weft would trust on the next run. Write-back and resolve backups
+  and the merge work file still use ordinary modes inside the now owner-only
+  directory (#327).
+
 ### Added
 
-- **A source can own Claude Code `settings.json` keys** (#307). Put the keys in
+- **Project registry and per-repository delivery** (#263, PR #267). Every weft
+  command run inside a repository records it in
+  `~/.config/weft/projects.yaml`, and dead or stale entries are pruned on the
+  way. Rules then reach those repositories by the cheapest mechanism each
+  harness supports: a `SessionStart` hook in a gitignored settings file for
+  Claude Code, one import line for Gemini CLI, and inline content only for a
+  harness you opt in. What weft writes is added to `.git/info/exclude`, so
+  `git status` stays clean. A project's own `CLAUDE.md`, `AGENTS.md`,
+  `GEMINI.md` and Cursor rules are read as input, so a rule written for one
+  harness reaches the others in that repository. New commands are
+  `weft project list`, `weft project status` and `weft project forget`.
+- **`weft resolve --take merge`** (#258). It runs a three-way merge of the
+  diverged copies against what weft last projected, and opens the result in
+  `$EDITOR`. The saved file is the resolution, and quitting without saving
+  leaves the conflict held. Conflict markers never reach a harness file. It
+  needs a terminal, so `--take <harness>` stays the scripted option.
+- **`weft resolve` with no arguments walks every held conflict** (#260). For
+  each one it offers merge, a take per harness, a diff against the base, skip
+  and quit. Without a terminal it reports what is held and exits non-zero.
+- **`weft target list --files`** (#264, PR #269). It shows, per detected
+  harness, what weft manages, what it recognises and leaves alone, and a count
+  of what it does not recognise (`--all` names them). Credential files are
+  never named. `weft project status` answers the same for the current
+  repository.
+- **`harness_home` and `WEFT_HARNESS_HOME`** (#265, PR #268). Both redirect
+  every harness path, so an apply under a throwaway `--config` no longer writes
+  to your real `~/.claude`, `~/.codex` and the rest. A `--config` run without
+  it now says that harness writes still go to your real home.
+- **Structured logging with `--log-level` and `WEFT_LOG_LEVEL`** (#262, PR
+  #266). Each run gets an id, and applies, resolves, write-backs and conflicts
+  are logged as events with durations. Five log generations are kept instead
+  of one. Hints now carry stable codes (`W001`, `W301`, ...), print at most
+  three per run on stderr, and are throttled per code.
+- **A source can own Claude Code `settings.json` keys** (#307, PR #310). Put the keys in
   `harness/claude-code/settings.json` in a source and every apply sets them in
   `~/.claude/settings.json`, leaving every other key alone. `weft adopt claude-code
   settings.json --into <source>` brings an existing file under a source.
@@ -19,32 +112,30 @@ from, so keep entries written for someone deciding whether to upgrade.
 ### Fixed
 
 - **Project sync no longer leaves an untracked `GEMINI.md` in your repositories**
-  (#313). A `GEMINI.md` that weft creates is now added to `.git/info/exclude` at
+  (#313, PR #315). A `GEMINI.md` that weft creates is now added to `.git/info/exclude` at
   once, so it never appears in `git status`. Weft also stops editing a
   `GEMINI.md` that already exists and that it did not create, until you run
   `weft config set project-write gemini-cli true`. Codex and Cursor files are
-  excluded the same way when you have enabled them. Upgrading: files created by
-  earlier versions are untracked and not excluded, so sync now leaves them
-  alone; run `weft doctor --fix` once to delete the ones holding only weft's
-  block, and the next sync recreates and excludes them.
+  excluded the same way when you have enabled them. See Upgrading for the
+  one-off `weft doctor --fix`.
 
-- **Projected scripts keep their execute bit** (#309). A skill script that is
+- **Projected scripts keep their execute bit** (#309, PR #310). A skill script that is
   executable in its source now arrives executable in the harness, whether it is
   new or its source gained the bit after an earlier apply. Before, it arrived as
   `-rw-r--r--` and failed with `Permission denied` when run by path.
 
-- **Project sync works in a git submodule** (#314). Weft now reads and writes the
+- **Project sync works in a git submodule** (#314, PR #317). Weft now reads and writes the
   submodule's own `info/exclude` and `config`, where it used to touch the
   superproject's, so a file weft created in a submodule is excluded there and its
   `origin` remote is found.
 
 - **Text you write in `GEMINI.md`, `AGENTS.md` or a Cursor rule now reaches the
-  other harnesses** (#316). Anything outside weft's block in a file weft delivers
+  other harnesses** (#316, PR #317). Anything outside weft's block in a file weft delivers
   to is read as project input, like text in `CLAUDE.md` already was. Before, weft
   skipped those files whole, so your own lines there never fanned out.
 
 - **Edits Claude Code makes to your `settings.json` now reach your source**
-  (#312). Adding a rule in `/permissions` to a key a source owns is written back
+  (#312, PR #317). Adding a rule in `/permissions` to a key a source owns is written back
   to that source's `harness/claude-code/settings.json` at the next apply instead
   of being reverted. If both the source and Claude Code changed the same key,
   weft keeps both values and warns (W205) until you make them match. A `/config`
@@ -53,6 +144,55 @@ from, so keep entries written for someone deciding whether to upgrade.
   rewrites the file with 2-space indentation. A settings file that has lost
   every key weft wrote (deleted, reset or emptied) is treated as a reset and
   restored from the sources, never written back as deletions.
+
+- **An empty file in a higher-priority source no longer wipes a populated one**
+  (#287, PR #289). An empty `CLAUDE.md` or `commands/*.md` in the winning
+  source used to replace the lower source's content with an empty block, and
+  `weft profile inspect` reported the opposite of what apply did. Empty
+  contributions are now skipped.
+
+- **Edits to a harness's instruction block survive watch-mode re-applies**
+  (#286). With the watcher running, an edit to weft's block in a single-file
+  harness (`AGENTS.md`, `GEMINI.md`, a Cursor rule) was overwritten on the next
+  source change, with no write-back and no backup. It is now written back first.
+
+- **Two harnesses editing the same source's instruction section are held as a
+  conflict** (#257, PR #273). The second write-back used to discard the first
+  silently. Weft now holds that source until you run `weft resolve`. A block
+  ending in a newline is also no longer reported as externally edited on every
+  apply.
+
+- **Write-back keeps sources portable** (#259, PR #274). An edited line holding
+  an expanded `{{weft.root}}`, `{{weft.source:NAME}}`, `{{weft.home}}` or
+  `{{weft.docs}}` path is collapsed back to its anchor before it lands in the
+  source. `weft resolve` does the same (#285), where before it wrote the
+  harness's absolute paths straight into the source.
+
+- **A live watcher in another PID namespace is no longer read as dead** (#300,
+  PR #301). Run from a sandbox or container, `weft status` used to report the
+  watcher as stopped and delete its state file.
+
+### Changed
+
+- **Auto-sync runs at most 4 sources at a time, each with a 2-minute timeout**
+  (#281). A large registry used to start every due sync at once and could run
+  out of file descriptors or SSH-agent capacity. One hung remote no longer
+  stalls the rest.
+- **Built with Go 1.26.9** (#311, PR #310), with `golang.org/x/net` v0.60.0 for a
+  `govulncheck` finding. Building from source needs Go 1.26.9 or later.
+  Dependency bumps: `mcp-go` 0.57.0 to 1.1.1, `go-git` 5.19.3, `doublestar`
+  4.10.2, `x/crypto` 0.57.0, `x/sys` 0.48.0.
+
+### Docs
+
+- **Examples use `~/weft/sources/<name>`** (#323, PR #326), the layout weft
+  recommends. The per-project rules section is marked deprecated, and the
+  binary install link now points at the releases repository.
+- **The `weft-releases` README is published from this repository on every
+  release** (#324, PR #326).
+- **The v0.0.9 and v0.1.0 changelog sections are complete** (#255, PR #256).
+- The documented Go version matches `go.mod` (#282), and `weft_source_push`
+  documents its required `confirm` flag (#283).
 
 ## [0.2.1] - 2026-08-15
 
