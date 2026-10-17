@@ -88,11 +88,11 @@ assembled CLAUDE.md under a "<!-- weft:projects -->" placeholder.
   Default names: projects, project-rules
 
   Flat layout — one file per project:
-    php/project-rules/ubs-keyinvest.md
+    php/project-rules/billing-api.md
     java/project-rules/instrument-service.md
 
   Nested layout — one subdirectory per project:
-    php/project-rules/ubs-keyinvest/ubs-keyinvest.md
+    php/project-rules/billing-api/billing-api.md
     java/project-rules/instrument-service/instrument-service.md
 
 Both layouts are supported. To add the project snippet to your CLAUDE.md,

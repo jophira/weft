@@ -14,7 +14,7 @@ For a **mixed-content source** (rules alongside tickets, docs, or knowledge dump
 
 ```bash
 # assemble the always-on rules; leave language/ticket/doc trees on-disk and on-demand
-weft source add work ~/.rules/work \
+weft source add work ~/weft/sources/work \
   --instruction-glob "**/*.md" \
   --instruction-exclude "java/,php/,tickets/,docs/"
 ```
@@ -53,7 +53,7 @@ brew install jophira/tap/weft
 
 **Linux / macOS — binary**
 ```bash
-curl -sSL https://github.com/jophira/weft/releases/latest/download/weft_linux_amd64.tar.gz | tar xz
+curl -sSL https://github.com/jophira/weft-releases/releases/latest/download/weft_linux_amd64.tar.gz | tar xz
 sudo mv weft /usr/local/bin/
 ```
 
@@ -61,7 +61,7 @@ Replace `linux_amd64` with your platform: `linux_arm64`, `darwin_amd64`, `darwin
 
 **Windows**
 
-Download `weft_windows_amd64.zip` from the [releases page](https://github.com/jophira/weft/releases/latest), extract, and add to your `PATH`.
+Download `weft_windows_amd64.zip` from the [releases page](https://github.com/jophira/weft-releases/releases/latest), extract, and add to your `PATH`.
 
 **Build from source** (requires Go 1.26.6+, matching the `go` directive in `go.mod`)
 ```bash
@@ -92,17 +92,17 @@ make build        # binary at ./bin/weft
 
 ```bash
 # Register a rule source — remote is inferred from the repo's origin when omitted
-weft source add work ~/.rules/work
+weft source add work ~/weft/sources/work
 
 # Specify the remote explicitly (or override an existing origin)
-weft source add work ~/.rules/work --remote git@github.com:you/work-rules.git
+weft source add work ~/weft/sources/work --remote git@github.com:you/work-rules.git
 
 # Register a source with a domain hierarchy (Backend/, Frontend/, …)
-weft source add work-private ~/.rules/work-private \
+weft source add work-private ~/weft/sources/work-private \
   --instruction-glob "**/*.md"
 
 # Register a source with custom project-rule directory names
-weft source add work ~/.rules/work --project-dir-names "projects,project-rules,specs"
+weft source add work ~/weft/sources/work --project-dir-names "projects,project-rules,specs"
 
 # Pull latest from all remotes
 weft source sync
@@ -131,6 +131,11 @@ weft doctor
 
 Weft can inject per-project rule references into your assembled `CLAUDE.md` so the AI loads the right rules for whichever project you are working in.
 
+> **Deprecated.** The `<!-- weft:projects -->` marker still works, but `weft profile use`
+> warns about it (W301) and a future release removes it. For new sources, give each rule
+> file `label:`/`detect:`/`extends:` front-matter and load it with `weft rules resolve`
+> from a session hook. `weft doctor` suggests the front-matter for each file.
+
 ### How it works
 
 1. Place a marker in your source `CLAUDE.md` where the list should appear:
@@ -142,13 +147,13 @@ Weft can inject per-project rule references into your assembled `CLAUDE.md` so t
 
    **Flat** — one file per project:
    ```
-   php/project-rules/ubs-keyinvest.md
+   php/project-rules/billing-api.md
    java/project-rules/instrument-service.md
    ```
 
    **Nested** — one subdirectory per project (any depth):
    ```
-   php/project-rules/ubs-keyinvest/ubs-keyinvest.md
+   php/project-rules/billing-api/billing-api.md
    java/project-rules/instrument-service/instrument-service.md
    ```
 
@@ -158,11 +163,11 @@ Weft can inject per-project rule references into your assembled `CLAUDE.md` so t
    <!-- weft:projects:begin — regenerated on every `weft profile use`; do not edit -->
    When working in a project, find the matching entry below and read its rule file(s):
 
-   `~/rules/php/project-rules/`:
-      - `~/rules/php/project-rules/ubs-keyinvest/ubs-keyinvest.md`
+   `~/weft/sources/work/php/project-rules/`:
+      - `~/weft/sources/work/php/project-rules/billing-api/billing-api.md`
 
-   `~/rules/java/project-rules/`:
-      - `~/rules/java/project-rules/instrument-service/instrument-service.md`
+   `~/weft/sources/work/java/project-rules/`:
+      - `~/weft/sources/work/java/project-rules/instrument-service/instrument-service.md`
    <!-- weft:projects:end -->
    ```
 
@@ -174,7 +179,7 @@ Weft searches for directory names `projects` and `project-rules` by default. To 
 
 ```bash
 # Use additional names
-weft source add work ~/.rules/work --project-dir-names "projects,project-rules,specs"
+weft source add work ~/weft/sources/work --project-dir-names "projects,project-rules,specs"
 ```
 
 Or set `project_dir_names` directly in the source YAML:
@@ -199,9 +204,9 @@ yours.
 highest-priority source is emitted last and takes precedence on conflict:
 
 ```bash
-weft source add company ~/.rules/company --priority 30
-weft source add team    ~/.rules/team    --priority 20
-weft source add me      ~/.rules/me      --priority 10
+weft source add company ~/weft/sources/company --priority 30
+weft source add team    ~/weft/sources/team    --priority 20
+weft source add me      ~/weft/sources/me      --priority 10
 ```
 
 Weft writes one copy per source to `~/.config/weft/profiles/<profile>/instructions/NN-<source>.md`
