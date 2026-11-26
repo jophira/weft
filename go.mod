@@ -10,7 +10,7 @@ require (
 	github.com/google/cel-go v0.31.0
 	github.com/mark3labs/mcp-go v1.1.1
 	github.com/pelletier/go-toml/v2 v2.4.3
-	github.com/sergi/go-diff v1.4.0
+	github.com/sergi/go-diff v1.4.5
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
 	github.com/testcontainers/testcontainers-go v0.44.0
